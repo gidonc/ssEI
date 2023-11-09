@@ -45,6 +45,6 @@ model{
       }
     }
 
-  target += log_det_J;
+  target += log_det_J; // Jacobian adjusment of transformation - should move this inside function.
   target += extdirmultinom_lpdf(cell_values | obs_prob);
 }
