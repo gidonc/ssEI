@@ -3,6 +3,10 @@
 // Constrains to row and column margins using: sequential sampling
 // and models row to column rates with: Multinomial-Dirichlet
 
+functions{
+  #include constraintfunctions.stanfunctions
+  #include realpdffunctions.stanfunction
+}
 data{
  int<lower=0> n_areas;
  int<lower=0> R;  // number of rows
