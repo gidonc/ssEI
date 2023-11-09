@@ -5,14 +5,14 @@
 
 data{
  int<lower=0> n_areas;
- int<lower=0> R;
- int<lower=0> C;
- matrix<lower=0>[n_areas, R] row_margins;
- matrix<lower=0>[n_areas, C] col_margins;
+ int<lower=0> R;  // number of rows
+ int<lower=0> C;  // number of columns
+ matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
+ matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
 }
 parameters{
  real lambda[n_areas, R - 1, C -1]; // sequential cell weights
- simplex[C] theta[R]; // row to column rates
+ simplex[C] theta[R]; // average row to column rates
 }
 transformed parameters{
  matrix<lower=0>[n_areas * R, C] cell_values;
