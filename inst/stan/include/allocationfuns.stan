@@ -1,7 +1,3 @@
-//
-// These functions
-// Constrains to row and column margins using: sequential sampling and Ferchet Bounds
-
   real[,,] ss_assign_cvals_lp (int n_areas, int R, int C, matrix row_margins, matrix col_margins, real[,,] lambda){
     // constrains using sequential sampling approach described in Chen et. al 2005
     // function to transform unconstrained (R-1)*(C-1) unconstrained parameters (lambda) into an RxC matrix with fixed row and column margins. The function completes the internal structure  across matrices from n_areas regions
@@ -49,6 +45,7 @@
          slack_col[j, C]=slack_col[j, C]-cell_value[j, r, C];
          slack_row[j, r]=slack_row[j, R]-cell_value[j, r, C];
        }
+
        for (c in 1:(C-1)){
          cell_value[j, R, c]=slack_col[j, c];
          rt=rt-cell_value[j, R, c];
@@ -58,7 +55,8 @@
        cell_value[j, R, C]=rt;
      }
 
-    \\ Jacobian
+    // Jacobian
     target += log_det_J;
     return cell_value;
   }
+

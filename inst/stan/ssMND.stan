@@ -4,8 +4,9 @@
 // and models row to column rates with: Multinomial-Dirichlet
 
 functions{
-  #include constraintfunctions.stanfunctions
-  #include realpdf.stanfunctions
+  #include include\allocationfuns.stan
+  #include include\realpdf.stan
+
 }
 data{
  int<lower=0> n_areas;
@@ -19,13 +20,13 @@ parameters{
  simplex[C] theta[R]; // average row to column rates
 }
 transformed parameters{
-  matrix<lower=0>[n_areas, R, C] cell_values;
+  real<lower=0> cell_values[n_areas, R, C];
 
   cell_values = ss_assign_cvals_lp(n_areas, R, C, row_margins, col_margins, lambda);
 }
 model{
   matrix[n_areas*R, C] obs_prob;
-  matrix<lower=0>[n_areas * R, C] cell_values_matrix;
+  matrix[n_areas * R, C] cell_values_matrix;
 
   for (j in 1:n_areas){
     for (r in 1:R){
