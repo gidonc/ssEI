@@ -1,6 +1,6 @@
 #' The 'ssEI' package.
 #'
-#' @description A DESCRIPTION OF THE PACKAGE
+#' @description Ecological inference using sequential sampling methods
 #'
 #' @docType package
 #' @name ssEI-package
