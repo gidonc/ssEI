@@ -5,7 +5,7 @@
 
 functions{
   #include constraintfunctions.stanfunctions
-  #include realpdffunctions.stanfunction
+  #include realpdf.stanfunctions
 }
 data{
  int<lower=0> n_areas;
