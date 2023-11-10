@@ -19,36 +19,21 @@ parameters{
  simplex[C] theta[R]; // average row to column rates
 }
 transformed parameters{
- matrix<lower=0>[n_areas * R, C] cell_values;
- real cell_values_flat_plus_detJ[n_areas*R*C + 1];
+  matrix<lower=0>[n_areas, R, C] cell_values;
 
- real log_det_J;
-
- cell_values_flat_plus_detJ = assign_cvals(n_areas, R, C, row_margins, col_margins, lambda);
-
- log_det_J = cell_values_flat_plus_detJ[n_areas*R*C + 1];
+  cell_values = ss_assign_cvals_lp(n_areas, R, C, row_margins, col_margins, lambda);
+}
+model{
+  matrix[n_areas*R, C] obs_prob;
+  matrix<lower=0>[n_areas * R, C] cell_values_matrix;
 
   for (j in 1:n_areas){
     for (r in 1:R){
       for (c in 1:C){
-       cell_values[(j - 1)*R + r, c] = cell_values_flat_plus_detJ[(j - 1)*R*C + (r-1)*C+c];
+       cell_values_matrix[(j - 1)*R + r, c] = cell_values[j, r, c];
+       obs_prob[(j - 1)*R + r, c] = theta[r, c]*row_margins[j, r];
      }
    }
   }
-}
-model{
-  matrix[n_areas*R, C] obs_prob;
-  int counter = 1;
-
-    for (j in 1:n_areas){
-      for (r in 1:R){
-        for(c in 1:C){
-          obs_prob[counter, c] = theta[r, c]*row_margins[j, r];
-        }
-      counter += 1;
-      }
-    }
-
-  target += log_det_J; // Jacobian adjusment of transformation - should move this inside function.
-  target += extdirmultinom_lpdf(cell_values | obs_prob);
+  target += realdirmultinom_lpdf(cell_values_matrix | obs_prob);
 }
