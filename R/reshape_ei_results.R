@@ -23,7 +23,8 @@ ei_cv_summary <- function(ei_stanfit, pars = "cell_values", probs = c(0.025, 0.2
     separate("param",
              into=c("param_name", "area_no", "row_no", "col_no", NA),
              sep="[\\[,\\]]",
-             remove=FALSE)
+             remove=FALSE) |>
+    mutate(across(area_no, row_no, col_no), as.numeric)
 }
 
 
@@ -51,7 +52,8 @@ ei_row_rate_summary <- function(ei_stanfit, pars = "row_rate", probs = c(0.025, 
     separate("param",
              into=c("param_name", "area_no", "row_no", "col_no", NA),
              sep="[\\[,\\]]",
-             remove=FALSE)
+             remove=FALSE) |>
+    mutate(across(area_no, row_no, col_no), as.numeric)
 }
 
 #' Obtain overall row rate estimates (total across all areas) from an ssEI model.
@@ -78,7 +80,8 @@ ei_overall_row_rate_summary <- function(ei_stanfit, pars = "overall_row_rates", 
     separate("param",
              into=c("param_name", "row_no", "col_no", NA),
              sep="[\\[,\\]]",
-             remove=FALSE)
+             remove=FALSE) |>
+    mutate(across(row_no, col_no), as.numeric)
 }
 
 #' Obtain overall total cell values estimates (total across all areas) from an ssEI model.
@@ -105,7 +108,8 @@ ei_overall_cell_values_summary <- function(ei_stanfit, pars = "overall_cell_valu
     separate("param",
              into=c("param_name", "row_no", "col_no", NA),
              sep="[\\[,\\]]",
-             remove=FALSE)
+             remove=FALSE) |>
+    mutate(across(row_no, col_no), as.numeric)
 }
 
 ei_to_cvdraws <- function(ei_posterior){
