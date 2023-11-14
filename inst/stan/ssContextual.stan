@@ -135,3 +135,21 @@ model{
 
   target += realdirmultinom_lpdf(cell_values_matrix | obs_prob);
 }
+generated quantities{
+  matrix[K, K] Omega;  // Correlation matrix
+  matrix[K, K] Sigma;  // Covariance matrix
+
+  #include include\generateratesandsummaries.stan
+
+  Omega = L * L';
+  for (m in 1:K) {
+    Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];
+  }
+  for (m in 1:(K-1)) {
+    for (n in (m+1):K) {
+      Sigma[m, n] = sigma[m] * sigma[n] * Omega[m, n];
+      Sigma[n, m] = Sigma[m, n];
+    }
+  }
+
+}

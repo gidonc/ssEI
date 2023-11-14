@@ -83,3 +83,8 @@ model{
   }
   target += realdirmultinom_lpdf(cell_values_matrix | obs_prob);
 }
+generated quantities{
+
+  #include include\generateratesandsummaries.stan
+
+}
