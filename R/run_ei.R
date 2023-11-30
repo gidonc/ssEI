@@ -43,6 +43,5 @@ ei_estimate <- function(row_margins, col_margins, model = "contextual",
   out <- rstan::sampling(mod,
                          data = standata,
                          cores = 4,
-                         iter = iter,
                          ...)
 }
