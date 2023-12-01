@@ -11,6 +11,7 @@
 #'
 #' @examples
 ei_estimate <- function(row_margins, col_margins, model = "contextual",
+                        lkj_param = 2,
                         verbose = TRUE, ...){
 
   R <- ncol(row_margins)
@@ -28,12 +29,15 @@ ei_estimate <- function(row_margins, col_margins, model = "contextual",
     R = R,
     C = C,
     row_margins = row_margins,
-    col_margins = col_margins
+    col_margins = col_margins,
+    lkj_param = lkj_param
   )
 
   if(model=="contextual"){
     mod <- stanmodels$ssContextual
-  } else{
+  } else if(model=="contextualOnion"){
+    mod <- stanmodels$ssContextualOnion
+  } else {
     mod <- stanmodels$ssMND
   }
   if(verbose){
