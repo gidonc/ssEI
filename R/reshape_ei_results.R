@@ -24,7 +24,7 @@ ei_cv_summary <- function(ei_stanfit, pars = "cell_values", probs = c(0.025, 0.2
              into=c("param_name", "area_no", "row_no", "col_no", NA),
              sep="[\\[,\\]]",
              remove=FALSE) |>
-    dplyr::mutate(dplyr::across(area_no, row_no, col_no), as.numeric)
+    dplyr::mutate(dplyr::across(c(area_no, row_no, col_no), as.numeric))
 }
 
 
