@@ -101,7 +101,7 @@ parameters{
    vector[R * (C-1)] mu;              // logit probability row mean
    // corr_matrix[R * (C-1)] Omega;      // correlation matrix
    // cholesky_factor_corr[K] L; // instead of corr_matrix[R * (C-1)] Omega;
-   // vector<lower=0>[K] sigma;  // scales
+   vector<lower=0>[K] sigma;  // scales
    row_vector[choose(K, 2) - 1] l; // do NOT init with 0 for all elements
    vector<lower = 0, upper = 1>[K - 1] R2; // first element is not really a R^2 but is on (0,1)
 }
@@ -130,8 +130,8 @@ transformed parameters{
  cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
   for(j in 1:n_areas){
-    // eta_area[j] = mu + sigma .*(L * alpha[j]);
-    eta_area[j] = mu + (L * alpha[j]);
+    eta_area[j] = mu + sigma .*(L * alpha[j]);
+    // eta_area[j] = mu + (L * alpha[j]);
   }
 
   for (j in 1:n_areas) {
@@ -157,7 +157,7 @@ model{
   // L ~ lkj_corr_cholesky(2.0); // implies L*L'~ lkj_corr(2.0);
   // Omega ~ lkj_corr(2.0);  // regularize to unit correlation
   // sigma ~ cauchy(0, 5);   // half-Cauchy due to constraint
-  // sigma ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
+  sigma ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
     for (j in 1:n_areas){
       for (r in 1:R){
         for(c in 1:C){
@@ -172,21 +172,20 @@ model{
   target += realdirmultinom_lpdf(cell_values_matrix | obs_prob);
 }
 generated quantities{
-  // matrix[K, K] Omega;  // Correlation matrix
-  matrix[K, K] Sigma = multiply_lower_tri_self_transpose(L);  // Covariance matrix
+  matrix[K, K] Omega= multiply_lower_tri_self_transpose(L);  // Correlation matrix
+  matrix[K, K] Sigma;  // Covariance matrix
 
   #include include\generateratesandsummaries.stan
 
-  // Omega = L * L';
-  // for (m in 1:K) {
-  //   Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];
-  // }
-  // for (m in 1:(K-1)) {
-  //   for (n in (m+1):K) {
-  //     Sigma[m, n] = sigma[m] * sigma[n] * Omega[m, n];
-  //     Sigma[n, m] = Sigma[m, n];
-  //   }
-  // }
+  for (m in 1:K) {
+    Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];
+  }
+  for (m in 1:(K-1)) {
+    for (n in (m+1):K) {
+      Sigma[m, n] = sigma[m] * sigma[n] * Omega[m, n];
+      Sigma[n, m] = Sigma[m, n];
+    }
+  }
 
 
 }
