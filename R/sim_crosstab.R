@@ -109,7 +109,6 @@ sim_tables_from_probs <- function(n_areas, row_margins, n_col, eta){
     row_margins= row_margins,
     col_margins = col_margins,
     row_rates = row_rates,
-    Sigma = Sigma,
     eta = eta
   )
 }
@@ -154,6 +153,8 @@ mk_sim_tables <- function(n_areas, n_row,  n_col,
   eta <- mk_eta(n_areas = n_areas, mu_raw = mu_raw, n_row = n_row, n_col = n_col, Sigma = Sigma)
 
   sim_tables <- sim_tables_from_probs(n_areas, row_margins, n_col, eta)
+
+  sim_tables$Sigma <- Sigma
 
   sim_tables
 }
