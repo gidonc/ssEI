@@ -60,6 +60,8 @@ parameters{
    // corr_matrix[R * (C-1)] Omega;      // correlation matrix
    cholesky_factor_corr[R * (C-1)] L; // instead of corr_matrix[R * (C-1)] Omega;
    vector<lower=0>[R * (C -1)] sigma;  // scales
+   real<lower=0> tau; //for scales
+   real mu_sigma; // for scales
 }
 
 transformed parameters{
@@ -118,22 +120,24 @@ model{
   }
 
   mu ~ normal(0, 5);      // vectorized, diffuse
+  mu_sigma ~ normal(0, 3);
   L ~ lkj_corr_cholesky(2.0); // implies L*L'~ lkj_corr(2.0);
   // Omega ~ lkj_corr(2.0);  // regularize to unit correlation
   // sigma ~ cauchy(0, 5);   // half-Cauchy due to constraint
-  sigma ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
+  tau ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
+  sigma ~ lognormal(mu_sigma, tau);
     for (j in 1:n_areas){
       for (r in 1:R){
         for(c in 1:C){
           cell_values_matrix[(j - 1)*R + r, c] = cell_values[j, r, c];
-          obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j, r];
-          // obs_prob[counter, c] = theta_area[j, r, c];
+          // obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j, r];
+          obs_prob[counter, c] = theta_area[j, r, c];
         }
       counter += 1;
       }
     }
 
-  target += realdirmultinom_lpdf(cell_values_matrix | obs_prob);
+  target += realmultinom_lpdf(cell_values_matrix | obs_prob);
 }
 generated quantities{
   matrix[K, K] Omega;  // Correlation matrix
