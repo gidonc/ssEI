@@ -60,8 +60,8 @@ parameters{
    // corr_matrix[R * (C-1)] Omega;      // correlation matrix
    cholesky_factor_corr[R * (C-1)] L; // instead of corr_matrix[R * (C-1)] Omega;
    vector<lower=0>[R * (C -1)] sigma;  // scales
-   real<lower=0> tau; //for scales
-   real mu_sigma; // for scales
+   // real<lower=0> tau; //for scales
+   // real mu_sigma; // for scales
 }
 
 transformed parameters{
@@ -120,12 +120,13 @@ model{
   }
 
   mu ~ normal(0, 5);      // vectorized, diffuse
-  mu_sigma ~ normal(0, 3);
+  // mu_sigma ~ normal(0, 3);
   L ~ lkj_corr_cholesky(2.0); // implies L*L'~ lkj_corr(2.0);
   // Omega ~ lkj_corr(2.0);  // regularize to unit correlation
   // sigma ~ cauchy(0, 5);   // half-Cauchy due to constraint
-  tau ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
-  sigma ~ lognormal(mu_sigma, tau);
+  sigma ~ normal(0, 3);
+  // tau ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
+  // sigma ~ lognormal(mu_sigma, tau);
     for (j in 1:n_areas){
       for (r in 1:R){
         for(c in 1:C){
