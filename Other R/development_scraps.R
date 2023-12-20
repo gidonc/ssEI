@@ -1,4 +1,5 @@
 library(ei)
+library(RxCEcolInf)
 library(tidyverse)
 
 
@@ -59,6 +60,18 @@ senc_long <- senc2 |>
   dplyr::group_by(area_no, row_no) |>
   dplyr::mutate(actual_row_prop = actual_cell_value/sum(actual_cell_value))
 
+
+ssei.path <- "C:/Users/gidon/OneDrive/Documents/ssEI"
+smod.path <- paste0(ssei.path, "/inst/stan/")
+mnb.path <- paste0(smod.path, "ssMNB.stan")
+
+senc_mnb <- test_mnb <- rstan::stan(file = mnb.path,
+                                    data = test_for_stan,
+                                    cores = 4,
+                                    control = list(
+                                      "adapt_delta" = .9)
+)
+
 senc_average <- ei_estimate(senc_rm, senc_cm, model="average")
 senc_contextual <- ei_estimate(senc_rm, senc_cm)
 senc_contextualonion <- ei_estimate(senc_rm, senc_cm, model="contextualOnion")
@@ -66,9 +79,67 @@ e_senc_average <- rstan::extract(senc_average)
 e_senc_bb <- rstan::extract(bb)
 e_senc_context <- rstan::extract(senc_contextual)
 cv_draws <- ei_to_cvdraws(e_senc_average)
-cv_draws <- ei_to_cvdraws(e_senc_context)
+cv_draws <- ei_to_cvdraws(e_senc_contextual)
 cv_draws <- ei_to_cvdraws(e_senc_bb)
 cv_draws <-ei_cv_summary(senc_contextualonion)
+cv_draws <-ei_cv_summary(senc_contextual)
+cv_draws_a <- ei_cv_summary(senc_average)|>
+  left_join(senc2_flat, by = c("area_no", "col_no"="col", "row_no"="row"))
+cv_summary <- ssEI::ei_cv_summary(senc_contextual)|>
+  left_join(senc2_flat, by = c("area_no", "col_no"="col", "row_no"="row"))
+cv_draws_oo <-ei_cv_summary(senc_contextualonion) |>
+  left_join(senc2_flat, by = c("area_no", "col_no"="col", "row_no"="row"))
+rr_summary<- ei_row_rate_summary(senc_contextual)|>
+  left_join(senc2_flat, by = c("area_no", "col_no"="col", "row_no"="row"))
+
+rr_summary |>
+  filter(mean> -1) |>
+  ggplot(aes(actual_row_prop, mean, colour=paste(row_names, col_names))) +
+  geom_point(aes(size=actual_value))
+
+
+rr_summary |>
+  filter(mean> -1) |>
+  filter(actual_row_total>10) |>
+  ggplot(aes(actual_row_prop, mean, colour=paste(row_names, col_names))) +
+  facet_grid(rows = vars(row_names), cols = vars(col_names))+
+  geom_point(aes(size=actual_value))
+
+rr_summary |>
+  filter(actual_row_total>10) |>
+  group_by(row_names, col_names) |>
+  summarise(cor = cor(mean, actual_row_prop, use="pairwise.complete.obs"))
+
+rr_summary |>
+  summarise(cor = cor(mean, actual_row_prop, use="pairwise.complete.obs"))
+
+# rr_summary |>
+#   filter(is.na(actual_row_prop)) |>
+#   select(mean, actual_row_total) |> View()
+
+rr_summary |>
+  ggplot(aes(actual_row_prop)) +
+  facet_wrap(vars(row_names)) +
+  geom_histogram()
+
+rr_summary |>
+  summarise(cor = cor(mean, actual_row_prop, use="pairwise.complete.obs"))
+
+ei_error_index(cv_summary$mean, cv_summary$actual_value)
+cor(cv_summary$mean, cv_summary$actual_value)
+cor(rr_summary$mean, rr_summary$actual_row_prop, use="complete.obs")
+ei_error_index(cv_draws_oo$mean, cv_draws_oo$actual_value)
+ei_error_index(cv_draws_a$mean, cv_draws_a$actual_value)
+rmse(cv_draws_oo$mean, cv_draws_oo$actual_value)
+rmse(cv_draws_a$mean, cv_draws_a$actual_value)
+mae(cv_draws_oo$mean, cv_draws_oo$actual_value)
+mae(cv_draws_a$mean, cv_draws_a$actual_value)
+
+
+rp_draws <-ei_row_rate_summary(senc_contextualonion)
+rp_draws <- cvdraws_to_rowprops(cv_draws)
+rp_summary <- summarize_cvdraws(rp_draws)
+
 rp_draws <-ei_row_rate_summary(senc_contextualonion)
 rp_draws <- cvdraws_to_rowprops(cv_draws)
 rp_summary <- summarize_cvdraws(rp_draws)
@@ -321,3 +392,744 @@ tmpres <- rstan::sampling(stanmodels$ssContextualOnion,
                 data=standata,
                 chains = 4,
                 cores = 4)
+
+newstancode2 <- rstan::get_stancode(senc_contextual2)
+R <- ncol(senc_rm)
+C <- ncol(senc_cm)
+n_areas <- nrow(senc_rm)
+my_lkj_param = 2
+standata <- list(
+  n_areas = n_areas,
+  R = R,
+  C = C,
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = my_lkj_param
+)
+senc_contextual2 <- rstan::stan(model_code = newstancode2,
+            data = standata,
+            cores = 4,
+            iter =10)
+
+
+ssei.path <- "C:/Users/gidon/OneDrive/Documents/ssEI"
+
+smod.path <- paste0(ssei.path, "/inst/stan/")
+
+mnb.path <- paste0(smod.path, "ssMNB.stan")
+mnb2.path <- paste0(smod.path, "ssMNB2.stan")
+mnd.path <- paste0(smod.path, "ssMND.stan")
+co.path <- paste0(smod.path, "ssContextualOnion.stan")
+
+set.seed(123)
+test_set <- ssEI::mk_sim_tables(50, 3, 3)
+
+
+test_for_stan <- list(
+  n_areas = nrow(test_set$row_margins),
+  R = ncol(test_set$row_margins),
+  C = ncol(test_set$col_margins),
+  row_margins = test_set$row_margins,
+  col_margins = test_set$col_margins,
+  lkj_param = 2
+)
+
+test_mnb <- rstan::stan(file = mnb.path,
+                        data = test_for_stan,
+                        cores = 4,
+                        control = list(
+                          "adapt_delta" = .9)
+)
+
+test_mnd <- rstan::stan(file = mnd.path,
+                        data = test_for_stan,
+                        cores = 4)
+
+st1 <- mods_summary(list("mnb" = test_mnb,
+                         "mnd" = test_mnd), test_set$row_rates)
+
+st1$cv_eval$cv_eval_stats
+st1$rr_eval$rr_eval_stats
+st1$eval_plots$p_cv
+st1$eval_plots$p_rr
+st1$eval_plots$pf_rr
+
+mnb_cv <- ei_cv_summary(test_mnb)
+mnd_cv <- ei_cv_summary(test_mnd)
+mnb_rr <- ei_row_rate_summary(test_mnb)
+mnd_rr <- ei_row_rate_summary(test_mnd)
+
+mnb_cv |> left_join(test_set$row_rates) |>
+  summarise(cor(mean, actual_cell_value))
+
+mnd_cv |> left_join(test_set$row_rates) |>
+  summarise(cor(mean, actual_cell_value))
+
+mnb_rr |> left_join(test_set$row_rates) |>
+  summarise(cor(mean, actual_row_rate))
+
+mnd_rr |> left_join(test_set$row_rates) |>
+  summarise(cor(mean, actual_row_rate))
+
+senc_for_stan <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2
+)
+
+senc_mnb <- rstan::stan(file = mnb.path,
+                        data = senc_for_stan,
+                        cores = 4)
+
+senc_co_new <- rstan::stan(file = co.path,
+                        data = senc_for_stan,
+                        cores = 4)
+
+
+ssum <- mods_summary(list("mnb2"=senc_mnb,
+                          "co new"=senc_co_new), senc2_flat |> rename(col_no=col, row_no=row, actual_cell_value = actual_value, actual_row_rate = actual_row_prop))
+
+ssum$cv_eval$cv_eval_stats
+ssum$rr_eval$rr_eval_stats
+ssum$eval_plots$p_cv
+ssum$eval_plots$p_rr + ylim(0,1) + geom_point(aes(colour=paste(row_names, col_names), size=actual_cell_value))
+
+b_senc_cv <- ei_cv_summary(senc_mnb)
+b_senc_rr <- ei_row_rate_summary(senc_mnb)
+
+b_senc_cv |> left_join(senc2_flat, by=c("area_no", "row_no"="row", "col_no"="col"))|>
+  summarise(cor(mean, actual_value))
+
+b_senc_rr |> left_join(senc2_flat, by=c("area_no", "row_no"="row", "col_no"="col"))|>
+  summarise(cor(mean, actual_row_prop, use="complete.obs"))
+
+b_senc_rr |> left_join(senc2_flat, by=c("area_no", "row_no"="row", "col_no"="col"))|>
+  filter(mean>-1) |>
+  ggplot(aes(actual_row_prop, mean, colour=paste(row_names, col_names)))+
+  geom_point(aes(size=actual_value))
+
+b_senc_rr |> left_join(senc2_flat, by=c("area_no", "row_no"="row", "col_no"="col"))|>
+  filter(mean>-1) |>
+  ggplot(aes(actual_row_prop, mean, colour=paste(col_names, row_names)))+
+  facet_grid(rows=vars(row_names), cols= vars(col_names)) +
+  geom_point(aes(size=actual_value))
+
+b_senc_rr |> left_join(senc2_flat, by=c("area_no", "row_no"="row", "col_no"="col"))|>
+  filter(mean>-1) |>
+  group_by(row_names, col_names) |>
+  summarise(cor(mean, actual_row_prop, use="complete.obs"))
+
+  ggplot(aes(actual_row_prop, mean, colour=paste(col_names, row_names)))+
+  facet_grid(rows=vars(row_names), cols= vars(col_names)) +
+  geom_point(aes(size=actual_value))
+
+
+ei.path<-switch (Sys.info()["nodename"],
+                   "GID-HOME-LENOVO"="C:/Users/Gidon/Dropbox/Analysis with R/EI",
+                   "GID-LAPTOP-LENO" = "C:/Users/gidon/Dropbox/Analysis with R/EI",
+                   "DM-GIA-099"="C:/Users/dgi0gc/Dropbox/Analysis with R/EI")
+cacheloc <- paste0(ei.path, "/model_cache")
+
+# read the education ethnicity crosstable from 2021 UK Census
+c21_ed_eth <- read_csv(paste0(ei.path, "/data/uk_census_2021/ENG_LTLA_ED7_ETH6.csv"
+)) |>  rename(la_code = 1,
+              la_name = 2,
+              eth_code = 3,
+              eth_group = 4,
+              ed_code = 5,
+              ed_group =6,
+              actual_cell_value = 7
+) |>
+  group_by(la_code) |>
+  mutate(area_no = cur_group_id())
+
+## Note: there are no missing values for ethnicity so remove the -8 cases for
+c21_ed_eth <- c21_ed_eth |> filter(eth_code != -8)
+
+set.seed(123)
+c21_ed_eth_small <- xfun::cache_rds({
+  c21_ed_eth |> filter(
+    la_code %in% sample(unique(c21_ed_eth$la_code), 100)
+  ) },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "c21_ed_eth_small.rds")
+
+prep_dat <- function(x, row_code, col_code){
+  x <- x |>
+    group_by(area_no) |>
+    mutate(new_area_no = cur_group_id()) |>
+    ungroup() |>
+    select(-area_no) |>
+    rename(area_no=new_area_no)
+  row_nos <- x |>
+    group_by({{row_code}}) |>
+    summarise() |>
+    mutate(row_no = dplyr::row_number(),
+           row_name = paste0("row_no.", row_no))
+
+  col_nos <- x |>
+    group_by({{col_code}}) |>
+    summarise() |>
+    mutate(col_no = dplyr::row_number(),
+           col_name = paste0("col_no.", col_no))
+
+  row_margins_long <- x |>
+    group_by(area_no, {{row_code}}) |>
+    summarise(actual_row_margin = sum(actual_cell_value)) |>
+    ungroup() |>
+    left_join(row_nos)
+
+  row_margins_wide <- row_margins_long |>
+    select(area_no, row_name, actual_row_margin) |>
+    pivot_wider(names_from = row_name,
+                values_from = "actual_row_margin")|>
+    select(-area_no)
+
+  col_margins_long <- x |>
+    group_by(area_no, {{col_code}}) |>
+    summarise(actual_col_margin = sum(actual_cell_value)) |>
+    ungroup() |>
+    left_join(col_nos)
+
+  col_margins_wide <- col_margins_long |>
+    select(area_no, col_name, actual_col_margin) |>
+    pivot_wider(names_from = "col_name",
+                values_from = "actual_col_margin") |>
+    select(-area_no)
+
+  cv_rr_long <- x |>
+    left_join(col_nos) |>
+    left_join(row_nos) |>
+    left_join(row_margins_long |>
+                select(area_no, row_no, actual_row_margin)) |>
+    mutate(actual_row_rate = actual_cell_value/actual_row_margin)
+
+
+  list(
+    row_margins_long = row_margins_long,
+    row_margins_wide = row_margins_wide,
+    col_margins_long = col_margins_long,
+    col_margins_wide = col_margins_wide,
+    cv_rr_long = cv_rr_long,
+    row_nos = row_nos,
+    col_nos = col_nos
+  )
+
+}
+set.seed(1234)
+ndists <- seq(from = 20, to = 200, by =20)
+csubsets <- vector("list", length = length(ndists))
+for(a in 1:length(ndists)){
+  s <- ndists[a]
+  this_dat <- c21_ed_eth |>
+    filter(la_code %in% sample(unique(c21_ed_eth$la_code), s))
+  csubsets[[a]] <- prep_dat(this_dat, eth_code, ed_code)
+}
+
+csubsets <- xfun::cache_rds({
+  csubsets
+},
+rerun = FALSE,
+dir = cacheloc,
+file = "csubsets.rds"
+)
+ces1_av <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[1]]$row_margins_wide,
+                col_margins = csubsets[[1]]$col_margins_wide,
+                model="average"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs1_av.rds"
+)
+
+prep_for_stan <- function(rm, cm, lkj_param = 2){
+  list(
+    n_areas = nrow(rm),
+    R = ncol(rm),
+    C = ncol(cm),
+    row_margins = rm,
+    col_margins = cm,
+    lkj_param = lkj_param
+  )
+}
+cs1_dat <- prep_for_stan(csubsets[[1]]$row_margins_wide,
+                       csubsets[[1]]$col_margins_wide
+)
+
+ces1_mnb1 <- xfun::cache_rds(
+  {
+    rstan::stan(file = mnb.path,
+                data = cs1_dat,
+                cores = 4)
+  },
+  rerun = FALSEpo,
+  dir = cacheloc,
+  file = "cs1_mnb1.rds"
+)
+
+ces1_mnb2 <- xfun::cache_rds(
+  {
+    rstan::stan(file = mnb2.path,
+                data = cs1_dat,
+                cores = 4)
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs1_mnb2.rds"
+)
+
+ces1_co <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[1]]$row_margins_wide,
+                col_margins = csubsets[[1]]$col_margins_wide,
+                model="contextualOnion"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs1_co.rds"
+)
+
+ces1_co_new <- xfun::cache_rds(
+  {
+    rstan::stan(file = co.path,
+                data = cs1_dat,
+                cores = 4)
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs1_co_new.rds"
+)
+
+ces1_co_new2 <- xfun::cache_rds(
+  {
+    rstan::stan(file = co.path,
+                data = cs1_dat,
+                cores = 4)
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs1_co_new2.rds"
+)
+
+ces1_co_new3 <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[1]]$row_margins_wide,
+                col_margins = csubsets[[1]]$col_margins_wide,
+                model="contextualOnion"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs1_co_new2.rds"
+)
+
+r1 <- mods_summary(list("mnd"=ces1_av,
+                        "mnb1"=ces1_mnb1,
+                        "mnb2"=ces1_mnb2),
+                   actual_long = csubsets[[1]]$cv_rr_long)
+
+r1 <- mods_summary(list("co"=ces1_co,
+                        "co_new"=ces1_co_new,
+                        "co_new2"=ces1_co_new2),
+                   actual_long = csubsets[[1]]$cv_rr_long)
+
+r1$cv_eval$cv_eval_stats
+r1$rr_eval$rr_eval_stats
+
+r1$eval_plots$p_rr
+r1$eval_plots$pf_rr
+
+r1$eval_plots$p_cv
+
+
+prep.king <- function(cm, rm){
+  formula <- as.formula(paste0("cbind(", paste(names(cm), collapse = ","), ") ~ cbind(", paste(names(rm), collapse=","), ")"))
+  list(
+    formula = formula,
+    data = cbind(cm, rm)
+  )
+}
+
+
+kc1_dat <- prep_king(csubsets[[1]]$col_margins_wide, csubsets[[1]]$row_margins_wide)
+
+
+
+
+kc1.tune.nocov <- tuneMD(kc1_dat$formula, data = kc1_dat$data,
+                         ntunes = 10, totaldraws = 100000)
+
+
+kc1.out.nocov <- ei.MD.bayes(kc1_dat$formula,
+                             covariate = NULL,
+                             data = kc1_dat$data,
+                             tune.list = kc1.tune.nocov)
+
+gqc1_dat <- prep_gq(csubsets[[1]]$col_margins_wide, csubsets[[1]]$row_margins_wide)
+gq.tune.c1 <- Tune(gqc1_dat$formula,
+                  data = gqc1_dat$data,
+                  num.iters = 20000,
+                  num.runs = 15)
+niter.gq <- 1500000
+Chain1.c1 <- Analyze(gqc1_dat$formula,
+                       rho.vec = gq.tune.c1$rhos,
+                       data = gqc1_dat$data,
+                       num.iters = niter.gq,
+                       burnin = 150000,
+                       save.every = 1000,
+                       debug = 1,
+                       keepNNinternals = 100,
+                       keepTHETAS = 100)
+Chain2.c1 <- Analyze(gqc1_dat$formula,
+                     rho.vec = gq.tune.c1$rhos,
+                     data = gqc1_dat$data,
+                     num.iters = niter.gq,
+                     burnin = 150000,
+                     save.every = 1000,
+                     debug = 1,
+                     keepNNinternals = 100,
+                     keepTHETAS = 100)
+Chain3.c1 <- Analyze(gqc1_dat$formula,
+                     rho.vec = gq.tune.c1$rhos,
+                     data = gqc1_dat$data,
+                     num.iters = niter.gq,
+                     burnin = 150000,
+                     save.every = 1000,
+                     debug = 1,
+                     keepNNinternals = 100,
+                     keepTHETAS = 100)
+c1.MCMClist <- mcmc.list(Chain1.c1, Chain2.c1,Chain3.c1)
+gelman.diag(c1.MCMClist, multivariate = FALSE)
+
+c1s <- mods_summary(list("king"= kc1.out.nocov, "average"=ces1_av, "co new"=ces1_co_new ), actual_long =csubsets[[1]]$cv_rr_long)
+c1s <- mods_summary(list("king"= kc1.out.nocov, gq = c1.MCMClist, "average"=ces1_av, "co new"=ces1_co_new, "co orig" = ces1_co ), actual_long =csubsets[[1]]$cv_rr_long)
+c1s <- mods_summary(list(gq = c1.MCMClist, "co new"=ces1_co_new), actual_long =csubsets[[1]]$cv_rr_long)
+c1s <- mods_summary(list("av"=ces1_av), actual_long =csubsets[[1]]$cv_rr_long)
+c1s$cv_eval$cv_eval_stats
+c1s$rr_eval$rr_eval_stats
+c1s$eval_plots$p_cv
+c1s$eval_plots$p_rr
+c1s$eval_plots$pf_rr
+
+
+cedeth_co <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = row_margins_eth_wide,
+                col_margins = col_margins_ed_wide,
+                model="contextualOnion"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cdeth_co.rds"
+)
+
+
+library(parallel)
+
+gq.Analyze <- function(formula, data, tune, niter.gq, burnin.iter = 150000, save.every=1000, debug = 1){
+    RxCEcolInf::Analyze(formula,
+                       rho.vec = tune$rhos,
+                       data = data,
+                       num.iters = niter.gq,
+                       burnin = burnin.iter,
+                       save.every = save.every,
+                       debug = 1,
+                       keepNNinternals = 100,
+                       keepTHETAS = 100)
+}
+
+gq.Analyze <- function(x, ...){
+  RxCEcolInf::Analyze(...)
+}
+
+res.list <- list(1,1,1)
+c1 <-makeCluster(3, methods = FALSE)
+clusterExport(c1, c("gqc1_dat", "gq.tune.c1"))
+res <-  parLapply(c1, res.list,
+               fun = gq.Analyze,
+               fstring = gqc1_dat$formula,
+               rho.vec = gq.tune.c1$rhos,
+               data = gqc1_dat$data,
+               num.iters = 1000,
+               burnin = 100,
+               save.every = 10,
+               debug = 1,
+               keepNNinternals = 100,
+               keepTHETAS = 100
+         )
+stopCluster(c1)
+
+
+##----simpleregmethods----
+
+# This model runs a regression obsC ~ Poisson(predC)
+# Where obsC[j,c] is the observed column total of column c in area j
+# and predC[j,c] = beta[c] * row_margins[j,] where beta[c] is a column specific
+reg1.path <- paste0(smod.path, "eiOreg.stan")
+reg1 <- rstan::stan(file = reg1.path,
+                data = cs1_dat,
+                cores = 4)
+
+reg2.path <- paste0(smod.path, "eiOreg2.stan")
+reg2 <- rstan::stan(file = reg2.path,
+                    data = cs1_dat,
+                    cores = 4)
+
+
+cprops <-cs1_dat$col_margins/rowSums(cs1_dat$col_margins)
+rprops <- cs1_dat$row_margins/rowSums(cs1_dat$row_margins)
+props <- cbind(cprops, rprops)
+props$ref_row <- props$row_no.4
+props_dm <- props - colSums(props)/nrow(props)
+
+props_dm <- apply(props, 2, function(x){x-mean(x)}) |> data.frame()
+
+lm(col_no.1 ~ log(row_no.1/ref_row) + log(row_no.2/ref_row) + log(row_no.3/ref_row) + log(row_no.4/ref_row) + log(row_no.5/ref_row), props) |> summary()
+
+lm(col_no.1 ~ 1 +row_no.1  + row_no.3 + row_no.4 + row_no.5, props_dm) |> summary()
+lm(col_no.1 ~ row_no.2, props_dm) |> summary()
+
+cs1_overall <- csubsets[[1]]$cv_rr_long |> group_by(row_no) |> mutate(row_total=sum(actual_cell_value)) |> group_by(col_no) |> mutate(col_total = sum(actual_cell_value)) |> group_by(row_no, row_total, col_no, col_total) |> summarise(actual_cell_value = sum(actual_cell_value)) |>
+  mutate(row_rate=actual_cell_value/row_total)
+
+cs1_overall |> View()
+
+lm(I(arm::logit(col_no.1)) ~ I(log(row_no.1/row_no.4)) +I(log(row_no.2/row_no.4)) + I(log(row_no.3/row_no.4))+ I(log(row_no.5/row_no.4)), props) |> summary()
+
+lm(I(arm::logit(col_no.1)) ~ I(log(row_no.3/row_no.4)), props) |> summary()
+lm(I(arm::logit(col_no.1)) ~ I(log(row_no.3/row_no.5)), props) |> summary()
+
+
+ces2_av <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[2]]$row_margins_wide,
+                col_margins = csubsets[[2]]$col_margins_wide,
+                model="average"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs2_av.rds"
+)
+c2s <- mods_summary(list("average"=ces2_av), actual_long =csubsets[[2]]$cv_rr_long)
+c2s$eval_plots$pf_rr
+
+
+ces3_av <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[3]]$row_margins_wide,
+                col_margins = csubsets[[3]]$col_margins_wide,
+                model="average"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs3_av.rds"
+)
+c3s <- mods_summary(list("average"=ces3_av), actual_long =csubsets[[3]]$cv_rr_long)
+c3s$eval_plots$pf_rr
+ces4_av <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[4]]$row_margins_wide,
+                col_margins = csubsets[[4]]$col_margins_wide,
+                model="average"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs4_av.rds"
+)
+c4s <- mods_summary(list("average"=ces4_av), actual_long =csubsets[[4]]$cv_rr_long)
+c4s$eval_plots$pf_rr
+
+ces5_av <- xfun::cache_rds(
+  {
+    ei_estimate(row_margins = csubsets[[5]]$row_margins_wide,
+                col_margins = csubsets[[5]]$col_margins_wide,
+                model="average"
+    )
+
+  },
+  rerun = FALSE,
+  dir = cacheloc,
+  file = "cs5_av.rds"
+)
+c5s <- mods_summary(list("average"=ces5_av), actual_long =csubsets[[5]]$cv_rr_long)
+c5s$eval_plots$pf_rr
+
+full_prep <-prep_dat(c21_ed_eth, eth_code, ed_code)
+
+cprops <- full_prep$col_margins_wide/rowSums(full_prep$col_margins_wide)
+rprops <- full_prep$row_margins_wide/rowSums(full_prep$row_margins_wide)
+props <- cbind(cprops, rprops)
+
+hist(props$row_no.5)
+
+
+##----censusedsoc----
+
+c21_ed_soc <- read_csv(paste0(ei.path, "/data/uk_census_2021/ENG_LTLA_ED7_SOC10.csv"
+)) |>  rename(la_code = 1,
+              la_name = 2,
+              ed_code = 3,
+              ed_group = 4,
+              soc_code = 5,
+              soc_group =6,
+              actual_cell_value = 7
+) |>
+  group_by(la_code) |>
+  mutate(area_no = cur_group_id())
+
+## Note: missing values for education and Socio-economic classification so remove the -8 cases for both
+c21_ed_soc <- c21_ed_soc |> filter(ed_code != -8, soc_code!=-8)
+
+c21es_full <- prep_dat(c21_ed_soc, {soc_code}, {ed_code})
+
+
+set.seed(1234)
+ndists <- seq(from = 20, to = 200, by =20)
+csubsets2 <- vector("list", length = length(ndists))
+for(a in 1:length(ndists)){
+  s <- ndists[a]
+  this_dat <- c21_ed_soc |>
+    filter(la_code %in% sample(unique(c21_ed_soc$la_code), s))
+  csubsets2[[a]] <- prep_dat(this_dat, soc_code, ed_code)
+}
+
+cse1_av <- ei_estimate(csubsets2[[1]]$row_margins_wide,
+                       csubsets2[[1]]$col_margins_wide,
+                       model="average")
+cse1s <- mods_summary(list("average"=cse1_av), actual_long =csubsets2[[1]]$cv_rr_long)
+cse1s$eval_plots$p_cv
+cse1s$eval_plots$pf_cv
+cse1s$eval_plots$pf_rr
+
+co.path <- paste0(smod.path, "ssContextualOnion.stan")
+
+cse_ss_co_res <- list(length=10)
+cse_ss_av_res <- list(length=10)
+for(sset in 1:5){
+  this_dat <- prep_for_stan(csubsets2[[sset]]$row_margins_wide,
+                           csubsets2[[sset]]$col_margins_wide
+  )
+  cse_ss_co_res[[sset]] <- xfun::cache_rds(
+    {
+      rstan::stan(file = co.path,
+                  data = this_dat,
+                  cores = 4)
+    },
+    rerun = FALSE,
+    dir = paste0(cacheloc, "/"),
+    file = paste0("cse_", sset, "_co_new.rds")
+  )
+}
+mnd.path <- paste0(smod.path, "ssMND.stan")
+for(sset in 2:5){
+  this_dat <- prep_for_stan(csubsets2[[sset]]$row_margins_wide,
+                            csubsets2[[sset]]$col_margins_wide
+  )
+  cse_ss_av_res[[sset]] <- xfun::cache_rds(
+    {
+      rstan::stan(file = mnd.path,
+                  data = this_dat,
+                  cores = 4)
+    },
+    rerun = FALSE,
+    dir = paste0(cacheloc, "/"),
+    file = paste0("cse_", sset, "_av.rds")
+  )
+}
+
+cse1s <- mods_summary(list("average"=cse1_av,
+                           "co" = cse_ss_co_res[[1]]), actual_long =csubsets2[[1]]$cv_rr_long)
+
+
+cse1s$cv_eval$cv_eval_stats
+cse1s$rr_eval$rr_eval_stats
+
+cse1s$eval_plots$pf_cv
+cse1s$eval_plots$pf_rr
+cse1sa <- mods_summary(list(
+                           "co" = cse_ss_co_res[[1]]), actual_long =csubsets2[[1]]$cv_rr_long)
+
+cse2s <- mods_summary(list("co" = cse_ss_co_res[[2]]), actual_long =csubsets2[[2]]$cv_rr_long)
+cse3s <- mods_summary(list("co" = cse_ss_co_res[[3]]), actual_long =csubsets2[[3]]$cv_rr_long)
+cse2s$rr_eval$rr_eval_stats
+cse2s$cv_eval$cv_eval_stats
+cse3s$rr_eval$rr_eval_stats
+cse3s$cv_eval$cv_eval_stats
+
+cse1sa$eval_plots$pf_rr + ggtitle("subset 1")
+cse2s$eval_plots$pf_rr + ggtitle("subset 2")
+cse3s$eval_plots$pf_rr + ggtitle("subset 3")
+
+set.seed(11)
+sim_dat11 <- mk_sim_tables(100, 3, 3,
+                           scale_sd = -1,
+                           sd_sd = .2,
+                           contextual_effects = TRUE,
+                           lkj_eta = exp(-100))
+
+
+
+
+sim_dat11$for_stan <- prep_for_stan(sim_dat11$row_margins, sim_dat11$col_margins)
+sim11_mnb <- rstan::stan(file = mnb.path,
+                                    data = sim_dat11$for_stan,
+                                    cores = 4)
+
+sim11_co_new <- rstan::stan(file = co.path,
+                         data = sim_dat11$for_stan,
+                         cores = 4)
+
+s11s <- mods_summary(list("mnb"=sim11_mnb, "co new"=sim11_co_new), sim_dat11$row_rates)
+
+s11s$cv_eval$cv_eval_stats
+s11s$rr_eval$rr_eval_stats
+s11s$eval_plots$p_cv
+s11s$eval_plots$p_rr
+s11s$eval_plots$pf_rr
+
+
+sim_dat11$Sigma
+
+s11rrwide <- sim_dat11$row_rates |> mutate(c = "c") |> unite(cell, c, row_no, col_no) |> select(area_no, cell, actual_row_rate) |> pivot_wider(names_from = cell, values_from = actual_row_rate)
+corrplot::corrplot(cor(s11rrwide |> select(-area_no)))
+
+s11rrwide|>
+  ggplot(aes(c_2_2, c_3_3)) + geom_point() + stat_smooth(method="lm")
+
+set.seed(12)
+sim_dat12 <- mk_sim_tables(100, 3, 3,
+                           scale_sd = -1,
+                           sd_sd = .2,
+                           contextual_effects = TRUE,
+                           lkj_eta = exp(-300))
+
+s12rrwide <- sim_dat12$row_rates |> mutate(c = "c") |>
+  unite(cell, c, row_no, col_no) |>
+  filter(actual_cell_value>10) |>
+  select(area_no, cell, actual_row_rate) |>
+  pivot_wider(names_from = cell, values_from = actual_row_rate)
+corrplot::corrplot(cor(s12rrwide |> select(-area_no), use="pairwise.complete.obs"), method = "number")
+s12rrwide|>
+  ggplot(aes(c_1_1, c_2_1)) + geom_point() + stat_smooth(method="lm")
+
