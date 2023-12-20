@@ -37,3 +37,195 @@ rmse <- function(actual, predicted){
   }
   res
 }
+
+
+mk_eval_plot <- function(cv_eval, rr_eval){
+  p1 <- cv_eval |>
+    ggplot(aes(actual_cell_value, mean)) +
+    facet_wrap(~model)+
+    geom_point()+
+    theme_bw() +
+    labs(x ="actual cell values",
+         y = "model estimated cell values") +
+    geom_abline(intercept = 0, slope = 1)
+
+  p2 <- rr_eval|>
+    ggplot(aes(actual_row_rate, mean)) +
+    facet_wrap(~model) +
+    geom_point()+
+    theme_bw() +
+    labs(x ="actual row proportions",
+         y = "model estimated row proportions") +
+    geom_abline(intercept = 0, slope = 1)
+
+
+  p3 <- cv_eval |>
+    ggplot(aes(actual_cell_value, mean)) +
+    facet_grid(row_no ~ col_no + model) +
+    geom_point()+
+    theme_bw() +
+    labs(x ="actual cell values",
+         y = "model estimated cell values") +
+    geom_abline(intercept = 0, slope = 1)
+
+  p4 <- rr_eval|>
+    ggplot(aes(actual_row_rate, mean)) +
+    facet_grid(row_no ~ col_no + model) +
+    geom_point()+
+    theme_bw() +
+    labs(x ="actual row proportions",
+         y = "model estimated row proportions") +
+    geom_abline(intercept = 0, slope = 1)
+
+  list(p_cv = p1,
+       p_rr = p2,
+       pf_cv = p3,
+       pf_rr = p4)
+}
+
+
+mods_summary <- function(mod_list, actual_long){
+  model_names <- names(mod_list)
+  n_mod <- length(mod_list)
+
+  cv_res <- list(length = n_mod)
+  rr_res <- list(length = n_mod)
+
+  for (n in 1:n_mod){
+    this_class <- class(mod_list[[n]])
+    if(this_class =="eiMD"){
+      rr_res[[n]] <- md.bayes.join.rr(mod_list[[n]], actual_long)
+      cv_res[[n]] <- md.bayes.cv(rr_res[[n]])
+
+    } else if(this_class[[1]]=="stanfit"){
+      cv_res[[n]] <- ei_cv_summary(mod_list[[n]])
+      rr_res[[n]] <- ei_row_rate_summary(mod_list[[n]])
+    } else if(this_class=="mcmc.list"){
+      tmp_res <- link.gq.res(mod_list[[n]], actual_long)
+      rr_res[[n]] <- tmp_res
+      cv_res[[n]] <- tmp_res |> dplyr::mutate(mean = value)
+    }
+  }
+  cv_eval <- mk_cv_eval(cv_list = cv_res,
+                        actual_long = actual_long,
+                        model_names = model_names)
+  rr_eval <- mk_rr_eval(rr_list = rr_res,
+                        actual_long = actual_long,
+                        model_names = model_names)
+
+  eval_plots <- mk_eval_plot(cv_eval$cv_eval, rr_eval$rr_eval)
+
+
+  list(
+    cv_res = cv_res,
+    rr_res = rr_res,
+    cv_eval = cv_eval,
+    rr_eval = rr_eval,
+    eval_plots = eval_plots,
+    model_names = model_names
+  )
+}
+
+mk_cv_eval <- function(cv_list, actual_long, model_names = c("average", "contextual")){
+
+  for(m in 1:length(cv_list)){
+    this_res <- cv_list[[m]] |>
+      dplyr::left_join(actual_long) |>
+      dplyr::mutate(model = model_names[[m]])
+    if(m==1){
+      cv_eval <- this_res
+    } else{
+      cv_eval <- dplyr::bind_rows(cv_eval, this_res)
+    }
+  }
+  cv_eval_stats <- cv_eval |>
+    dplyr::group_by(model) |>
+    dplyr::summarise(cor = cor(actual_cell_value, mean),
+                     ei_error_index= ei_error_index(actual_cell_value, mean),
+                     mae = mae(mean, actual_cell_value),
+                     rmse = rmse(actual_cell_value, mean))
+
+  list(
+    cv_eval = cv_eval,
+    cv_eval_stats = cv_eval_stats
+  )
+}
+
+mk_rr_eval <- function(rr_list, actual_long, model_names = c("average", "contextual")){
+
+  for(m in 1:length(rr_list)){
+    this_res <- rr_list[[m]] |>
+      dplyr::left_join(actual_long) |>
+      dplyr::mutate(model = model_names[[m]])
+    if(m==1){
+      rr_eval <- this_res
+    } else{
+      rr_eval <- dplyr::bind_rows(rr_eval, this_res)
+    }
+  }
+  rr_eval_stats <- rr_eval |>
+    dplyr::filter(!is.na(actual_row_rate)) |>
+    dplyr::group_by(model) |>
+    dplyr::summarise(cor = cor(actual_row_rate, mean, use="pairwise.complete.obs"),
+                     ei_error_index = ei_error_index(actual_row_rate, mean),
+                     mae = mae(actual_row_rate, mean),
+                     rmse = rmse(actual_row_rate, mean))
+
+  list(
+    rr_eval = rr_eval,
+    rr_eval_stats = rr_eval_stats
+  )
+}
+
+md.bayes.join.rr <- function(md.bayes.res, actual_row_rate){
+  k.out<-summary(md.bayes.res$draws$Beta)$statistics
+  k.res <- k.out |>
+    as.matrix() |>
+    data.frame() |>
+    tibble::rownames_to_column("rowname") |>
+    tibble::tibble()
+  k.res <- k.res |>
+    tidyr::separate(rowname, into=c(NA, NA, NA, "row_no", NA, NA, "col_no", "area_no"), remove=FALSE) |>
+    dplyr::mutate(
+      col_no = as.numeric(col_no),
+      row_no = as.numeric(row_no),
+      area_no= as.numeric(area_no),
+      mean = Mean
+    ) |>
+    dplyr::left_join(actual_row_rate, by=c("area_no", "row_no", "col_no"))
+
+  k.res
+}
+
+md.bayes.cv <- function(md.bayes.rr){
+  md.bayes.rr |>
+    dplyr::mutate(mean = Mean*actual_row_margin)
+}
+
+link.gq.res <- function(gq.MCMC.list, actual_cv){
+  NNs <- lapply(gq.MCMC.list, function(x){
+    attr(x, "NN.internals")
+  })
+  for(x in 1:length(NNs)){
+    NNs[[x]] <- NNs[[x]] |> as.data.frame ()|> mutate(chain = x)
+  }
+  NNs <- bind_rows(NNs)
+  NNs.df <- as.data.frame(NNs) |>
+    mutate(iter = row_number()) |>
+    pivot_longer(cols = c(-iter, -chain)) |>
+    separate(name, into = c(NA, NA, "area_no", NA, NA, "row_no", NA, NA, "col_no")) |>
+    mutate(area_no = as.numeric(area_no),
+           row_no = as.numeric(row_no),
+           col_no = as.numeric(col_no)
+    )
+  NN.summary <- NNs.df |>
+    group_by(area_no, row_no, col_no) |>
+    summarise(value = mean(value)) |> left_join(actual_cv, by = c("area_no","col_no", "row_no")) |>
+    dplyr::group_by(area_no, row_no) |>
+    dplyr::mutate(actual_row_rate = actual_cell_value/sum(actual_cell_value),
+                  est_row_rate = value/sum(value),
+                  mean = est_row_rate) |>
+    ungroup()
+
+}
+
