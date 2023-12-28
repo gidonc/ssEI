@@ -64,13 +64,19 @@ senc_long <- senc2 |>
 ssei.path <- "C:/Users/gidon/OneDrive/Documents/ssEI"
 smod.path <- paste0(ssei.path, "/inst/stan/")
 mnb.path <- paste0(smod.path, "ssMNB.stan")
-
+co.new.path <- paste0(smod.path, "ssContextual2.stan")
 senc_mnb <- test_mnb <- rstan::stan(file = mnb.path,
                                     data = test_for_stan,
                                     cores = 4,
                                     control = list(
                                       "adapt_delta" = .9)
 )
+
+senc_co_new <- test_mnb <- rstan::stan(file = co.new.path,
+                                    data = senc_for_stan,
+                                    cores = 4,
+                                    iter =50)
+
 
 senc_average <- ei_estimate(senc_rm, senc_cm, model="average")
 senc_contextual <- ei_estimate(senc_rm, senc_cm)
@@ -420,6 +426,8 @@ mnb.path <- paste0(smod.path, "ssMNB.stan")
 mnb2.path <- paste0(smod.path, "ssMNB2.stan")
 mnd.path <- paste0(smod.path, "ssMND.stan")
 co.path <- paste0(smod.path, "ssContextualOnion.stan")
+co.new2.path <- paste0(smod.path, "ssContextual2.stan")
+co.new3.path <- paste0(smod.path, "ssContextual3.stan")
 
 set.seed(123)
 test_set <- ssEI::mk_sim_tables(50, 3, 3)
@@ -484,18 +492,32 @@ senc_mnb <- rstan::stan(file = mnb.path,
                         data = senc_for_stan,
                         cores = 4)
 
-senc_co_new <- rstan::stan(file = co.path,
-                        data = senc_for_stan,
-                        cores = 4)
+senc_co_new3 <- rstan::stan(file = co.new3.path,
+                            data = senc_for_stan,
+                            cores = 4,
+                            iter = 5000)
 
+senc_co_new2 <- rstan::stan(file = co.new2.path,
+                           data = senc_for_stan,
+                           cores = 4)
+senc_co_new <- rstan::stan(file = co.path,
+                           data = senc_for_stan,
+                           cores = 4)
 
 ssum <- mods_summary(list("mnb2"=senc_mnb,
-                          "co new"=senc_co_new), senc2_flat |> rename(col_no=col, row_no=row, actual_cell_value = actual_value, actual_row_rate = actual_row_prop))
+                          "co_new" = senc_co_new,
+                          "co_new2"=senc_co_new2,
+                          "co_new3"=senc_co_new3), senc2_flat |> rename(col_no=col, row_no=row, actual_cell_value = actual_value, actual_row_rate = actual_row_prop))
+
+ssum <- mods_summary(list("mnb2"=senc_mnb,
+                          "co new"=senc_co_new2), senc2_flat |> rename(col_no=col, row_no=row, actual_cell_value = actual_value, actual_row_rate = actual_row_prop))
 
 ssum$cv_eval$cv_eval_stats
 ssum$rr_eval$rr_eval_stats
 ssum$eval_plots$p_cv
 ssum$eval_plots$p_rr + ylim(0,1) + geom_point(aes(colour=paste(row_names, col_names), size=actual_cell_value))
+ssum$eval_plots$pf_rr+ ylim(0,1)
+ssum$rr_eval$rr_eval |> group_by(model, row_no, col_no) |> summarise(cor=cor(mean, actual_row_rate, use="pairwise.complete.obs")) |> arrange(row_no, col_no, model) |> View()
 
 b_senc_cv <- ei_cv_summary(senc_mnb)
 b_senc_rr <- ei_row_rate_summary(senc_mnb)
@@ -1133,3 +1155,65 @@ corrplot::corrplot(cor(s12rrwide |> select(-area_no), use="pairwise.complete.obs
 s12rrwide|>
   ggplot(aes(c_1_1, c_2_1)) + geom_point() + stat_smooth(method="lm")
 
+
+actualOmegal <- senc2_flat |> select(area_no, row, col, actual_row_prop) |>
+  # mutate(col = paste0(",", col,"]"), row = paste0("Omega[", row)) |>
+  pivot_wider(names_from="col", values_from ="actual_row_prop") |>
+  mutate(across(c(3:5), function(x) log(x/`1` ))) |>
+  select(-`1`)|>
+  pivot_longer(cols = c(`2`,`3`), names_to = "col") |>
+  mutate(cell = ((as.numeric(row) - 1) * 2) + as.numeric(col)-1) |>
+  select(-row, -col) |>
+  pivot_wider(names_from ="cell", values_from= value) |>
+  drop_na() |>
+  select(-area_no) |>
+  rowwise() |>
+  filter(!any(is.infinite(c_across(where(is.numeric)))))|>
+  cor(use="pairwise.complete.obs") |>
+  data.frame()|>
+  setNames(1:6) |>
+  rownames_to_column("idx1") |>
+  pivot_longer(cols = - idx1, names_to = "idx2") |>
+  mutate(cell = paste0("Omega[", idx1, ",", idx2, "]"))
+
+actualOmega <- pull(actualOmegal, value)
+names(actualOmega) <- pull(actualOmegal, cell)
+
+plot(actualOmega, bb_o)
+plot(actualOmega, aa_o)
+
+library(ggrepel)
+data.frame(actual=actualOmega,
+           old = aa_o,
+           new = bb_o,
+           cell = names(aa_o),
+           idx1 = pull(actualOmegal, idx1),
+           idx2 = pull(actualOmegal, idx2)) |>
+  pivot_longer(cols = c(old, new)) |>
+  filter(actual < 1)|>
+  filter(idx1 <= idx2) |>
+  ggplot(aes(actual, value, colour = name))+
+  geom_point()+
+  geom_text_repel(aes(label = cell), position="jitter") +
+  geom_abline(intercept =0, slope =1)
+
+actualsigmal <- senc2_flat |> select(area_no, row, col, actual_row_prop) |>
+  # mutate(col = paste0(",", col,"]"), row = paste0("Omega[", row)) |>
+  pivot_wider(names_from="col", values_from ="actual_row_prop") |>
+  mutate(across(c(3:5), function(x) log(x/`1` ))) |>
+  select(-`1`)|>
+  pivot_longer(cols = c(`2`,`3`), names_to = "col") |>
+  mutate(cell = ((as.numeric(row) - 1) * 2) + as.numeric(col)-1)|>
+  drop_na() |>
+  select(-area_no) |>
+  rowwise() |>
+  filter(!any(is.infinite(c_across(where(is.numeric))))) |>
+  group_by(cell) |>
+  summarise(sd = sd(value))
+
+data.frame(actual=actualsigmal$sd, old = aa_s, new=bb_s[1:6]) |>
+  ggplot()+
+  geom_point(colour="red", aes(actual, old))+
+  geom_point(colour="blue", aes(actual, new))+
+  geom_abline(intercept=0, slope =1)+
+  ylim(0,1.5)+xlim(0,1.5)
