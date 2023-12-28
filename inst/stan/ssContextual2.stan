@@ -96,7 +96,7 @@ transformed parameters{
     for(r in 1:R){
       theta_area[j, r] = simplex_constrain_softmax_lp(eta_area[j,((r-1)*(C -1) + 1):((r-1)*(C -1) + C -1) ]);
     }
-    theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, R*(C - 1) +1:K2]);
+    theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, (R*(C - 1) +1):K2]);
   }
 }
 model{
@@ -134,17 +134,17 @@ model{
   target += realmultinom_lpdf(row_margins| rm_prob);
 }
 generated quantities{
-  matrix[K, K] Omega;  // Correlation matrix
-  matrix[K, K] Sigma;  // Covariance matrix
+  matrix[K2, K2] Omega;  // Correlation matrix
+  matrix[K2, K2] Sigma;  // Covariance matrix
 
   #include include\generateratesandsummaries.stan
 
   Omega = L * L';
-  for (m in 1:K) {
+  for (m in 1:K2) {
     Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];
   }
-  for (m in 1:(K-1)) {
-    for (n in (m+1):K) {
+  for (m in 1:(K2-1)) {
+    for (n in (m+1):K2) {
       Sigma[m, n] = sigma[m] * sigma[n] * Omega[m, n];
       Sigma[n, m] = Sigma[m, n];
     }
