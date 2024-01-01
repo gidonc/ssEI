@@ -22,7 +22,8 @@ data{
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
  real<lower=0> lkj_param; // lkj param
- int<lower=0, upper=1> lflag_mn; // logical flag indicating whether to use multinomial (v. poission) paramertization
+ int<lower=0, upper=2> lflag_mn; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
+ int<lower=0, upper=1> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects (1)
 }
 transformed data{
   int K = R*(C -1);
@@ -30,7 +31,10 @@ transformed data{
   int free_R[n_areas];
   int free_C[n_areas];
   int non0_rm;
+  int phi_length;
   real param_map[n_areas, R - 1, C - 1];
+  matrix[n_areas, R - 1] row_margins_lr;
+
   // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
   int n_param = 0;
@@ -60,14 +64,28 @@ transformed data{
   }
   non0_rm = sum(free_R);
 
+  for (j in 1:n_areas){
+    for(r in 1:(R - 1)){
+      row_margins_lr[j, r] = log((row_margins[j, r]+ .5)/(sum(row_margins[r, (r + 1):R]) + .5));
+    }
+  }
+  if(lflag_mn==2){
+    phi_length = 1;
+  } else{
+    phi_length = 0;
+  }
+
+
 }
 parameters{
  real lambda_unpadded[n_param]; // sequential cell weights
  // simplex[C] theta[R]; // average row to column rates
  vector[R * (C-1)] mu;              // logit probability row mean to construct theta
- matrix[n_areas, R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
- vector<lower=0>[R * (C - 1)] sigma; // scale of area variation from mu
+ vector<lower=0, upper = 1>[phi_length* R] phi;
 
+ matrix[lflag_area_re*n_areas, lflag_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
+ vector<lower=0>[lflag_area_re * R * (C - 1)] sigma; // scale of area variation from mu
+ // matrix[R - 1, K] betas;
  // row_vector[choose(K, 2) - 1] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[K - 1] R2; // first element is not really a R^2 but is on (0,1)
 }
@@ -76,6 +94,8 @@ transformed parameters{
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas, R] simplex[C] theta_area; // prob vector for each area
   array[n_areas] vector[K] eta_area;
+  // matrix[n_areas, K] mu_area;
+  // vector[n_areas, K] mu_area;
   // matrix[K, K] L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix
 
 
@@ -91,9 +111,26 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
+
+ // for (j in 1:n_areas){
+ //    for (k in 1:K){
+ //      mu_area[j,k] = row_margins_lr[j] * col(betas,k);
+ //    }
+ // }
+
+
+
+  // for(j in 1:n_areas){
+  //   eta_area[j] = mu + mu_area[j]' + sigma .*(alpha[j]');
+  // }
   for(j in 1:n_areas){
-    eta_area[j] = mu + sigma .*(alpha[j]');
+    if(lflag_area_re == 1){
+        eta_area[j] = mu + sigma .*(alpha[j]');
+    } else {
+        eta_area[j] = mu;
+    }
   }
+
 
   for (j in 1:n_areas) {
     for(r in 1:R){
@@ -105,11 +142,17 @@ transformed parameters{
 model{
   matrix[non0_rm, C] obs_prob;
   matrix[non0_rm, C] cell_values_matrix;
+  matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
   int counter = 0;
   sigma ~ normal(0, 3);
 
   mu ~ normal(0, 5);      // vectorized, diffuse
   to_vector(alpha) ~ std_normal();
+//
+//   for(k in 1:K){
+//       col(betas, k) ~ normal(0, 3);
+//   }
+//
 
   for (j in 1:n_areas){
     for (r in 1:R){
@@ -117,10 +160,13 @@ model{
         counter += 1;
         for (c in 1:C){
           cell_values_matrix[counter, c] = cell_values[j, r, c];
-          if(lflag_mn== 1){
-            obs_prob[counter, c] = theta_area[j, r, c];
-            } else {
+          if(lflag_mn ==0) {
             obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j,r];
+          }else if(lflag_mn== 1){
+            obs_prob[counter, c] = theta_area[j, r, c];
+          } else  if (lflag_mn==2){
+            phi_matrix[counter, c] = phi[r];
+            obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j, r] - (theta_area[j,r,c]*row_margins[j, r] * phi[r]);
           }
       }
 
@@ -129,8 +175,11 @@ model{
   }
   if(lflag_mn == 1){
     target += realmultinom_lpdf(cell_values_matrix | obs_prob);
-  } else {
+  } else if(lflag_mn == 0) {
     target += realpoisson_lpdf(to_row_vector(cell_values_matrix) | to_vector(obs_prob));
+  } else if(lflag_mn == 2) {
+    phi ~ cauchy(0, 3);
+    target += realnegbinom3_lpdf(to_row_vector(cell_values_matrix) | to_vector(obs_prob), to_vector(phi_matrix));
   }
 }
 generated quantities{
