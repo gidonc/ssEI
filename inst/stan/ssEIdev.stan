@@ -25,6 +25,7 @@ data{
  int<lower=0, upper=2> lflag_mn; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower=0, upper=1> lflag_inc_rm; //flag indicating whether to include row margins log-ratios in correlation matrix
+ int<lower=0, upper=1> lflag_predictors_rm; //flag indicating whether to have row margin log-ratios as predictors of row-to-column (unconstrained) simplex
 }
 transformed data{
   int K;
@@ -123,6 +124,7 @@ parameters{
  cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
+ matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
 
 }
 transformed parameters{
@@ -132,6 +134,7 @@ transformed parameters{
   array[n_areas] vector[K] eta_area;
   matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
   array[lflag_inc_rm * n_areas] simplex[lflag_inc_rm * R] theta_rm_area; // prob vector for row margins in each area
+  matrix[n_areas, K] mu_area_rm;
 
   if(has_onion == 1){
     L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix
@@ -152,13 +155,27 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
+
+  mu_area_rm = rep_matrix(0, n_areas, K);
+
+  if(lflag_predictors_rm == 1){
+      for (j in 1:n_areas){
+       for (k in 1:K){
+         mu_area_rm[j,k] = row_margins_lr[j] * betas_rm[k]';
+       }
+      }
+  }
+
+
+
+
   for(j in 1:n_areas){
     if(lflag_area_re == 0){
-      eta_area[j] = mu;
+      eta_area[j] = mu + mu_area_rm[j]';
     } else if(lflag_area_re == 1){
-        eta_area[j] = mu + sigma .*(alpha[j]);
+        eta_area[j] = mu + mu_area_rm[j]' + sigma .*(alpha[j]);
     } else if(lflag_area_re == 2 || lflag_area_re ==3){
-        eta_area[j] = mu + sigma .*(L * alpha[j]);
+        eta_area[j] = mu + mu_area_rm[j]' + sigma .*(L * alpha[j]);
     }
   }
 
@@ -196,11 +213,11 @@ model{
   for (j in 1:n_areas){
     alpha[j] ~ std_normal();
   }
-//
-//   for(k in 1:K){
-//       col(betas, k) ~ normal(0, 3);
-//   }
-//
+
+  for(k in 1:K_no_rm){
+      betas_rm[k] ~ normal(0, 3);
+  }
+
 
   for (j in 1:n_areas){
     if(lflag_inc_rm == 1){
