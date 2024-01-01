@@ -39,25 +39,47 @@ rmse <- function(actual, predicted){
 }
 
 
-mk_eval_plot <- function(cv_eval, rr_eval){
+mk_eval_plot <- function(cv_eval, rr_eval, cv_eval_stats, rr_eval_stats){
+
+  cv_eval_stats_long <- cv_eval_stats |>
+    pivot_longer(cols = - model) |>
+    group_by(model) |>
+    mutate(value = paste(name, round(value, 4)),
+           y = row_number() *.05 *max(cv_eval$mean))
+
   p1 <- cv_eval |>
     ggplot(aes(actual_cell_value, mean)) +
     facet_wrap(~model)+
     geom_point()+
+    geom_text(data = cv_eval_stats_long, x =.8*max(cv_eval$actual_cell_value), aes(label = value, y = y)) +
     theme_bw() +
     labs(x ="actual cell values",
          y = "model estimated cell values") +
     geom_abline(intercept = 0, slope = 1)
 
+  rr_eval_stats_long <- rr_eval_stats |>
+    pivot_longer(cols = - model) |>
+    group_by(model) |>
+    mutate(value = paste(name, round(value, 4)),
+           y = row_number() *.05 *max(rr_eval$mean))
+
   p2 <- rr_eval|>
+    filter(mean > -1) |>
     ggplot(aes(actual_row_rate, mean)) +
     facet_wrap(~model) +
     geom_point()+
+    geom_text(data = rr_eval_stats_long, x =.9, aes(y=y, label = value)) +
     theme_bw() +
     labs(x ="actual row proportions",
          y = "model estimated row proportions") +
     geom_abline(intercept = 0, slope = 1)
 
+
+  cv_eval_stats_f <- cv_eval |>
+    group_by(model, row_no, col_no) |>
+    summarise(cor = cor(actual_cell_value, mean)) |>
+    mutate(value = paste("cor", round(cor, 4)),
+           y = .05 *max(cv_eval$mean))
 
   p3 <- cv_eval |>
     ggplot(aes(actual_cell_value, mean)) +
@@ -66,12 +88,22 @@ mk_eval_plot <- function(cv_eval, rr_eval){
     theme_bw() +
     labs(x ="actual cell values",
          y = "model estimated cell values") +
+    geom_text(data = cv_eval_stats_f, x =.8*max(cv_eval$actual_cell_value), aes(label = value, y = y)) +
     geom_abline(intercept = 0, slope = 1)
 
+  rr_eval_stats_f <- rr_eval |>
+    filter(!is.na(actual_row_rate)) |>
+    group_by(model, row_no, col_no) |>
+    summarise(cor = cor(actual_row_rate, mean)) |>
+    mutate(value = paste("cor", round(cor, 4)),
+           y = .05 *max(rr_eval$mean, na.rm=TRUE))
+
   p4 <- rr_eval|>
+    filter(mean > -1) |>
     ggplot(aes(actual_row_rate, mean)) +
     facet_grid(row_no ~ col_no + model) +
     geom_point()+
+    geom_text(data = rr_eval_stats_f, x =.8*max(rr_eval$actual_row_rate, na.rm=TRUE), aes(label = value, y = y)) +
     theme_bw() +
     labs(x ="actual row proportions",
          y = "model estimated row proportions") +
@@ -113,7 +145,7 @@ mods_summary <- function(mod_list, actual_long){
                         actual_long = actual_long,
                         model_names = model_names)
 
-  eval_plots <- mk_eval_plot(cv_eval$cv_eval, rr_eval$rr_eval)
+  eval_plots <- mk_eval_plot(cv_eval$cv_eval, rr_eval$rr_eval, cv_eval$cv_eval_stats, rr_eval$rr_eval_stats)
 
 
   list(
