@@ -23,10 +23,20 @@ data{
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
  real<lower=0> lkj_param; // lkj param
  int<lower=0, upper=2> lflag_mn; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
- int<lower=0, upper=2> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2)
+ int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
+ int<lower=0, upper=1> lflag_inc_rm; //flag indicating whether to include row margins log-ratios in correlation matrix
 }
 transformed data{
-  int K = R*(C -1);
+  int K;
+  int K_no_rm;
+
+  if(lflag_inc_rm == 1){
+    K = (R * C) - 1;
+  } else {
+    K = R * (C - 1);
+  }
+  K_no_rm = R * (C - 1);
+
   array[2] vector[K -1] shapes = create_shapes(K, lkj_param);
   int free_R[n_areas];
   int free_C[n_areas];
@@ -34,8 +44,10 @@ transformed data{
   int phi_length;
   int has_area_re;
   int has_L;
+  int has_onion;
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
+
 
   // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
@@ -83,11 +95,18 @@ transformed data{
     has_area_re = 1;
   }
 
-  if(lflag_area_re == 3){
-    has_L = 0;
-  } else {
+  if(lflag_area_re == 2){
     has_L = 1;
+  } else {
+    has_L = 0;
   }
+
+  if(lflag_area_re == 3){
+    has_onion = 1;
+  } else {
+    has_onion = 0;
+  }
+
 
 
 
@@ -95,26 +114,31 @@ transformed data{
 parameters{
  real lambda_unpadded[n_param]; // sequential cell weights
  // simplex[C] theta[R]; // average row to column rates
- vector[R * (C-1)] mu;  // logit probability row mean to construct theta
+ vector[K] mu;  // logit probability row mean to construct theta
  vector<lower=0, upper = 1>[phi_length* R] phi;
 
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
- vector<lower=0>[has_area_re * R * (C - 1)] sigma; // scale of area variation from mu
- cholesky_factor_corr[has_L * R * (C-1)] L; // for modelling correlation matrix
- // matrix[R - 1, K] betas;
- // row_vector[choose(K, 2) - 1] l; // do NOT init with 0 for all elements
- // vector<lower = 0, upper = 1>[K - 1] R2; // first element is not really a R^2 but is on (0,1)
+ vector<lower=0>[has_area_re * K] sigma; // scale of area variation from mu
+ cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
+ row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
+ vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
+
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas, R] simplex[C] theta_area; // prob vector for each area
   array[n_areas] vector[K] eta_area;
-  // matrix[n_areas, K] mu_area;
-  // vector[n_areas, K] mu_area;
-  // matrix[K, K] L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix
+  matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
+  array[lflag_inc_rm * n_areas] simplex[lflag_inc_rm * R] theta_rm_area; // prob vector for row margins in each area
 
+  if(has_onion == 1){
+    L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix
+  }
+  if(has_L == 1){
+    L = L_a; // cholesky_factor corr matrix
+  }
 
   for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
@@ -128,24 +152,12 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
-
- // for (j in 1:n_areas){
- //    for (k in 1:K){
- //      mu_area[j,k] = row_margins_lr[j] * col(betas,k);
- //    }
- // }
-
-
-
-  // for(j in 1:n_areas){
-  //   eta_area[j] = mu + mu_area[j]' + sigma .*(alpha[j]');
-  // }
   for(j in 1:n_areas){
     if(lflag_area_re == 0){
       eta_area[j] = mu;
     } else if(lflag_area_re == 1){
         eta_area[j] = mu + sigma .*(alpha[j]);
-    } else if(lflag_area_re == 2){
+    } else if(lflag_area_re == 2 || lflag_area_re ==3){
         eta_area[j] = mu + sigma .*(L * alpha[j]);
     }
   }
@@ -155,6 +167,9 @@ transformed parameters{
     for(r in 1:R){
       theta_area[j, r] = simplex_constrain_softmax_lp(eta_area[j,((r-1)*(C -1) + 1):((r-1)*(C -1) + C -1) ]);
     }
+    if(lflag_inc_rm == 1){
+         theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, (R*(C - 1) + 1):K]);
+    }
   }
 
 }
@@ -162,11 +177,17 @@ model{
   matrix[non0_rm, C] obs_prob;
   matrix[non0_rm, C] cell_values_matrix;
   matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
-  int counter = 0;
+  int counter = 1;
+  matrix[lflag_inc_rm * n_areas, lflag_inc_rm * R] rm_prob;
+
   sigma ~ normal(0, 3);
 
   if(has_L == 1){
     L ~ lkj_corr_cholesky(lkj_param); // implies L*L'~ lkj_corr(lkj_param);
+  }
+  if(has_onion == 1){
+    l ~ std_normal();
+    R2 ~ beta(shapes[1], shapes[2]);
   }
 
 
@@ -182,9 +203,11 @@ model{
 //
 
   for (j in 1:n_areas){
+    if(lflag_inc_rm == 1){
+        rm_prob[j] = theta_rm_area[j]';
+    }
     for (r in 1:R){
       if(row_margins[j, r] > 0){
-        counter += 1;
         for (c in 1:C){
           cell_values_matrix[counter, c] = cell_values[j, r, c];
           if(lflag_mn ==0) {
@@ -196,7 +219,7 @@ model{
             obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j, r] - (theta_area[j,r,c]*row_margins[j, r] * phi[r]);
           }
       }
-
+      counter += 1;
     }
    }
   }
@@ -207,6 +230,9 @@ model{
   } else if(lflag_mn == 2) {
     phi ~ cauchy(0, 3);
     target += realnegbinom3_lpdf(to_row_vector(cell_values_matrix) | to_vector(obs_prob), to_vector(phi_matrix));
+  }
+  if(lflag_inc_rm){
+      target += realmultinom_lpdf(row_margins| rm_prob);
   }
 }
 generated quantities{
