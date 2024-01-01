@@ -1,3 +1,31 @@
+  real realpoisson_lpdf(row_vector x, vector lambda){
+    // pdf for poisson extended to positive real numbers
+    vector[num_elements(x)] lpdf = (to_vector(x) .* log(lambda)) - lambda - to_vector(lgamma(x + 1));
+    return sum(lpdf);
+  }
+
+    real realnegbinom2_lpdf(row_vector x, vector mu, vector psi){
+      vector[num_elements(x)] lpdf;
+      for (n in 1:num_elements(x)){
+        lpdf[n] = lchoose(x[n] + psi[n] - 1, x[n]) + x[n]*log(mu[n]) - x[n]*log(mu[n] + psi[n]) + psi[n]*log(psi[n]) - psi[n]*log(mu[n] + psi[n]);
+
+      }
+
+      return sum(lpdf);
+  }
+
+  real realnegbinom3_lpdf(row_vector x, vector alpha, vector theta){
+      vector[num_elements(x)] lpdf;
+      vector[num_elements(x)] lpdf2;
+      for (n in 1:num_elements(x)){
+        lpdf[n] = lgamma(x[n] + alpha[n]) - lgamma(alpha[n]) - lgamma(x[n] + 1) + x[n]*log(theta[n]) + alpha[n]*log(1 - theta[n]);
+
+      }
+
+      return sum(lpdf);
+  }
+
+
   real realmultinom_lpdf(matrix x, matrix theta){
     // pdf for multinomial extended to positive real numbers
     real  N[rows(x)];
