@@ -21,10 +21,12 @@ data{
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
 }
 transformed data{
-  int K = R*(C -1);
+  int K = R*(C -1); // size correlation matrix excluding the row margins
+  int K2 = (R * C) - 1; // size correlation matrix including the row margins
   int free_R[n_areas];
   int free_C[n_areas];
   real param_map[n_areas, R - 1, C - 1];
+  matrix[n_areas, R - 1] row_margins_lr;
   // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
   int n_param = 0;
@@ -55,11 +57,11 @@ transformed data{
 }
 parameters{
    real lambda_unpadded[n_param]; // sequential cell weights
-   array[n_areas] vector[K] alpha;    // logit column probabilities for area j and rows
-   vector[R * (C-1)] mu;              // logit probability row mean
+   array[n_areas] vector[K2] alpha;    // logit column probabilities for area j and rows
+   vector[K2] mu;              // logit probability row mean
    // corr_matrix[R * (C-1)] Omega;      // correlation matrix
-   cholesky_factor_corr[R * (C-1)] L; // instead of corr_matrix[R * (C-1)] Omega;
-   vector<lower=0>[R * (C -1)] sigma;  // scales
+   cholesky_factor_corr[K2] L; // instead of corr_matrix[R * (C-1)] Omega;
+   vector<lower=0>[K2] sigma;  // scales
    // real<lower=0> tau; //for scales
    // real mu_sigma; // for scales
 }
@@ -68,7 +70,8 @@ transformed parameters{
  real lambda[n_areas, R - 1, C -1]; // sequential cell weights padded with zeros
  real<lower=0> cell_values[n_areas, R, C];
  array[n_areas, R] simplex[C] theta_area; // prob vector for each area
- array[n_areas] vector[K] eta_area;
+ array[n_areas] simplex[R] theta_rm_area; // prob vector for row margins in each area
+ array[n_areas] vector[K2] eta_area;
  // corr_matrix[K] Omega;
  // cov_matrix[K] Sigma;       // covariance matrix
 
@@ -85,20 +88,6 @@ transformed parameters{
 
  cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
-  //  Omega = L * L';
-  //
-  //
-  // for (m in 1:K) {
-  //   Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];
-  // }
-  // for (m in 1:(K-1)) {
-  //   for (n in (m+1):K) {
-  //     Sigma[m, n] = sigma[m] * sigma[n] * Omega[m, n];
-  //     Sigma[n, m] = Sigma[m, n];
-  //   }
-  // }
-
-
   for(j in 1:n_areas){
     eta_area[j] = mu + sigma .*(L * alpha[j]);
   }
@@ -107,11 +96,13 @@ transformed parameters{
     for(r in 1:R){
       theta_area[j, r] = simplex_constrain_softmax_lp(eta_area[j,((r-1)*(C -1) + 1):((r-1)*(C -1) + C -1) ]);
     }
+    theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, (R*(C - 1) +1):K2]);
   }
 }
 model{
   matrix[n_areas*R, C] obs_prob;
   matrix[n_areas * R, C] cell_values_matrix;
+  matrix[n_areas, R] rm_prob;
 
   int counter = 1;
 
@@ -128,6 +119,7 @@ model{
   // tau ~ normal(0, 3);   // half-normal due to constraint - implemented instead of Cauchy to see if that helps with divergent transitions
   // sigma ~ lognormal(mu_sigma, tau);
     for (j in 1:n_areas){
+      rm_prob[j] = theta_rm_area[j]';
       for (r in 1:R){
         for(c in 1:C){
           cell_values_matrix[(j - 1)*R + r, c] = cell_values[j, r, c];
@@ -139,19 +131,20 @@ model{
     }
 
   target += realmultinom_lpdf(cell_values_matrix | obs_prob);
+  target += realmultinom_lpdf(row_margins| rm_prob);
 }
 generated quantities{
-  matrix[K, K] Omega;  // Correlation matrix
-  matrix[K, K] Sigma;  // Covariance matrix
+  matrix[K2, K2] Omega;  // Correlation matrix
+  matrix[K2, K2] Sigma;  // Covariance matrix
 
   #include include\generateratesandsummaries.stan
 
   Omega = L * L';
-  for (m in 1:K) {
+  for (m in 1:K2) {
     Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];
   }
-  for (m in 1:(K-1)) {
-    for (n in (m+1):K) {
+  for (m in 1:(K2-1)) {
+    for (n in (m+1):K2) {
       Sigma[m, n] = sigma[m] * sigma[n] * Omega[m, n];
       Sigma[n, m] = Sigma[m, n];
     }
