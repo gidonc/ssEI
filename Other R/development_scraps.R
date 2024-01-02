@@ -242,6 +242,7 @@ sencr[[5]] <- rstan::stan(file = flexmod.path,
                           cores = 4
 )
 
+sencr[[9]] <- ei_estimate(senc_rm, senc_cm, iter=10)
 
 st1 <- mods_summary(list("cont_nb" = sencr[[1]],
                          "contnb_rm" =sencr[[6]],
