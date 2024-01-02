@@ -23,7 +23,7 @@ ei_estimate <- function(row_margins, col_margins,
                         predictors_rm = FALSE,
                         prior_lkj = 2,
                         cores = 4,
-                        chains = 4
+                        chains = 4,
                         verbose = TRUE, ...){
 
   standata <- prep_data_stan(row_margins, col_margins)

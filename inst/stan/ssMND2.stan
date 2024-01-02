@@ -6,7 +6,7 @@
 functions{
   #include include\allocationfuns.stan
   #include include\realpdf.stan
-  #include lkjonionfun.stan
+  #include include\lkjonionfun.stan
 
 }
 data{
@@ -82,7 +82,7 @@ model{
      }
    }
   }
-  theta ~ dirichlet(theta_prior);
+  // theta ~ dirichlet(theta_prior);
   target += realmultinom_lpdf(cell_values_matrix | obs_prob);
 }
 generated quantities{

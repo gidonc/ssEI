@@ -3,16 +3,24 @@
     vector[num_elements(x)] lpdf = (to_vector(x) .* log(lambda)) - lambda - to_vector(lgamma(x + 1));
     return sum(lpdf);
   }
-
-    real realnegbinom2_lpdf(row_vector x, vector mu, vector psi){
+    real realnegbinom2_lpdf(vector x, real mu, real psi){
       vector[num_elements(x)] lpdf;
       for (n in 1:num_elements(x)){
-        lpdf[n] = lchoose(x[n] + psi[n] - 1, x[n]) + x[n]*log(mu[n]) - x[n]*log(mu[n] + psi[n]) + psi[n]*log(psi[n]) - psi[n]*log(mu[n] + psi[n]);
+        lpdf[n] = lchoose(x[n] + psi - 1, x[n]) + x[n]*log(mu) - x[n]*log(mu + psi) + psi*log(psi) - psi*log(mu + psi);
 
       }
+    return sum(lpdf);
+    }
 
-      return sum(lpdf);
-  }
+    // real realnegbinom2_lpdf(row_vector x, vector mu, vector psi){
+    //   vector[num_elements(x)] lpdf;
+    //   for (n in 1:num_elements(x)){
+    //     lpdf[n] = lchoose(x[n] + psi[n] - 1, x[n]) + x[n]*log(mu[n]) - x[n]*log(mu[n] + psi[n]) + psi[n]*log(psi[n]) - psi[n]*log(mu[n] + psi[n]);
+    //
+    //   }
+//
+//       return sum(lpdf);
+//   }
 
   real realnegbinom3_lpdf(row_vector x, vector alpha, vector theta){
       vector[num_elements(x)] lpdf;
