@@ -14,6 +14,15 @@ ei_error_index<- function(actual, predicted){
   50 * sum(abs(predicted - actual))/N
 }
 
+#' Mean Absolute Error
+#'
+#' @param actual the actual value of the cell
+#' @param predicted the predicted value of the cell
+#'
+#' @return Value of mean absolute error
+#' @export
+#'
+#' @examples
 mae <- function(actual, predicted){
   n <- length(actual)
   if(n == length(predicted)){
@@ -26,6 +35,15 @@ mae <- function(actual, predicted){
   res
 }
 
+#' Root Mean Square Error
+#'
+#' @param actual the actual value of the cell
+#' @param predicted the predicted value of the cell
+#'
+#' @return
+#' @export
+#'
+#' @examples
 rmse <- function(actual, predicted){
   n <- length(actual)
   if(n == length(predicted)){
