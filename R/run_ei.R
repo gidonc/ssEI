@@ -46,16 +46,7 @@ ei_estimate <- function(row_margins, col_margins,
 
   }
 
-  standata <- list(
-    n_areas = n_areas,
-    R = R,
-    C = C,
-    row_margins = row_margins,
-    col_margins = col_margins,
-    lkj_param = lkj_param
-  )
-
-  mod <- stanmodel$ssEIdev
+  mod <- stanmodels$ssEIdev
   if(verbose){
     print(paste("now running model", mod@model_name))
   }
