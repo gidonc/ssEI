@@ -2,9 +2,7 @@ Package: ssEI
 Title: Ecological Inference using Sequential Sampling
 Version: 0.0.0.9000
 Authors@R: 
-<<<<<<< HEAD
     person("Gidon", "Cohen", ,"gidon.cohen@durham.ac.uk", role = c("aut", "cre"),
->>>>>>> c3478121e2b89fa4e4b558c944f2498e4eb89d3a
            comment = c(ORCID = "YOUR-ORCID-ID"))
 Description: What the package does (one paragraph).
 License: `use_gpl3_license()`
