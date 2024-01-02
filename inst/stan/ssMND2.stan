@@ -6,7 +6,7 @@
 functions{
   #include include\allocationfuns.stan
   #include include\realpdf.stan
-  #include lkjonionfun.stan
+  #include include\lkjonionfun.stan
 
 }
 data{
