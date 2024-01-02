@@ -141,7 +141,7 @@ mk_eval_plot <- function(cv_eval, rr_eval, cv_eval_stats, rr_eval_stats){
 #' @param mod_list The models to evaluate in a list. Models can be the result of sequential sampling EI (from this package), or ei package or RxCEcolInf package.
 #' @param actual_long The data containing the actual cell values and actual row rates.
 #'
-#' @return
+#' @return List of values of summary performance.
 #' @export
 #'
 #' @examples
