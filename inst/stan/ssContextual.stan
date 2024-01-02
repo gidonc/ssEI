@@ -4,8 +4,8 @@
 // and models row to column rates with:
 
 functions{
-  #include include\allocationfuns.stan
-  #include include\realpdf.stan
+  #include include/allocationfuns.stan
+  #include include/realpdf.stan
 
   vector simplex_constrain_softmax_lp(vector v) {
      int K = size(v) + 1;
@@ -144,7 +144,7 @@ generated quantities{
   matrix[K, K] Omega;  // Correlation matrix
   matrix[K, K] Sigma;  // Covariance matrix
 
-  #include include\generateratesandsummaries.stan
+  #include include/generateratesandsummaries.stan
 
   Omega = L * L';
   for (m in 1:K) {

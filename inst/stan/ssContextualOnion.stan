@@ -6,8 +6,8 @@
 // onion method implementation described here: https://discourse.mc-stan.org/t/lkj-corr-lpdf-correlation-matrix-is-not-positive-definite/31995/5
 
 functions{
-  #include include\allocationfuns.stan
-  #include include\realpdf.stan
+  #include include/allocationfuns.stan
+  #include include/realpdf.stan
 
   vector simplex_constrain_softmax_lp(vector v) {
      int K = size(v) + 1;
@@ -180,7 +180,7 @@ generated quantities{
   matrix[K, K] Omega= multiply_lower_tri_self_transpose(L);  // Correlation matrix
   matrix[K, K] Sigma;  // Covariance matrix
 
-  #include include\generateratesandsummaries.stan
+  #include include/generateratesandsummaries.stan
 
   for (m in 1:K) {
     Sigma[m, m] = sigma[m] * sigma[m] * Omega[m, m];

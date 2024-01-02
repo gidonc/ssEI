@@ -12,9 +12,9 @@
 // The input data is a vector 'y' of length 'N'.
 
 functions{
-  #include include\allocationfuns.stan
-  #include include\realpdf.stan
-  #include include\lkjonionfun.stan
+  #include include/allocationfuns.stan
+  #include include/realpdf.stan
+  #include include/lkjonionfun.stan
 
   vector simplex_constrain_softmax_lp(vector v) {
      int K = size(v) + 1;
