@@ -4,9 +4,9 @@
 // and models row to column rates with: Multinomial-Dirichlet
 
 functions{
-  #include include\allocationfuns.stan
-  #include include\realpdf.stan
-  #include include\lkjonionfun.stan
+  #include include/allocationfuns.stan
+  #include include/realpdf.stan
+  #include include/lkjonionfun.stan
 
 }
 data{
@@ -87,6 +87,6 @@ model{
 }
 generated quantities{
 
-  #include include\generateratesandsummaries.stan
+  #include include/generateratesandsummaries.stan
 
 }

@@ -116,6 +116,17 @@ mk_eval_plot <- function(cv_eval, rr_eval, cv_eval_stats, rr_eval_stats){
 }
 
 
+#' Summarise EI Model Performance
+#'
+#' Summarise the performance of results from a set of Ecological Inference models against known actual cell and row rates (in long format).
+#'
+#' @param mod_list The models to evaluate in a list. Models can be the result of sequential sampling EI (from this package), or ei package or RxCEcolInf package.
+#' @param actual_long The data containing the actual cell values and actual row rates.
+#'
+#' @return
+#' @export
+#'
+#' @examples
 mods_summary <- function(mod_list, actual_long){
   model_names <- names(mod_list)
   n_mod <- length(mod_list)
