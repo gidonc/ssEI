@@ -32,7 +32,7 @@ ei_estimate <- function(row_margins, col_margins,
                            use_dist = use_dist,
                            area_re = area_re,
                            inc_rm = inc_rm,
-                           predictors_rm = predictors_fm
+                           predictors_rm = predictors_rm
                          ))
   standat <- modifyList(standata,
                         prep_priors_stan(
