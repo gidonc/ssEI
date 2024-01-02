@@ -197,7 +197,10 @@ model{
   int counter = 1;
   matrix[lflag_inc_rm * n_areas, lflag_inc_rm * R] rm_prob;
 
-  sigma ~ normal(0, 3);
+  if(has_area_re){
+    sigma ~ normal(0, 3);
+  }
+
 
   if(has_L == 1){
     L ~ lkj_corr_cholesky(lkj_param); // implies L*L'~ lkj_corr(lkj_param);
@@ -210,13 +213,18 @@ model{
 
 
   mu ~ normal(0, 5);      // vectorized, diffuse
-  for (j in 1:n_areas){
-    alpha[j] ~ std_normal();
+  if(has_area_re==1){
+      for (j in 1:n_areas){
+        alpha[j] ~ std_normal();
+      }
   }
 
-  for(k in 1:K_no_rm){
+  if(lflag_predictors_rm==1){
+    for(k in 1:K_no_rm){
       betas_rm[k] ~ normal(0, 3);
+    }
   }
+
 
 
   for (j in 1:n_areas){
