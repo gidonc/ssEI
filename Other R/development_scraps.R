@@ -64,19 +64,269 @@ senc_long <- senc2 |>
 ssei.path <- "C:/Users/gidon/OneDrive/Documents/ssEI"
 smod.path <- paste0(ssei.path, "/inst/stan/")
 mnb.path <- paste0(smod.path, "ssMNB.stan")
+mnb2.path <- paste0(smod.path, "ssMNB2.stan")
 co.new.path <- paste0(smod.path, "ssContextual2.stan")
-senc_mnb <- test_mnb <- rstan::stan(file = mnb.path,
-                                    data = test_for_stan,
+flexmod.path <- paste0(smod.path, "ssEIdev.stan")
+
+senc_for_stan <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 1
+)
+senc_for_stanp <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 0
+)
+senc_for_stannb <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2
+)
+
+senc_for_stannb_noarea_re <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =0,
+  lflag_inc_rm = 0,
+  lflag_rm_predictors = 0
+)
+sencd <- list()
+sencd[[1]]<-senc_for_stan_mn <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 1,
+  lflag_area_re =1,
+  lflag_inc_rm = 0,
+  lflag_predictors_rm = 0
+)
+sencd[[2]] <- senc_for_stan_p_inc_rm <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 0,
+  lflag_area_re =1,
+  lflag_inc_rm = 1,
+  lflag_predictors_rm = 0
+)
+
+sencd[[3]] <-senc_for_stannb_predictors_rm_noarea_re <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =0,
+  lflag_inc_rm = 0,
+  lflag_predictors_rm = 1
+)
+
+sencd[[4]] <- senc_for_stannb_contextual_nb <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =2,
+  lflag_inc_rm = 0,
+  lflag_predictors_rm = 0
+)
+sencd[[5]] <- senc_for_stannb_contextualonion_nb <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =3,
+  lflag_inc_rm = 0,
+  lflag_predictors_rm = 0
+)
+sencd[[6]] <- senc_for_stannb_contextual_inc_rm <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =2,
+  lflag_inc_rm = 1,
+  lflag_predictors_rm = 0
+)
+sencd[[7]] <- senc_for_stannb_contextual_rm_predictors <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =2,
+  lflag_inc_rm = 0,
+  lflag_predictors_rm = 1
+)
+sencd[[8]] <-senc_for_stannb_predictors_rm_noarea_re <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2,
+  lflag_area_re =0,
+  lflag_inc_rm = 0,
+  lflag_predictors_rm = 0
+)
+
+sencr<- list()
+
+sencr[[6]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[6]],
+                          cores = 4
+)
+sencr[[7]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[7]],
+                          cores = 4
+)
+
+sencr[[1]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[1]],
+                          cores = 4,
+                          )
+sencr[[4]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[4]],
+                          cores = 4
+)
+sencr[[3]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[3]],
+                          cores = 4
+)
+
+
+sencr[[2]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[2]],
+                          cores = 4
+)
+sencr[[5]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[5]],
+                          cores = 4
+)
+
+
+st1 <- mods_summary(list("cont_nb" = sencr[[1]],
+                         "contnb_rm" =sencr[[6]],
+                         "contnb_rm2" =sencr[[7]]
+                         ), senc2_flat |>
+                      rename(col_no=col, row_no=row,
+                             actual_cell_value = actual_value,
+                             actual_row_rate = actual_row_prop))
+
+st1$cv_eval
+st1$rr_eval
+
+st1$eval_plots$pf_rr
+st1$eval_plots$p_rr + geom_point(aes(colour=paste(row_names, col_names), size=actual_cell_value))
+st1$eval_plots$p_cv
+
+sencr[[3]] <- rstan::stan(file = flexmod.path,
+                          data = sencd[[3]],
+                          chains = 1,
+                          iter=10
+)
+
+
+
+senc_mnb <- rstan::stan(file = mnb.path,
+                                    data = senc_for_stan,
                                     cores = 4,
                                     control = list(
                                       "adapt_delta" = .9)
 )
 
+senc_mnb2_mn <- rstan::stan(file = mnb2.path,
+                        data = senc_for_stan,
+                        cores = 4
+)
+senc_mnb2_p <- rstan::stan(file = mnb2.path,
+                            data = senc_for_stanp,
+                            cores = 4
+)
+senc_mnb2_nb <- rstan::stan(file = mnb2.path,
+                            data = senc_for_stannb,
+                            cores = 4
+)
+senc_mnb2_nb2 <- rstan::stan(file = mnb2.path,
+                            data = senc_for_stannb_noarea_re,
+                            cores = 4
+)
+senc_flex_contextual_nb <- rstan::stan(file = flexmod.path,
+                             data = senc_for_stannb_contextual_nb,
+                             cores = 4
+)
+senc_flex_contextualonion_nb <- rstan::stan(file = flexmod.path,
+                                       data = senc_for_stannb_contextualonion_nb,
+                                       cores = 4
+)
+senc_flex_contextual_nb_inc_rm <- rstan::stan(file = flexmod.path,
+                                            data = senc_for_stannb_contextual_inc_rm,
+                                            cores = 4
+)
 senc_co_new <- test_mnb <- rstan::stan(file = co.new.path,
                                     data = senc_for_stan,
                                     cores = 4,
                                     iter =50)
 
+st1 <- mods_summary(list("mnb2_mn" = senc_mnb2_mn,
+                         "mnb2_p" = senc_mnb2_p,
+                         "mnb2_nb" = senc_mnb2_nb,
+                         "mnb2_nb_nore" = senc_mnb2_nb2,
+                         "cont_nb" = senc_flex_contextual_nb), senc2_flat |>
+                      rename(col_no=col, row_no=row,
+                             actual_cell_value = actual_value,
+                             actual_row_rate = actual_row_prop))
+
+st1 <- mods_summary(list("cont_nb" = senc_flex_contextual_nb,
+                         "contonion_nb" =senc_flex_contextualonion_nb), senc2_flat |>
+                      rename(col_no=col, row_no=row,
+                             actual_cell_value = actual_value,
+                             actual_row_rate = actual_row_prop))
+
+st1$cv_eval
+st1$rr_eval
+
+st1$eval_plots$pf_rr
+st1$eval_plots$p_rr + geom_point(aes(colour=paste(row_names, col_names), size=actual_cell_value))
+st1$eval_plots$p_cv
 
 senc_average <- ei_estimate(senc_rm, senc_cm, model="average")
 senc_contextual <- ei_estimate(senc_rm, senc_cm)
@@ -1217,3 +1467,17 @@ data.frame(actual=actualsigmal$sd, old = aa_s, new=bb_s[1:6]) |>
   geom_point(colour="blue", aes(actual, new))+
   geom_abline(intercept=0, slope =1)+
   ylim(0,1.5)+xlim(0,1.5)
+
+
+## ----testnegbinom-----
+
+data("st_louis_census", package = "bayesjackman")
+
+negbin.dat<- within(list(), {
+  y = st_louis_census$i8094
+  N <- length(y)}))
+nbtest.path <- paste0 (smod.path, "test_negbinom.stan")
+nbt <- rstan::stan(nbtest.path,
+                   data = negbin.dat)
+library(rstanarm)
+negbin_fit2 <- rstanarm::stan_glm.nb(i8094 ~ 1, data = st_louis_census)
