@@ -160,7 +160,7 @@ transformed parameters{
 
   if(lflag_predictors_rm == 1){
       for (j in 1:n_areas){
-       for (k in 1:K){
+       for (k in 1:K_no_rm){
          mu_area_rm[j,k] = row_margins_lr[j] * betas_rm[k]';
        }
       }
