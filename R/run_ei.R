@@ -3,7 +3,7 @@
 #' @param row_margins A data frame with the row margins data, with one row for each area, and with columns giving the row margins in the area.
 #' @param col_margins A data frame with the column margins data, with one row for each area, and with columns giving the column margins in the area.
 #' @param use_dist Which distribution to use to model the cell values relative to the mean estimate, options are: pois (Poisson), negbinom (Negative Binomial), multinom (Multinomial), multinomdirich (Multinomial Dirichlet - not yet implemented). Note Poisson/Multinomial and Negative Binomial/Multinomial Dirichlet are alternative paramaterizations of the same models.
-#' @param area_re Are there a random effects in the model of the area means? Options are: none, normal, multinormal
+#' @param area_re Are there a random effects in the model of the area means? Options are: none, normal, multinormal, multinormal2 (multinormal uses a non-centered paramaterization, multinormal2 uses an onion construction of the correlation matrix and a non-centred paramaterization)
 #' @param inc_rm Include row margin log-ratios in the random effects model of the area means. Options are TRUE, FALSE
 #' @param predictors_rm Include row margin log-ratios in the model of area means. Options are TRUE, FALSE
 #' @param prior_lkj Prior of the LKJ correlation matrix. Parameter must be real number greater than zero, where 1 is uniform across correlations.

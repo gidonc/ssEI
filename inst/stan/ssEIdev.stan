@@ -26,10 +26,14 @@ data{
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower=0, upper=1> lflag_inc_rm; //flag indicating whether to include row margins log-ratios in correlation matrix
  int<lower=0, upper=1> lflag_predictors_rm; //flag indicating whether to have row margin log-ratios as predictors of row-to-column (unconstrained) simplex
+ int<lower=0, upper=1> lflag_mod_cols; // flag indicating whether to model column proportions as well as row proportions;
 }
 transformed data{
   int K;
   int K_no_rm;
+  int K_c;
+
+  K_c = C * (R - 1);
 
   if(lflag_inc_rm == 1){
     K = (R * C) - 1;
@@ -42,6 +46,7 @@ transformed data{
   int free_R[n_areas];
   int free_C[n_areas];
   int non0_rm;
+  int non0_cm;
   int phi_length;
   int has_area_re;
   int has_L;
@@ -78,6 +83,7 @@ transformed data{
     n_param += max(0, (free_R[j] - 1) * (free_C[j] - 1));
   }
   non0_rm = sum(free_R);
+  non0_cm = sum(free_C);
 
   for (j in 1:n_areas){
     for(r in 1:(R - 1)){
@@ -116,11 +122,14 @@ parameters{
  real lambda_unpadded[n_param]; // sequential cell weights
  // simplex[C] theta[R]; // average row to column rates
  vector[K] mu;  // logit probability row mean to construct theta
+ vector[lflag_mod_cols * K_c] mu_c;  // logit probability row mean to construct theta
  vector<lower=0, upper = 1>[phi_length* R] phi;
 
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
- vector<lower=0>[has_area_re * K] sigma; // scale of area variation from mu
+ array[lflag_mod_cols*n_areas] vector[lflag_mod_cols*K_c] alpha_c;    // logit column probabilities for area j and cols
+ vector<lower=0>[has_area_re * K] sigma; // scale of area row variation from mu
+ vector<lower=0>[lflag_mod_cols * K_c] sigma_c; //scale of area col variation from mu_c
  cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -130,8 +139,10 @@ parameters{
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
-  array[n_areas, R] simplex[C] theta_area; // prob vector for each area
+  array[n_areas, R] simplex[C] theta_area; // prob row vector for each area
+  array[n_areas, C] simplex[R] theta_c_area; // prob col vector for each area
   array[n_areas] vector[K] eta_area;
+  array[lflag_mod_cols*n_areas] vector[lflag_mod_cols*K_c] eta_c_area;
   matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
   array[lflag_inc_rm * n_areas] simplex[lflag_inc_rm * R] theta_rm_area; // prob vector for row margins in each area
   matrix[n_areas, K] mu_area_rm;
@@ -178,11 +189,20 @@ transformed parameters{
         eta_area[j] = mu + mu_area_rm[j]' + sigma .*(L * alpha[j]);
     }
   }
+  if(lflag_mod_cols == 1){
+    for(j in 1:n_areas){
+      eta_c_area[j] = mu_c + sigma_c .*(alpha_c[j]);
+    }
+  }
+
 
 
   for (j in 1:n_areas) {
     for(r in 1:R){
       theta_area[j, r] = simplex_constrain_softmax_lp(eta_area[j,((r-1)*(C -1) + 1):((r-1)*(C -1) + C -1) ]);
+    }
+    for(c in 1:C){
+      theta_c_area[j, c] = simplex_constrain_softmax_lp(eta_c_area[j, ((c - 1)*(R - 1) + 1):((c-1)*(R -1)+ C - 1)]);
     }
     if(lflag_inc_rm == 1){
          theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, (R*(C - 1) + 1):K]);
@@ -193,10 +213,12 @@ transformed parameters{
 model{
   matrix[non0_rm, C] obs_prob;
   matrix[non0_rm, C] cell_values_matrix;
+  matrix[lflag_mod_cols*non0_rm, lflag_mod_cols*C] cell_values_matrix_c;
   matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
   int counter = 1;
+  int counter_c = 1;
   matrix[lflag_inc_rm * n_areas, lflag_inc_rm * R] rm_prob;
-
+  matrix[lflag_mod_cols * non0_cm, lflag_mod_cols * R] obs_prob_c;
   if(has_area_re){
     sigma ~ normal(0, 3);
   }
@@ -247,6 +269,17 @@ model{
       counter += 1;
     }
    }
+   if(lflag_mod_cols == 1){
+     for (c in 1:C){
+       if(col_margins[j, c] > 0){
+         for(r in 1:R){
+           cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
+           obs_prob_c[counter_c, r] = theta_c_area[j, r, c] * col_margins[j, c];
+         }
+        }
+      }
+    }
+
   }
   if(lflag_dist == 1){
     target += realmultinom_lpdf(cell_values_matrix | obs_prob);
@@ -258,6 +291,14 @@ model{
   }
   if(lflag_inc_rm){
       target += realmultinom_lpdf(row_margins| rm_prob);
+  }
+  if(lflag_mod_cols==1){
+    target +=realmultinom_lpdf(cell_values_matrix_c| obs_prob_c);
+    sigma_c ~ normal(0, 3);
+    mu_c ~ normal(0, 5);      // vectorized, diffuse
+    for (j in 1:n_areas){
+      alpha_c[j] ~ std_normal();
+    }
   }
 }
 generated quantities{
