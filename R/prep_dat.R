@@ -23,8 +23,8 @@ prep_options_stan <- function(use_dist,
   if(use_dist == "multinomdirch"){
     stop("multinomdirich not yet implemented. Use negbinom instead.")
   }
-  if(!area_re %in% c("none", "normal", "multinormal")){
-    stop("area_re must be one of: none, normal, multinormal")
+  if(!area_re %in% c("none", "normal", "multinormal", "multinormal2")){
+    stop("area_re must be one of: none, normal, multinormal", "multinormal2")
   }
   if(!inc_rm %in% c(TRUE, FALSE)){
     stop("inc_rm must be one of: TRUE, FALSE")
@@ -43,7 +43,8 @@ prep_options_stan <- function(use_dist,
     lflag_area_re = dplyr::case_when(
       area_re == "none" ~ 0,
       area_re == "normal" ~ 1,
-      area_re == "multinormal" ~ 2
+      area_re == "multinormal" ~ 2,
+      area_re == "multinormal2" ~3
     ),
     lflag_inc_rm = dplyr::case_when(
       inc_rm == FALSE ~ 0,
