@@ -32,7 +32,8 @@ prep_options_stan <- function(use_dist,
   }
   if(!predictors_rm %in% c(TRUE, FALSE)){
     stop("predictors_rm must be one of: TRUE, FALSE")
-  }  if(!predictors_cm %in% c(TRUE, FALSE)){
+  }
+  if(!predictors_cm %in% c(TRUE, FALSE)){
     stop("predictors_cm must be one of: TRUE, FALSE")
   }
 
