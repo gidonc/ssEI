@@ -6,6 +6,7 @@
 #' @param area_re Are there a random effects in the model of the area means? Options are: none, normal, multinormal, multinormal2 (multinormal uses a non-centered paramaterization, multinormal2 uses an onion construction of the correlation matrix and a non-centred paramaterization)
 #' @param inc_rm Include row margin log-ratios in the random effects model of the area means. Options are TRUE, FALSE
 #' @param predictors_rm Include row margin log-ratios in the model of area means. Options are TRUE, FALSE
+#' @param predictors_cm Include col margin log-ratios in the model of area means. Options are TRUE, FALSE
 #' @param prior_lkj Prior of the LKJ correlation matrix. Parameter must be real number greater than zero, where 1 is uniform across correlations.
 #' @param verbose Print some information about the data and model before running
 #' @param cores To be passed to rstan::sampling
@@ -21,6 +22,7 @@ ei_estimate <- function(row_margins, col_margins,
                         area_re = "none",
                         inc_rm = FALSE,
                         predictors_rm = FALSE,
+                        predictors_cm = FALSE,
                         prior_lkj = 2,
                         cores = 4,
                         chains = 4,
@@ -32,7 +34,8 @@ ei_estimate <- function(row_margins, col_margins,
                            use_dist = use_dist,
                            area_re = area_re,
                            inc_rm = inc_rm,
-                           predictors_rm = predictors_rm
+                           predictors_rm = predictors_rm,
+                           predictors_cm = predictors_cm
                          ))
   standat <- modifyList(standata,
                         prep_priors_stan(

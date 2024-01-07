@@ -16,7 +16,8 @@ prep_data_stan <- function(row_margins, col_margins){
 prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
-                              predictors_rm){
+                              predictors_rm,
+                              predictors_cm){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
   }
@@ -31,6 +32,8 @@ prep_options_stan <- function(use_dist,
   }
   if(!predictors_rm %in% c(TRUE, FALSE)){
     stop("predictors_rm must be one of: TRUE, FALSE")
+  }  if(!predictors_cm %in% c(TRUE, FALSE)){
+    stop("predictors_cm must be one of: TRUE, FALSE")
   }
 
   list(
@@ -53,6 +56,10 @@ prep_options_stan <- function(use_dist,
     lflag_predictors_rm = dplyr::case_when(
       predictors_rm == FALSE ~ 0,
       predictors_rm == TRUE ~ 1
+    ),
+    lflag_predictors_cm = dplyr::case_when(
+      predictors_cm == FALSE ~ 0,
+      predictors_cm == TRUE ~ 1
     )
   )
 }

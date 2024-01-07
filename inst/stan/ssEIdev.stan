@@ -26,6 +26,8 @@ data{
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower=0, upper=1> lflag_inc_rm; //flag indicating whether to include row margins log-ratios in correlation matrix
  int<lower=0, upper=1> lflag_predictors_rm; //flag indicating whether to have row margin log-ratios as predictors of row-to-column (unconstrained) simplex
+  int<lower=0, upper=1> lflag_predictors_cm; //flag indicating whether to have col margin log-ratios as predictors of row-to-column (unconstrained) simplex
+
 }
 transformed data{
   int K;
@@ -48,6 +50,7 @@ transformed data{
   int has_onion;
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
+  matrix[n_areas, C - 1] col_margins_lr;
 
 
   // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
@@ -81,7 +84,10 @@ transformed data{
 
   for (j in 1:n_areas){
     for(r in 1:(R - 1)){
-      row_margins_lr[j, r] = log((row_margins[j, r]+ .5)/(sum(row_margins[r, (r + 1):R]) + .5));
+      row_margins_lr[j, r] = log((row_margins[j, r]+ .5)/(row_margins[j, R] + .5));
+    }
+    for(c in 1:(C - 1)){
+      col_margins_lr[j, c] = log((col_margins[j, c]+ .5)/(col_margins[j, C] + .5));
     }
   }
   if(lflag_dist==2){
@@ -125,6 +131,7 @@ parameters{
  row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
  matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
+ matrix[lflag_predictors_cm * K_no_rm, lflag_predictors_cm * (C - 1)] betas_cm;
 
 }
 transformed parameters{
@@ -165,7 +172,15 @@ transformed parameters{
        }
       }
   }
-
+  if(lflag_predictors_cm == 1){
+      for (j in 1:n_areas){
+        for(r in 1:R){
+          for (c in 1:(C-1)){
+            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[r, c] * col_margins_lr[j, c];
+          }
+        }
+      }
+  }
 
 
 
