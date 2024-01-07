@@ -202,7 +202,7 @@ transformed parameters{
       theta_area[j, r] = simplex_constrain_softmax_lp(eta_area[j,((r-1)*(C -1) + 1):((r-1)*(C -1) + C -1) ]);
     }
     for(c in 1:C){
-      theta_c_area[j, c] = simplex_constrain_softmax_lp(eta_c_area[j, ((c - 1)*(R - 1) + 1):((c-1)*(R -1)+ R - 1)]);
+      theta_c_area[j, c] = simplex_constrain_softmax_lp(eta_c_area[j, ((c - 1)*(R - 1) + 1):((c-1)*(R -1)+ C - 1)]);
     }
     if(lflag_inc_rm == 1){
          theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, (R*(C - 1) + 1):K]);
@@ -213,7 +213,7 @@ transformed parameters{
 model{
   matrix[non0_rm, C] obs_prob;
   matrix[non0_rm, C] cell_values_matrix;
-  matrix[lflag_mod_cols*non0_cm, lflag_mod_cols*R] cell_values_matrix_c;
+  matrix[lflag_mod_cols*non0_rm, lflag_mod_cols*C] cell_values_matrix_c;
   matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
   int counter = 1;
   int counter_c = 1;
@@ -274,9 +274,8 @@ model{
        if(col_margins[j, c] > 0){
          for(r in 1:R){
            cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
-           obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
+           obs_prob_c[counter_c, r] = theta_c_area[j, r, c] * col_margins[j, c];
          }
-         counter_c += 1;
         }
       }
     }
@@ -294,7 +293,7 @@ model{
       target += realmultinom_lpdf(row_margins| rm_prob);
   }
   if(lflag_mod_cols==1){
-    target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
+    target +=realmultinom_lpdf(cell_values_matrix_c| obs_prob_c);
     sigma_c ~ normal(0, 3);
     mu_c ~ normal(0, 5);      // vectorized, diffuse
     for (j in 1:n_areas){
