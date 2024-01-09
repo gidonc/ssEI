@@ -176,7 +176,7 @@ transformed parameters{
       for (j in 1:n_areas){
         for(r in 1:R){
           for (c in 1:(C-1)){
-            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[c];
+            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[c]*col_margins_lr[j, c];
           }
         }
       }
