@@ -70,6 +70,8 @@ prep_priors_stan <- function(prior_lkj){
 }
 
 prep_king <- function(rm, cm){
+  names(rm) <- paste0("row_no.", 1:ncol(rm))
+  names(cm) <- paste0("col_no.", 1:ncol(cm))
   formula <- as.formula(paste0("cbind(", paste(names(cm), collapse = ","), ") ~ cbind(", paste(names(rm), collapse=","), ")"))
   list(
     formula = formula,
