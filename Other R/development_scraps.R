@@ -61,7 +61,7 @@ senc_long <- senc2 |>
   dplyr::mutate(actual_row_prop = actual_cell_value/sum(actual_cell_value))
 
 
-ssei.path <- "C:/Users/gidon/OneDrive/Documents/ssEI"
+ssei.path <- "C:/Users/gidon/Documents"
 smod.path <- paste0(ssei.path, "/inst/stan/")
 mnb.path <- paste0(smod.path, "ssMNB.stan")
 mnb2.path <- paste0(smod.path, "ssMNB2.stan")
