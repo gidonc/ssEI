@@ -132,7 +132,9 @@ parameters{
  row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
  matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
- vector[lflag_predictors_cm * (C - 1)] betas_cm;
+ matrix[lflag_predictors_cm * n_areas, lflag_predictors_cm * (C - 1)] betas_cm;
+ vector[lflag_predictors_cm * (C - 1)] mu_betas_cm;
+ vector<lower=0>[lflag_predictors_cm * (C - 1)] sigma_betas_cm;
 
 }
 transformed parameters{
@@ -177,7 +179,7 @@ transformed parameters{
       for (j in 1:n_areas){
         for(r in 1:R){
           for (c in 1:(C-1)){
-            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[c]*col_margins_pd[j,c];
+            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[j, c];
           }
         }
       }
@@ -243,7 +245,11 @@ model{
 
 
   if(lflag_predictors_cm==1){
-    betas_cm ~ normal(0, 3);
+    for(j in 1:n_areas){
+      betas_cm[j] ~ normal(mu_betas_cm, sigma_betas_cm);
+    }
+    mu_betas_cm ~ normal(0, 3);
+    sigma_betas_cm ~ normal(0, 3);
   }
 
 
