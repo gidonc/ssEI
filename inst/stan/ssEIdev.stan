@@ -51,7 +51,7 @@ transformed data{
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
   matrix[n_areas, C - 1] col_margins_lr;
-
+  matrix[n_areas, C - 1] col_margins_pd;
 
   // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
@@ -88,6 +88,7 @@ transformed data{
     }
     for(c in 1:(C - 1)){
       col_margins_lr[j, c] = log((col_margins[j, c + 1]+ .5)/(col_margins[j, 1] + .5));
+      col_margins_pd[j, c] = (col_margins[j, c + 1] - col_margins[j, 1])/sum(col_margins[j,1:C]);
     }
   }
   if(lflag_dist==2){
@@ -176,7 +177,7 @@ transformed parameters{
       for (j in 1:n_areas){
         for(r in 1:R){
           for (c in 1:(C-1)){
-            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[c]*col_margins_lr[j, c];
+            mu_area_rm[j, (r - 1)*(C - 1) + c] += betas_cm[c]*col_margins_pd[j,c];
           }
         }
       }
