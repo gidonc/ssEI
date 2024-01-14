@@ -122,14 +122,23 @@ parameters{
  real lambda_unpadded[n_param]; // sequential cell weights
  // simplex[C] theta[R]; // average row to column rates
  // vector[K] mu;  // logit probability row mean to construct theta
- vector[lflag_mod_cols * K_c] mu_c;  // logit probability row mean to construct theta
+ // vector[lflag_mod_cols * K_c] mu_c;  // logit probability row mean to construct theta
  // vector<lower=0, upper = 1>[phi_length* R] phi;
 
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  // array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
- array[lflag_mod_cols*n_areas] vector[lflag_mod_cols*K_c] alpha_c;    // logit column probabilities for area j and cols
+ array[lflag_mod_cols*n_areas] matrix[lflag_mod_cols*(R - 1), lflag_mod_cols * (C - 1)] area_cell_effect_raw;    // logit column probabilities for area j and cols
+ real area_effect[n_areas*lflag_mod_cols];
+ matrix[n_areas*lflag_mod_cols, lflag_mod_cols*(R - 1)] area_row_effect_raw;
+ matrix[n_areas*lflag_mod_cols, lflag_mod_cols*(C - 1)] area_col_effect_raw;
+ matrix[lflag_mod_cols*(R - 1), lflag_mod_cols*(C - 1)] cell_effect_raw;
+ vector[C - 1] mu_ce;
+ vector[R - 1] mu_re;
+ vector<lower=0>[C - 1] sigma_ce;
+ vector<lower=0>[R - 1] sigma_re;
+
  // vector<lower=0>[has_area_re * K] sigma; // scale of area row variation from mu
- vector<lower=0>[lflag_mod_cols * K_c] sigma_c; //scale of area col variation from mu_c
+ vector<lower=0>[lflag_mod_cols * (R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -140,9 +149,16 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   // array[n_areas, R] simplex[C] theta_area; // prob row vector for each area
-  array[n_areas, C] simplex[R] theta_c_area; // prob col vector for each area
+  // array[n_areas, C] simplex[R] theta_c_area; // prob col vector for each area
+  real log_e_cell_value[n_areas*lflag_mod_cols, lflag_mod_cols*R, lflag_mod_cols*C];
+  matrix[n_areas*lflag_mod_cols, lflag_mod_cols*R] area_row_effect;
+  matrix[n_areas*lflag_mod_cols, lflag_mod_cols*C] area_col_effect;
+  matrix[lflag_mod_cols*R, lflag_mod_cols *C] cell_effect;
+  array[lflag_mod_cols*n_areas] matrix[lflag_mod_cols*R, lflag_mod_cols * C] area_cell_effect;    // logit column probabilities for area j and cols
+
+
   // array[n_areas] vector[K] eta_area;
-  array[lflag_mod_cols*n_areas] vector[lflag_mod_cols*K_c] eta_c_area;
+  // array[lflag_mod_cols*n_areas] vector[lflag_mod_cols*K_c] eta_c_area;
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
   // array[lflag_inc_rm * n_areas] simplex[lflag_inc_rm * R] theta_rm_area; // prob vector for row margins in each area
   // matrix[n_areas, K] mu_area_rm;
@@ -190,24 +206,48 @@ transformed parameters{
   //   }
   // }
   if(lflag_mod_cols == 1){
+  cell_effect = rep_matrix(0.0, R, C);
+  cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
+
+  for(j in 1:n_areas){
+    area_cell_effect[j] = rep_matrix(0.0, R, C);
+    area_cell_effect[j, 1:(R - 1), 1:(C - 1)] = area_cell_effect_raw[j];
+    for(r in 1:(R - 1)){
+      for(c in 1:(C - 1)){
+
+      }
+    }
+  }
+
     for(j in 1:n_areas){
-      eta_c_area[j] = mu_c + sigma_c .*(alpha_c[j]);
+      // eta_c_area[j] = mu_c + sigma_c .*(alpha_c[j]);
+      area_col_effect[j, 1:(C - 1)] = area_col_effect_raw[j];
+      area_col_effect[j, C] = -1 * sum(area_col_effect_raw[j]);
+      area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
+      area_row_effect[j, R] = -1 * sum(area_col_effect_raw[j]);
+
+      for(r in 1:R){
+
+        for(c in 1:C){
+          log_e_cell_value[j, r, c] = area_effect[j] + area_row_effect[j, r] + area_col_effect[j, c] + cell_effect[r, c] + area_cell_effect[j, r, c];
+        }
+      }
     }
   }
 
 
 
-  for (j in 1:n_areas) {
+  // for (j in 1:n_areas) {
     // for(r in 1:R){
     //   theta_area[j, r] = simplex_constrain_softmax_lp(eta_area[j,((r-1)*(C -1) + 1):((r-1)*(C -1) + C -1) ]);
     // }
-    for(c in 1:C){
-      theta_c_area[j, c] = simplex_constrain_softmax_lp(eta_c_area[j, ((c - 1)*(R - 1) + 1):((c-1)*(R -1)+ R - 1)]);
-    }
+    // for(c in 1:C){
+      // theta_c_area[j, c] = simplex_constrain_softmax_lp(eta_c_area[j, ((c - 1)*(R - 1) + 1):((c-1)*(R -1)+ R - 1)]);
+    // }
     // if(lflag_inc_rm == 1){
     //      theta_rm_area[j] = simplex_constrain_softmax_lp(eta_area[j, (R*(C - 1) + 1):K]);
     // }
-  }
+  // }
 
 }
 model{
@@ -274,7 +314,8 @@ model{
        if(col_margins[j, c] > 0){
          for(r in 1:R){
            cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
-           obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
+           // obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
+           obs_prob_c[counter_c, r] = exp(log_e_cell_value[j, r, c]);
          }
          counter_c += 1;
         }
@@ -295,10 +336,19 @@ model{
   // }
   if(lflag_mod_cols==1){
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
-    sigma_c ~ normal(0, 3);
-    mu_c ~ normal(0, 5);      // vectorized, diffuse
+    // sigma_c ~ normal(0, 10);
+    sigma_c ~ normal(0, 10);
+    mu_ce~ normal(0, 5);
+    mu_re~ normal(0, 5);
+    sigma_ce~normal(0, 5);
+    sigma_re~normal(0, 5);
+    // mu_c ~ normal(0, 20);      // vectorized, diffuse
+    to_vector(cell_effect_raw) ~ normal(0, 10);
     for (j in 1:n_areas){
-      alpha_c[j] ~ std_normal();
+      // alpha_c[j] ~ std_normal();
+      to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
+      area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
+      area_col_effect_raw[j] ~ normal(mu_ce, sigma_ce);
     }
   }
 }
