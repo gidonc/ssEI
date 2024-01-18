@@ -16,7 +16,6 @@ prep_data_stan <- function(row_margins, col_margins){
 prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
-                              mod_cols ,
                               predictors_rm,
                               vary_sd
                               ){
@@ -31,9 +30,6 @@ prep_options_stan <- function(use_dist,
   }
   if(!inc_rm %in% c(TRUE, FALSE)){
     stop("inc_rm must be one of: TRUE, FALSE")
-  }
-  if(!mod_cols %in% c(TRUE, FALSE)){
-    stop("mod_cols must be one of: TRUE, FALSE")
   }
   if(!predictors_rm %in% c(TRUE, FALSE)){
     stop("predictors_rm must be one of: TRUE, FALSE")
@@ -58,10 +54,6 @@ prep_options_stan <- function(use_dist,
     lflag_inc_rm = dplyr::case_when(
       inc_rm == FALSE ~ 0,
       inc_rm == TRUE ~ 1
-    ),
-    lflag_mod_cols = dplyr::case_when(
-      mod_cols == FALSE ~ 0,
-      mod_cols == TRUE ~ 1
     ),
     lflag_predictors_rm = dplyr::case_when(
       predictors_rm == FALSE ~ 0,
