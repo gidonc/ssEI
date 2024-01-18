@@ -246,12 +246,12 @@ model{
   // }
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
     // sigma_c ~ normal(0, 10);
-    sigma_c_raw ~ normal(0, 10);
+    sigma_c_raw ~ normal(0, 5);
     mu_ce~ normal(0, 5);
     mu_re~ normal(0, 5);
     sigma_ce~normal(0, 5);
     sigma_re~normal(0, 5);
-    to_vector(cell_effect_raw) ~ normal(0, 10);
+    to_vector(cell_effect_raw) ~ normal(0, 5);
     for (j in 1:n_areas){
       to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
       area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
