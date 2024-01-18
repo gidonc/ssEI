@@ -48,8 +48,12 @@ ei_estimate <- function(row_margins, col_margins,
     print(standata$n_areas)
 
   }
+  if(mod_cols){
+    mod <- stanmodels$ssEIdev
+  } else{
+    mod <- stanmodels$ssEIrow
+  }
 
-  mod <- stanmodels$ssEIdev
   if(verbose){
     print(paste("now running model", mod@model_name))
   }
