@@ -67,7 +67,7 @@ prep_options_stan <- function(use_dist,
       predictors_rm == FALSE ~ 0,
       predictors_rm == TRUE ~ 1
     ),
-    lflag_sigma_varies = dplyr::case_when(
+    lflag_vary_sd = dplyr::case_when(
       vary_sd == TRUE ~ 1,
       vary_sd == FALSE ~ 0
     )
