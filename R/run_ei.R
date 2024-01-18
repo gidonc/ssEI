@@ -49,7 +49,7 @@ ei_estimate <- function(row_margins, col_margins,
 
   }
   if(mod_cols){
-    mod <- stanmodels$ssEIdev
+    mod <- stanmodels$ssEItable
   } else{
     mod <- stanmodels$ssEIrow
   }
