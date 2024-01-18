@@ -32,6 +32,8 @@ transformed data{
   int K_c;
 
   K_c = C * (R - 1);
+  K = R * (C - 1);
+  K_no_rm = R * (C - 1);
 
   // if(lflag_inc_rm == 1){
   //   K = (R * C) - 1;
@@ -51,7 +53,6 @@ transformed data{
   int has_onion;
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
-
 
   // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
@@ -132,7 +133,7 @@ parameters{
  vector<lower=0>[C - 1] sigma_ce;
  vector<lower=0>[R - 1] sigma_re;
 
- // vector<lower=0>[lflag_mod_cols * (R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
+ // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
  real<lower=0> sigma_c_raw[(lflag_vary_sd ==1) ? (R - 1) * (C - 1) : 1]; //scale of area col variation from mu_c
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
@@ -202,6 +203,7 @@ transformed parameters{
     }
 
 
+
 }
 model{
   matrix[non0_cm, R] cell_values_matrix_c;
@@ -245,7 +247,7 @@ model{
   //     target += realmultinom_lpdf(row_margins| rm_prob);
   // }
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
-    // sigma_c ~ normal(0, 10);
+    // sigma_c ~ normal(0, 5);
     sigma_c_raw ~ normal(0, 5);
     mu_ce~ normal(0, 5);
     mu_re~ normal(0, 5);
