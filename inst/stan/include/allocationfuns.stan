@@ -89,23 +89,30 @@
      lower_pos[1]=0.0;
      log_det_J = 0;
      for (j in 1:n_areas){
-       row_vector[0] slack_row;
-       row_vector[0] slack_col;
+       row_vector[R] slack_row_raw = rep_row_vector(0, R);
+       row_vector[C] slack_col_raw = rep_row_vector(0, C);
+
        free_R = 0;
        free_C = 0;
+
        for (r in 1:R){
          if(row_margins[j, r]>0){
            free_R += 1;
-           slack_row = append_col(slack_row, row_margins[j, r]);
+           // slack_row = append_col(slack_row, row_margins[j, r]);
+           slack_row_raw[free_R] = row_margins[j, r];
          }
        }
        for (c in 1:C){
          if(col_margins[j, c]>0){
            free_C += 1;
-           slack_col = append_col(slack_col, col_margins[j, c]);
+           // slack_col = append_col(slack_col, col_margins[j, c]);
+           slack_col_raw[free_C] = col_margins[j, c];
          }
-
        }
+
+
+       row_vector[free_R] slack_row = slack_row_raw[1:free_R];
+       row_vector[free_C] slack_col = slack_col_raw[1:free_C];
 
       rt=sum(slack_row);
       matrix[free_R, free_C] tmp_cell_value;
@@ -159,5 +166,6 @@
     // Jacobian
     target += log_det_J;
     return cell_value;
+
   }
 
