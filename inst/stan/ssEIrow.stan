@@ -26,6 +26,7 @@ data{
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower=0, upper=1> lflag_inc_rm; //flag indicating whether to include row margins log-ratios in correlation matrix
  int<lower=0, upper=1> lflag_predictors_rm; //flag indicating whether to have row margin log-ratios as predictors of row-to-column (unconstrained) simplex
+ int<lower=0, upper=1> lflag_sigma_varies; //flag indicating whether the standard deviation of the log-ratios varies across cells (1) or is the same across cells (0)
 }
 transformed data{
   int K;
@@ -122,7 +123,7 @@ parameters{
 
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
- vector<lower=0>[has_area_re * K] sigma; // scale of area row variation from mu
+ vector<lower=0>[has_area_re * (lflag_sigma_varies == 1 ? K : 1)] sigma_raw; // scale of area row variation from mu
  cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -137,6 +138,16 @@ transformed parameters{
   matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
   array[lflag_inc_rm * n_areas] simplex[lflag_inc_rm * R] theta_rm_area; // prob vector for row margins in each area
   matrix[n_areas, K] mu_area_rm;
+  vector<lower=0>[has_area_re * K] sigma;
+
+  if(has_area_re ==1){
+    if(lflag_sigma_varies == 0) {
+      sigma = rep_vector(sigma_raw[1], K);
+    } else{
+      sigma = sigma_raw;
+    }
+
+  }
 
   if(has_onion == 1){
     L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix

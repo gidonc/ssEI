@@ -16,16 +16,18 @@ prep_data_stan <- function(row_margins, col_margins){
 prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
-                              mod_cols,
-                              predictors_rm){
+                              mod_cols ,
+                              predictors_rm,
+                              vary_sd
+                              ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
   }
   if(use_dist == "multinomdirch"){
     stop("multinomdirich not yet implemented. Use negbinom instead.")
   }
-  if(!area_re %in% c("none", "normal", "multinormal")){
-    stop("area_re must be one of: none, normal, multinormal")
+  if(!area_re %in% c("none", "normal", "multinormal", "multinormal2")){
+    stop("area_re must be one of: none, normal, multinormal, multinormal2")
   }
   if(!inc_rm %in% c(TRUE, FALSE)){
     stop("inc_rm must be one of: TRUE, FALSE")
@@ -35,6 +37,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!predictors_rm %in% c(TRUE, FALSE)){
     stop("predictors_rm must be one of: TRUE, FALSE")
+  }
+  if(!vary_sd %in% c(TRUE, FALSE)){
+    stop("vary_sd must be one of: TRUE, FALSE")
   }
 
   list(
@@ -47,7 +52,8 @@ prep_options_stan <- function(use_dist,
     lflag_area_re = dplyr::case_when(
       area_re == "none" ~ 0,
       area_re == "normal" ~ 1,
-      area_re == "multinormal" ~ 2
+      area_re == "multinormal" ~ 2,
+      area_re == "multinormal2" ~ 3
     ),
     lflag_inc_rm = dplyr::case_when(
       inc_rm == FALSE ~ 0,
@@ -60,6 +66,10 @@ prep_options_stan <- function(use_dist,
     lflag_predictors_rm = dplyr::case_when(
       predictors_rm == FALSE ~ 0,
       predictors_rm == TRUE ~ 1
+    ),
+    lflag_sigma_varies = dplyr::case_when(
+      vary_sd == TRUE ~ 1,
+      vary_sd == FALSE ~ 0
     )
   )
 }
