@@ -31,7 +31,10 @@ ei_estimate <- function(row_margins, col_margins,
                         prior_mu_ce_sigma = 2,
                         prior_mu_re_sigma = 2,
                         prior_sigma_c_scale = 1,
-                        prior_sigma_mu_scale = 1,
+                        prior_sigma_c_mu_scale = 1,
+                        prior_sigma_ce_scale = 1,
+                        prior_sigma_re_scale = 1,
+                        prior_cell_effect_scale = 1,
                         cores = 4,
                         chains = 4,
                         verbose = TRUE, ...){
@@ -47,7 +50,11 @@ ei_estimate <- function(row_margins, col_margins,
                          ))
   standat <- modifyList(standata,
                         prep_priors_stan(
-                          prior_lkj = prior_lkj
+                          prior_lkj = prior_lkj,
+                          prior_mu_ce_sigma = prior_mu_ce_sigma,
+                          prior_mu_re_sigma = prior_mu_re_sigma,
+                          prior_sigma_c_scale = prior_sigma_c_scale,
+                          prior_sigma_c_mu_scale = prior_sigma_c_mu_scale
                         ))
 
   if(verbose){

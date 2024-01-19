@@ -25,10 +25,13 @@ data{
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is shared across cells (0) varies by cell (1) or has a hierarchical model structure (2)
  real<lower=0> prior_lkj; // lkj param
- real<lower=0> prior_mu_re_sigma; // prior for scale of mu_re (mean row effect)
- real<lower=0> prior_mu_ce_sigma; // prior for scale of mu_ce (mean column effect)
+ real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
+ real<lower=0> prior_mu_ce_scale; // prior for scale of mu_ce (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 3)
  real<lower=0> prior_sigma_c_mu_scale; //prior for scale of sigma_c_mu (only if lflag_vary_sd == 3)
+ real<lower=0> prior_sigma_ce_scale; //prior of scale for sigma_ce
+ real<lower=0> prior_sigma_re_scale; //prior of scale for sigma_re
+ real<lower=0> prior_cell_effect_scale; //prior of scale for average cell effects
 }
 transformed data{
   int K;
@@ -268,11 +271,11 @@ model{
     } else {
       sigma_c_raw ~ normal(0, prior_sigma_c_scale);
     }
-    mu_ce~ cauchy(0, prior_mu_ce_sigma);
-    mu_re~ cauchy(0, prior_mu_re_sigma);
-    sigma_ce~normal(0, 5);
-    sigma_re~normal(0, 5);
-    to_vector(cell_effect_raw) ~ normal(0, 5);
+    mu_ce~ cauchy(0, prior_mu_ce_scale);
+    mu_re~ cauchy(0, prior_mu_re_scale);
+    sigma_ce~normal(0, prior_sigma_ce_scale);
+    sigma_re~normal(0, prior_sigma_re_scale);
+    to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
       to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
       area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
