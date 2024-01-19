@@ -67,8 +67,16 @@ prep_options_stan <- function(use_dist,
   )
 }
 
-prep_priors_stan <- function(prior_lkj){
-  list(prior_lkj = prior_lkj)
+prep_priors_stan <- function(prior_lkj,
+                             prior_mu_ce_sigma,
+                             prior_mu_re_sigma,
+                             prior_sigma_c_scale,
+                             prior_sigma_mu_scale){
+  list(prior_lkj = prior_lkj,
+       prior_mu_ce_sigma = prior_mu_ce_sigma,
+       prior_mu_re_sigma = prior_mu_re_sigma,
+       prior_sigma_c_scale = prior_sigma_c_scale,
+       prior_sigma_mu_scale = prior_sigma_mu_scale)
 }
 
 prep_king <- function(rm, cm){

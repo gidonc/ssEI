@@ -9,6 +9,8 @@
 #' @vary_sd Is the standard deviation of cell parameters error terms shared across the whole table (FALSE), does it vary by cell (TRUE) or is there a shared model ("partial")
 #' @param predictors_rm Include row margin log-ratios in the model of area means. Options are TRUE, FALSE
 #' @param prior_lkj Prior of the LKJ correlation matrix. Parameter must be real number greater than zero, where 1 is uniform across correlations.
+#' @param prior_mu_ce_sigma Prior of the scale for the mean column effects parameter
+#' @param prior_mu_re_sigma Prior of the scale for the mean row effects parameter
 #' @param verbose Print some information about the data and model before running
 #' @param cores To be passed to rstan::sampling
 #' @param chains To be passed to rstan::sampling
@@ -26,6 +28,10 @@ ei_estimate <- function(row_margins, col_margins,
                         vary_sd = FALSE,
                         mod_cols = FALSE,
                         prior_lkj = 2,
+                        prior_mu_ce_sigma = 2,
+                        prior_mu_re_sigma = 2,
+                        prior_sigma_c_scale = 1,
+                        prior_sigma_mu_scale = 1,
                         cores = 4,
                         chains = 4,
                         verbose = TRUE, ...){

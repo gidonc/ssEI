@@ -21,10 +21,14 @@ data{
  int<lower=0> C;  // number of columns
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
- real<lower=0> prior_lkj; // lkj param
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is shared across cells (0) varies by cell (1) or has a hierarchical model structure (2)
+ real<lower=0> prior_lkj; // lkj param
+ real<lower=0> prior_mu_re_sigma; // prior for scale of mu_re (mean row effect)
+ real<lower=0> prior_mu_ce_sigma; // prior for scale of mu_ce (mean column effect)
+ real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 3)
+ real<lower=0> prior_sigma_c_mu_scale; //prior for scale of sigma_c_mu (only if lflag_vary_sd == 3)
 }
 transformed data{
   int K;
@@ -251,19 +255,21 @@ model{
   // if(lflag_inc_rm){
   //     target += realmultinom_lpdf(row_margins| rm_prob);
   // }
+
+
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
     // sigma_c ~ normal(0, 5);
     if(lflag_vary_sd == 2){
-      sigma_c_mu ~ normal(0, 3);
-      sigma_c_sigma ~ normal(0, 5);
+      sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
+      sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
       for(s in 1:K_t){
         sigma_c_raw[s]~lognormal(sigma_c_mu, sigma_c_sigma);
       }
     } else {
-      sigma_c_raw ~ normal(0, 5);
+      sigma_c_raw ~ normal(0, prior_sigma_c_scale);
     }
-    mu_ce~ normal(0, 5);
-    mu_re~ normal(0, 5);
+    mu_ce~ cauchy(0, prior_mu_ce_sigma);
+    mu_re~ cauchy(0, prior_mu_re_sigma);
     sigma_ce~normal(0, 5);
     sigma_re~normal(0, 5);
     to_vector(cell_effect_raw) ~ normal(0, 5);
