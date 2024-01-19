@@ -28,8 +28,11 @@ data{
 }
 transformed data{
   int K;
+  int K_t;
   int K_no_rm;
   int K_c;
+
+  K_t = (R - 1)* (C - 1);
 
   K_c = C * (R - 1);
   K = R * (C - 1);
@@ -42,7 +45,7 @@ transformed data{
   // }
   // K_no_rm = R * (C - 1);
 
-  array[2] vector[K -1] shapes = create_shapes(K, prior_lkj);
+  array[2] vector[K -1] shapes = create_shapes(K_t, prior_lkj);
   int free_R[n_areas];
   int free_C[n_areas];
   int non0_rm;
@@ -135,8 +138,8 @@ parameters{
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
  real<lower=0> sigma_c_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
- real<lower=0> sigma_c_sigma[(lflag_vary_sd ==3) ? 1 : 0]; //hierarchical standard deviatation on standard deviations
- real sigma_c_mu[(lflag_vary_sd ==3) ? 1 : 0]; //hierarchical mean on standard deviations
+ real<lower=0> sigma_c_sigma[(lflag_vary_sd ==2) ? 1 : 0]; //hierarchical standard deviatation on standard deviations
+ vector[(lflag_vary_sd ==2) ? 1 : 0] sigma_c_mu; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -250,10 +253,12 @@ model{
   // }
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
     // sigma_c ~ normal(0, 5);
-    if(lflag_vary_sd == 3){
+    if(lflag_vary_sd == 2){
       sigma_c_mu ~ normal(0, 3);
       sigma_c_sigma ~ normal(0, 5);
-      sigma_c_raw~lognormal(sigma_c_mu, sigma_c_sigma);
+      for(s in 1:K_t){
+        sigma_c_raw[s]~lognormal(sigma_c_mu, sigma_c_sigma);
+      }
     } else {
       sigma_c_raw ~ normal(0, 5);
     }
