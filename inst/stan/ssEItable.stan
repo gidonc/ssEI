@@ -24,7 +24,7 @@ data{
  real<lower=0> prior_lkj; // lkj param
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
- int<lower  =0, upper=1> lflag_vary_sd;
+ int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is shared across cells (0) varies by cell (1) or has a hierarchical model structure (2)
 }
 transformed data{
   int K;
@@ -134,7 +134,9 @@ parameters{
  vector<lower=0>[R - 1] sigma_re;
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
- real<lower=0> sigma_c_raw[(lflag_vary_sd ==1) ? (R - 1) * (C - 1) : 1]; //scale of area col variation from mu_c
+ real<lower=0> sigma_c_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
+ real<lower=0> sigma_c_sigma[(lflag_vary_sd ==3) ? 1 : 0]; //hierarchical standard deviatation on standard deviations
+ real sigma_c_mu[(lflag_vary_sd ==3) ? 1 : 0]; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -196,10 +198,10 @@ transformed parameters{
       }
     }
 
-    if(lflag_vary_sd == 1){
-      sigma_c = sigma_c_raw;
-    } else {
+    if(lflag_vary_sd == 0){
       sigma_c = rep_array(sigma_c_raw[1], (R - 1)*(C - 1));
+    } else {
+      sigma_c = sigma_c_raw;
     }
 
 
@@ -248,7 +250,13 @@ model{
   // }
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
     // sigma_c ~ normal(0, 5);
-    sigma_c_raw ~ normal(0, 5);
+    if(lflag_vary_sd == 3){
+      sigma_c_mu ~ normal(0, 3);
+      sigma_c_sigma ~ normal(0, 5);
+      sigma_c_raw~lognormal(sigma_c_mu, sigma_c_sigma);
+    } else {
+      sigma_c_raw ~ normal(0, 5);
+    }
     mu_ce~ normal(0, 5);
     mu_re~ normal(0, 5);
     sigma_ce~normal(0, 5);
