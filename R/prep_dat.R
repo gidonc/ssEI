@@ -34,8 +34,8 @@ prep_options_stan <- function(use_dist,
   if(!predictors_rm %in% c(TRUE, FALSE)){
     stop("predictors_rm must be one of: TRUE, FALSE")
   }
-  if(!vary_sd %in% c(TRUE, FALSE)){
-    stop("vary_sd must be one of: TRUE, FALSE")
+  if(!vary_sd %in% c(FALSE, TRUE, "partial")){
+    stop("vary_sd must be one of: TRUE, FALSE, partial")
   }
 
   list(
@@ -60,8 +60,9 @@ prep_options_stan <- function(use_dist,
       predictors_rm == TRUE ~ 1
     ),
     lflag_vary_sd = dplyr::case_when(
+      vary_sd == FALSE ~ 0,
       vary_sd == TRUE ~ 1,
-      vary_sd == FALSE ~ 0
+      vary_sd == "partial" ~ 2
     )
   )
 }
