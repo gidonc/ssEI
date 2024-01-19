@@ -26,7 +26,7 @@ data{
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower=0, upper=1> lflag_inc_rm; //flag indicating whether to include row margins log-ratios in correlation matrix
  int<lower=0, upper=1> lflag_predictors_rm; //flag indicating whether to have row margin log-ratios as predictors of row-to-column (unconstrained) simplex
- int<lower=0, upper=1> lflag_vary_sd; //flag indicating whether the standard deviation of the log-ratios varies across cells (1) or is the same across cells (0)
+ int<lower=0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is shared across cells (0) varies by cell (1) or has a hierarchical model structure (2)
 }
 transformed data{
   int K;
@@ -123,7 +123,9 @@ parameters{
 
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
- vector<lower=0>[has_area_re * (lflag_vary_sd == 1 ? K : 1)] sigma_raw; // scale of area row variation from mu
+ vector<lower=0>[has_area_re * (lflag_vary_sd == 0 ? 1 : K)] sigma_raw; // scale of area row variation from mu
+ real<lower=0> sigma_sigma[has_area_re *( (lflag_vary_sd ==2) ? 1 : 0 )]; //hierarchical standard deviatation on standard deviations
+ vector[has_area_re * ((lflag_vary_sd ==2) ? 1 : 0)] sigma_mu; //hierarchical mean on standard deviations
  cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -208,7 +210,16 @@ model{
   matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
   int counter = 1;
   matrix[lflag_inc_rm * n_areas, lflag_inc_rm * R] rm_prob;
-  if(has_area_re){
+  if(has_area_re==1){
+    if(lflag_vary_sd == 2){
+      sigma_mu ~ normal(0, 3);
+      sigma_sigma ~ normal(0, 5);
+      for(s in 1:K){
+        sigma_raw[s]~lognormal(sigma_mu[1], sigma_sigma);
+      }
+    } else {
+      sigma_raw ~ normal(0, 5);
+    }
     sigma ~ normal(0, 3);
   }
 
