@@ -137,11 +137,13 @@ parameters{
  real area_effect[n_areas];
  matrix[n_areas, (R - 1)] area_row_effect_raw;
  matrix[n_areas, (C - 1)] area_col_effect_raw;
- matrix[(R - 1), (C - 1)] cell_effect_raw;
- vector[C - 1] mu_ce;
- vector[R - 1] mu_re;
+ // matrix[(R - 1), (C - 1)] cell_effect_raw;
+ matrix[R, C] cell_effect;
+ // vector[C - 1] mu_ce;
+ // vector[R - 1] mu_re;
  vector<lower=0>[C - 1] sigma_ce;
  vector<lower=0>[R - 1] sigma_re;
+ real<lower=0> sigma_area_effect;
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
  real<lower=0> sigma_c_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
@@ -161,7 +163,7 @@ transformed parameters{
   real log_e_cell_value[n_areas, R, C];
   matrix[n_areas, R] area_row_effect;
   matrix[n_areas, C] area_col_effect;
-  matrix[R, C] cell_effect;
+  // matrix[R, C] cell_effect;
   array[n_areas] matrix[R, C] area_cell_effect;    // logit column probabilities for area j and cols
   real<lower=0> sigma_c[(R - 1) * (C - 1)]; //scale of area col variation from mu_c
 
@@ -188,8 +190,8 @@ transformed parameters{
   cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
 
-  cell_effect = rep_matrix(0.0, R, C);
-  cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
+  // cell_effect = rep_matrix(0.0, R, C);
+  // cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
 
   for(j in 1:n_areas){
     area_cell_effect[j] = rep_matrix(0.0, R, C);
@@ -271,16 +273,22 @@ model{
     } else {
       sigma_c_raw ~ normal(0, prior_sigma_c_scale);
     }
-    mu_ce~ cauchy(0, prior_mu_ce_scale);
-    mu_re~ cauchy(0, prior_mu_re_scale);
+    // mu_ce~ cauchy(0, prior_mu_ce_scale);
+    // mu_re~ cauchy(0, prior_mu_re_scale);
     sigma_ce~normal(0, prior_sigma_ce_scale);
     sigma_re~normal(0, prior_sigma_re_scale);
-    to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
+    // to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
+    to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
       to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
-      area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
-      area_col_effect_raw[j] ~ normal(mu_ce, sigma_ce);
+      // area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
+      // area_col_effect_raw[j] ~ normal(mu_ce, sigma_ce);
+      area_row_effect_raw[j] ~ normal(0, sigma_re);
+      area_col_effect_raw[j] ~ normal(0, sigma_ce);
     }
+    area_effect ~ normal(0, sigma_area_effect);
+    sigma_area_effect~normal(0, 3);
+
 }
 generated quantities{
 
