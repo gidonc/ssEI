@@ -137,10 +137,10 @@ parameters{
  real area_effect[n_areas];
  matrix[n_areas, (R - 1)] area_row_effect_raw;
  matrix[n_areas, (C - 1)] area_col_effect_raw;
- // matrix[(R - 1), (C - 1)] cell_effect_raw;
- matrix[R, C] cell_effect;
- // vector[C - 1] mu_ce;
- // vector[R - 1] mu_re;
+ matrix[(R - 1), (C - 1)] cell_effect_raw;
+ // matrix[R, C] cell_effect;
+ vector[C - 1] mu_ce;
+ vector[R - 1] mu_re;
  vector<lower=0>[C - 1] sigma_ce;
  vector<lower=0>[R - 1] sigma_re;
  real<lower=0> sigma_area_effect;
@@ -163,7 +163,7 @@ transformed parameters{
   real log_e_cell_value[n_areas, R, C];
   matrix[n_areas, R] area_row_effect;
   matrix[n_areas, C] area_col_effect;
-  // matrix[R, C] cell_effect;
+  matrix[R, C] cell_effect;
   array[n_areas] matrix[R, C] area_cell_effect;    // logit column probabilities for area j and cols
   real<lower=0> sigma_c[(R - 1) * (C - 1)]; //scale of area col variation from mu_c
 
@@ -190,8 +190,8 @@ transformed parameters{
   cell_values = ss_assign_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, lambda);
 
 
-  // cell_effect = rep_matrix(0.0, R, C);
-  // cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
+  cell_effect = rep_matrix(0.0, R, C);
+  cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
 
   for(j in 1:n_areas){
     area_cell_effect[j] = rep_matrix(0.0, R, C);
@@ -223,6 +223,12 @@ model{
   matrix[non0_cm, R] cell_values_matrix_c;
   int counter_c = 1;
   matrix[non0_cm, R] obs_prob_c;
+  array[n_areas] vector[C - 1] mu_col_effect_raw;
+  array[n_areas] vector[R - 1] mu_row_effect_raw;
+  vector[R] tmp_col_effects;
+  vector[R] tmp_col_effects_ref;
+  vector[C] tmp_row_effects;
+  vector[C] tmp_row_effects_ref;
 
 //
 //   if(has_L == 1){
@@ -283,8 +289,31 @@ model{
       to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
       // area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
       // area_col_effect_raw[j] ~ normal(mu_ce, sigma_ce);
-      area_row_effect_raw[j] ~ normal(0, sigma_re);
-      area_col_effect_raw[j] ~ normal(0, sigma_ce);
+
+      // area_col_effects are to meet column proportion sufficient statistics
+      // area_col effect = log(Tc) + log_sum_exp(row_effect + cell_effect [within the reference column]) - log(Tref) - log_wum_exp(row_effect + cell_effect[within the column])
+      for(r in 1:R){
+        tmp_col_effects_ref[r] = area_row_effect[j, r] + cell_effect[r,C] + area_cell_effect[j, r, C];
+      }
+      for(c in 1:(C - 1)){
+        for(r in 1:R){
+          tmp_col_effects[r] = area_row_effect[j, r] + cell_effect[r,c] + area_cell_effect[j, r, c];
+        }
+        mu_col_effect_raw[j, c] = log(col_margins[j, C] + .01) + log_sum_exp(tmp_col_effects_ref) - log(col_margins[j, c] + .1) - log_sum_exp(tmp_col_effects);
+      }
+      area_col_effect_raw[j] ~ normal(mu_col_effect_raw[j], sigma_ce);
+
+      for(c in 1:C){
+        tmp_row_effects_ref[c] = area_col_effect[j, c] + cell_effect[R,c] + area_cell_effect[j, R, c];
+      }
+      for(r in 1:(R - 1)){
+        for(c in 1:C){
+          tmp_row_effects[c] = area_col_effect[j, c] + cell_effect[r,c] + area_cell_effect[j, r, c];
+        }
+        mu_row_effect_raw[j, r] = log(row_margins[j, R] + .01) + log_sum_exp(tmp_row_effects_ref) - log(row_margins[j, r] + .1) - log_sum_exp(tmp_row_effects);
+      }
+      area_row_effect_raw[j] ~ normal(mu_row_effect_raw[j], sigma_re);
+
     }
     area_effect ~ normal(0, sigma_area_effect);
     sigma_area_effect~normal(0, 3);
