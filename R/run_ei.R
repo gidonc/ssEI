@@ -28,8 +28,8 @@ ei_estimate <- function(row_margins, col_margins,
                         vary_sd = FALSE,
                         mod_cols = FALSE,
                         prior_lkj = 2,
-                        prior_mu_ce_sigma = 2,
-                        prior_mu_re_sigma = 2,
+                        prior_mu_ce_scale = 2,
+                        prior_mu_re_scale = 2,
                         prior_sigma_c_scale = 1,
                         prior_sigma_c_mu_scale = 1,
                         prior_sigma_ce_scale = 1,
@@ -51,10 +51,13 @@ ei_estimate <- function(row_margins, col_margins,
   standat <- modifyList(standata,
                         prep_priors_stan(
                           prior_lkj = prior_lkj,
-                          prior_mu_ce_sigma = prior_mu_ce_sigma,
-                          prior_mu_re_sigma = prior_mu_re_sigma,
+                          prior_mu_ce_scale = prior_mu_ce_scale,
+                          prior_mu_re_scale = prior_mu_re_scale,
                           prior_sigma_c_scale = prior_sigma_c_scale,
-                          prior_sigma_c_mu_scale = prior_sigma_c_mu_scale
+                          prior_sigma_c_mu_scale = prior_sigma_c_mu_scale,
+                          prior_sigma_ce_scale = prior_sigma_ce_scale,
+                          prior_sigma_re_scale = prior_sigma_re_scale,
+                          prior_cell_effect_scale = prior_cell_effect_scale
                         ))
 
   if(verbose){
