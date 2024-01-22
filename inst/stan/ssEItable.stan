@@ -134,7 +134,7 @@ parameters{
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  // array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
  array[n_areas] matrix[(R - 1), (C - 1)] area_cell_effect_raw;    // logit column probabilities for area j and cols
- real area_effect[n_areas];
+ // real area_effect[n_areas];
  matrix[n_areas, (R - 1)] area_row_effect_raw;
  matrix[n_areas, (C - 1)] area_col_effect_raw;
  matrix[(R - 1), (C - 1)] cell_effect_raw;
@@ -143,7 +143,7 @@ parameters{
  vector[R - 1] mu_re;
  vector<lower=0>[C - 1] sigma_ce;
  vector<lower=0>[R - 1] sigma_re;
- real<lower=0> sigma_area_effect;
+ // real<lower=0> sigma_area_effect;
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
  real<lower=0> sigma_c_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
@@ -160,12 +160,14 @@ transformed parameters{
   real<lower=0> cell_values[n_areas, R, C];
   // array[n_areas, R] simplex[C] theta_area; // prob row vector for each area
   // array[n_areas, C] simplex[R] theta_c_area; // prob col vector for each area
+  array[n_areas] matrix[R, C] area_effect_components;
   real log_e_cell_value[n_areas, R, C];
   matrix[n_areas, R] area_row_effect;
   matrix[n_areas, C] area_col_effect;
   matrix[R, C] cell_effect;
   array[n_areas] matrix[R, C] area_cell_effect;    // logit column probabilities for area j and cols
   real<lower=0> sigma_c[(R - 1) * (C - 1)]; //scale of area col variation from mu_c
+  real area_effect[n_areas];
 
 
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
@@ -202,6 +204,13 @@ transformed parameters{
 
     area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
     area_row_effect[j, R] = 0;
+
+    for(r in 1:R){
+      for(c in 1:C){
+        area_effect_components[j, r, c] = area_row_effect[j, r] + area_col_effect[j, c] + cell_effect[r, c] + area_cell_effect[j, r, c];
+      }
+    }
+    area_effect[j] = log(sum(row_margins[j])) - log_sum_exp(to_vector(area_effect_components[j]));
 
     for(r in 1:R){
         for(c in 1:C){
@@ -249,7 +258,7 @@ model{
          for(r in 1:R){
            cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
            // obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
-           obs_prob_c[counter_c, r] = exp(log_e_cell_value[j, r, c]);
+           obs_prob_c[counter_c, r] = sum(col_margins[j])*exp(log_e_cell_value[j, r, c]);
          }
          counter_c += 1;
         }
@@ -287,8 +296,8 @@ model{
     to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
       to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
-      // area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
-      // area_col_effect_raw[j] ~ normal(mu_ce, sigma_ce);
+      area_row_effect_raw[j] ~ cauchy(mu_re, sigma_re);
+      area_col_effect_raw[j] ~ cauchy(mu_ce, sigma_ce);
 
       // area_col_effects are to meet column proportion sufficient statistics
       // area_col effect = log(Tc) + log_sum_exp(row_effect + cell_effect [within the reference column]) - log(Tref) - log_wum_exp(row_effect + cell_effect[within the column])
@@ -299,9 +308,27 @@ model{
         for(r in 1:R){
           tmp_col_effects[r] = area_row_effect[j, r] + cell_effect[r,c] + area_cell_effect[j, r, c];
         }
-        mu_col_effect_raw[j, c] = log(col_margins[j, C] + .01) + log_sum_exp(tmp_col_effects_ref) - log(col_margins[j, c] + .1) - log_sum_exp(tmp_col_effects);
+        mu_col_effect_raw[j, c] = log(col_margins[j, c] + .01) + log_sum_exp(tmp_col_effects_ref) - log(col_margins[j, C] + .01) - log_sum_exp(tmp_col_effects);
+
+        for(r in 1:R){
+            tmp_col_effects[r] = area_row_effect[j, r] + cell_effect[r,c] + area_cell_effect[j, r, c] + mu_col_effect_raw[j, c];
+        }
+        // print("start area", j, " col", c);
+        // print("log_sum_exp col:", log_sum_exp(append_row(tmp_col_effects, area_col_effect_raw[j, c])));
+        // print("log_sum_exp col with mu:", log_sum_exp(append_row(tmp_col_effects, mu_col_effect_raw[j, c])));
+        // print("mu sum to col log ratio:", log_sum_exp(tmp_col_effects) - log_sum_exp(tmp_col_effects_ref));
+        // print("param", area_col_effect_raw[j,c]);
+        // print(log_sum_exp(tmp_col_effects_ref)) ;
+        // print("dif:", log_sum_exp(append_row(tmp_col_effects, area_col_effect_raw[j, c])) - log_sum_exp(tmp_col_effects_ref)) ;
+        // print("dif with mu:", log_sum_exp(append_row(tmp_col_effects, mu_col_effect_raw[j, c])) - log_sum_exp(tmp_col_effects_ref)) ;
+        // print("actual: ", log(col_margins[j, c] + .01) - log(col_margins[j, C] + .01)) ;
+
+        // print("end area", j, " col", c);
+
+
       }
-      area_col_effect_raw[j] ~ normal(mu_col_effect_raw[j], sigma_ce);
+      // area_col_effect_raw[j] ~ normal(mu_col_effect_raw[j], prior_sigma_ce_scale);
+
 
       for(c in 1:C){
         tmp_row_effects_ref[c] = area_col_effect[j, c] + cell_effect[R,c] + area_cell_effect[j, R, c];
@@ -310,13 +337,34 @@ model{
         for(c in 1:C){
           tmp_row_effects[c] = area_col_effect[j, c] + cell_effect[r,c] + area_cell_effect[j, r, c];
         }
-        mu_row_effect_raw[j, r] = log(row_margins[j, R] + .01) + log_sum_exp(tmp_row_effects_ref) - log(row_margins[j, r] + .1) - log_sum_exp(tmp_row_effects);
+        mu_row_effect_raw[j, r] = log(row_margins[j, r] + .01) + log_sum_exp(tmp_row_effects_ref) - log(row_margins[j, R] + .01) - log_sum_exp(tmp_row_effects);
+
+        for(c in 1:C){
+            tmp_row_effects[c] = area_col_effect[j, c] + cell_effect[r,c] + area_cell_effect[j, r, c] + mu_row_effect_raw[j, r];
+        }
+
+        // print("start area", j, " row", r);
+        // print("log_sum_exp row:", log_sum_exp(append_row(tmp_row_effects, area_row_effect_raw[j, r])));
+        // print("log_sum_exp row with mu:", log_sum_exp(append_row(tmp_row_effects, mu_row_effect_raw[j, r])));
+        // print("log_sum_exp ref:", log_sum_exp(tmp_row_effects_ref));
+        //
+        // print("mu", mu_row_effect_raw[j,r]);
+        // print("param", area_row_effect_raw[j,r]);
+        // print("dif:", log_sum_exp(append_row(tmp_row_effects, area_row_effect_raw[j, r])) - log_sum_exp(tmp_row_effects_ref)) ;
+        //
+        // print("calc; ", log_sum_exp(tmp_row_effects) - log_sum_exp(tmp_row_effects_ref));
+        // print("actual: ", log(row_margins[j, r] + .01) - log(row_margins[j, R] + .01)) ;
+        //
+        // print("end area", j, " row", r);
+
       }
-      area_row_effect_raw[j] ~ normal(mu_row_effect_raw[j], sigma_re);
+      // area_row_effect_raw[j] ~ normal(mu_row_effect_raw[j], prior_sigma_re_scale);
+
+
 
     }
-    area_effect ~ normal(0, sigma_area_effect);
-    sigma_area_effect~normal(0, 3);
+    // area_effect ~ normal(0, sigma_area_effect);
+    // sigma_area_effect~normal(0, 3);
 
 }
 generated quantities{
