@@ -137,10 +137,11 @@ parameters{
  // real area_effect[n_areas];
  matrix[n_areas, (R - 1)] area_row_effect_raw;
  matrix[n_areas, (C - 1)] area_col_effect_raw;
- matrix[(R - 1), (C - 1)] cell_effect_raw;
+ // matrix[(R - 1), (C - 1)] cell_effect_raw;
+ vector[R * C - 1] cell_effect_raw;
  // matrix[R, C] cell_effect;
- vector[C - 1] mu_ce;
- vector[R - 1] mu_re;
+ // vector[C - 1] mu_ce;
+ // vector[R - 1] mu_re;
  vector<lower=0>[C - 1] sigma_ce;
  vector<lower=0>[R - 1] sigma_re;
  // real<lower=0> sigma_area_effect;
@@ -193,7 +194,21 @@ transformed parameters{
 
 
   cell_effect = rep_matrix(0.0, R, C);
-  cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
+  // cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
+
+  for(r in 1:R){
+    for(c in 1:C){
+      if(r == R && c ==C){
+        cell_effect[r, c] = 0;
+      } else{
+        cell_effect[r, c] = cell_effect_raw[(r - 1)*C + c];
+      }
+
+    }
+  }
+
+  for(k in 1:(R*C -1)){
+  }
 
   for(j in 1:n_areas){
     area_cell_effect[j] = rep_matrix(0.0, R, C);
@@ -296,8 +311,10 @@ model{
     to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
       to_vector(area_cell_effect_raw[j]) ~ normal(0, sigma_c);
-      area_row_effect_raw[j] ~ cauchy(mu_re, sigma_re);
-      area_col_effect_raw[j] ~ cauchy(mu_ce, sigma_ce);
+      // area_row_effect_raw[j] ~ cauchy(mu_re, sigma_re);
+      // area_col_effect_raw[j] ~ cauchy(mu_ce, sigma_ce);
+      area_row_effect_raw[j] ~ normal(0, sigma_re);
+      area_col_effect_raw[j] ~ normal(0, sigma_ce);
 
       // area_col_effects are to meet column proportion sufficient statistics
       // area_col effect = log(Tc) + log_sum_exp(row_effect + cell_effect [within the reference column]) - log(Tref) - log_wum_exp(row_effect + cell_effect[within the column])
