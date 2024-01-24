@@ -17,7 +17,9 @@ prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
                               predictors_rm,
-                              vary_sd
+                              vary_sd,
+                              llmod_const,
+                              llmod_structure_omit
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -36,6 +38,12 @@ prep_options_stan <- function(use_dist,
   }
   if(!vary_sd %in% c(FALSE, TRUE, "partial")){
     stop("vary_sd must be one of: TRUE, FALSE, partial")
+  }
+  if(!llmod_const %in% c("none", "area_tot")){
+    stop("llmod_const must be one of none, area_tot")
+  }
+  if(!llmod_structure_omit %in% c("none", "area*r*c", "area*c")){
+    stop("llmod_const must be one of none, area*r*c, area*c")
   }
 
   list(
@@ -63,6 +71,15 @@ prep_options_stan <- function(use_dist,
       vary_sd == FALSE ~ 0,
       vary_sd == TRUE ~ 1,
       vary_sd == "partial" ~ 2
+    ),
+    lflag_llmod_const = dplyr::case_when(
+      llmod_const == "none" ~ 0,
+      llmod_const == "area_tot" ~ 1
+    ),
+    lflag_llmod_structure = dplyr::case_when(
+      llmod_structure_omit == "none" ~ 0,
+      llmod_structure_omit == "area*r*c" ~ 1,
+      llmod_structure_omit == "area*c" ~ 2
     )
   )
 }

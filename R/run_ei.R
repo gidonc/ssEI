@@ -7,6 +7,8 @@
 #' @param inc_rm Include row margin log-ratios in the random effects model of the area means. Options are TRUE, FALSE
 #' @param mod_cols Model columns by examining the whole table (v model conditional on rows looking at row to column rates)
 #' @vary_sd Is the standard deviation of cell parameters error terms shared across the whole table (FALSE), does it vary by cell (TRUE) or is there a shared model ("partial")
+#' @llmod_const What constraints (conditions) are placed on the log-linear model. Fewer constraints on the log-linear model, gives more opportunity for the model to learn from the data. Options are "none", "area_tot" (conditions the model to ensure that the area totals match the area totals in the data).
+#' @llmod_structure_omit Which terms to omit from the table model log-linear structure. Options are none (saturated model), area*r*c (omit three-way interaction), area*c (omit area column interaction - so column effects are constant across areas)
 #' @param predictors_rm Include row margin log-ratios in the model of area means. Options are TRUE, FALSE
 #' @param prior_lkj Prior of the LKJ correlation matrix. Parameter must be real number greater than zero, where 1 is uniform across correlations.
 #' @param prior_mu_ce_sigma Prior of the scale for the mean column effects parameter
@@ -24,9 +26,10 @@ ei_estimate <- function(row_margins, col_margins,
                         use_dist = "pois",
                         area_re = "normal",
                         inc_rm = FALSE,
-                        predictors_rm = FALSE,
                         vary_sd = FALSE,
                         mod_cols = FALSE,
+                        llmod_structure_omit="area*c",
+                        predictors_rm = FALSE,
                         prior_lkj = 2,
                         prior_mu_ce_scale = 2,
                         prior_mu_re_scale = 2,
