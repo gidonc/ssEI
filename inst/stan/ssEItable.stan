@@ -184,6 +184,8 @@ parameters{
  vector[(lflag_vary_sd ==2) ? 1 : 0] sigma_c_mu; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  cholesky_factor_corr[K_ame] L_ame; // for modelling correlation matrix
+ array[n_areas, R] simplex[C] theta_jr;
+ array[R] simplex[C] d_theta_r;
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
  // matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
@@ -302,6 +304,10 @@ transformed parameters{
 
 }
 model{
+  matrix[non0_rm, C] obs_prob;
+  matrix[non0_rm, C] cell_values_matrix;
+  // matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
+  int counter = 1;
   matrix[non0_cm, R] cell_values_matrix_c;
   int counter_c = 1;
   matrix[non0_cm, R] obs_prob_c;
@@ -313,6 +319,11 @@ model{
   vector[C] tmp_row_effects_ref;
 
   L_ame ~ lkj_corr_cholesky(prior_lkj);
+
+  for(r in 1:R){
+    d_theta_r[r] ~ dirichlet(rep_vector(1, C));
+  }
+
 
 //
 //   if(has_L == 1){
@@ -328,6 +339,22 @@ model{
 
 
   for (j in 1:n_areas){
+    for (r in 1:R){
+      theta_jr[j,r] ~ dirichlet(d_theta_r[r]);
+      if(row_margins[j, r] > 0){
+          cell_values_matrix[counter] = to_row_vector(cell_values[j, r, 1:C]);
+          if(lflag_dist ==0) {
+            obs_prob[counter] = to_row_vector(theta_jr[j, r]).*sum(exp(log_e_cell_value[j, r, 1:C]));
+          }else if(lflag_dist== 1){
+            obs_prob[counter] = to_row_vector(theta_jr[j, r]);
+          } else  if (lflag_dist==2){
+            // phi_matrix[counter, c] = phi[r];
+            // obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j, r] - (theta_area[j,r,c]*row_margins[j, r] * phi[r]);
+          }
+      counter += 1;
+    }
+   }
+
      for (c in 1:C){
        if(col_margins[j, c] > 0){
          for(r in 1:R){
@@ -353,6 +380,9 @@ model{
 
 
     target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
+
+    target +=realpoisson_lpdf(to_row_vector(cell_values_matrix)| to_vector(obs_prob));
+
     // sigma_c ~ normal(0, 5);
     if(lflag_vary_sd == 2){
       sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
