@@ -333,7 +333,7 @@ model{
          for(r in 1:R){
            cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
            // obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
-           obs_prob_c[counter_c, r] = sum(col_margins[j])*exp(log_e_cell_value[j, r, c]);
+           obs_prob_c[counter_c, r] = exp(log_e_cell_value[j, r, c]);
          }
          counter_c += 1;
         }
