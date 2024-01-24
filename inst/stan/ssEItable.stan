@@ -26,7 +26,6 @@ data{
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
  int<lower = 0, upper = 1> lflag_llmod_const; // flag indicating whether log-linear model should be (0) unconstrained (1) constrained to generate correct area totals
  int<lower = 0, upper =2> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect)
-
  real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of mu_ce (mean column effect)
@@ -53,6 +52,8 @@ transformed data{
   int has_area_col_effects;
   int has_L;
   int has_onion;
+  int has_L_ame;
+  int mu_re_ce_in_cell_effects  = 1;
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
 
@@ -152,6 +153,8 @@ transformed data{
     }
   }
 
+  has_L_ame = 0;
+
 
 
 
@@ -183,9 +186,9 @@ parameters{
  real<lower=0> sigma_c_sigma[(lflag_vary_sd ==2) ? 1 : 0]; //hierarchical standard deviatation on standard deviations
  vector[(lflag_vary_sd ==2) ? 1 : 0] sigma_c_mu; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
- cholesky_factor_corr[K_ame] L_ame; // for modelling correlation matrix
- array[n_areas, R] simplex[C] theta_jr;
- array[R] simplex[C] d_theta_r;
+ // cholesky_factor_corr[has_L_ame*K_ame] L_ame_raw; // for modelling correlation matrix
+ // array[n_areas, R] simplex[C] theta_jr;
+ // array[R] simplex[C] d_theta_r;
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
  // matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
@@ -209,6 +212,7 @@ transformed parameters{
   real area_effect[n_areas];
   matrix[n_areas, (R - 1)] area_row_effect_raw;
   matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
+  // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
 
 
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
@@ -218,6 +222,12 @@ transformed parameters{
   // }
   // if(has_L == 1){
   //   L = L_a; // cholesky_factor corr matrix
+  // }
+
+  // if(has_L_ame == 1){
+  //   L_ame = L_ame_raw;
+  // } else{
+  //   L_ame = diag_matrix(rep_vector(1, K_ame));
   // }
 
 
@@ -236,12 +246,17 @@ transformed parameters{
 
   mu_re = rep_vector(0, R);
   mu_ce = rep_vector(0, C);
-  mu_re[1:R -1] = mu_re_raw;
-  mu_ce[1: C - 1] = mu_ce_raw;
 
 
   cell_effect = rep_matrix(0.0, R, C);
   cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
+  if(mu_re_ce_in_cell_effects == 1){
+    cell_effect[R, 1:(C - 1)] = to_row_vector(mu_ce_raw);
+    cell_effect[1:(R - 1), C] = mu_re_raw;
+  } else{
+    mu_re[1:R -1] = mu_re_raw;
+    mu_ce[1: C - 1] = mu_ce_raw;
+  }
 
   // for(r in 1:R){
   //   for(c in 1:C){
@@ -262,7 +277,9 @@ transformed parameters{
 
     }
 
-    area_margin_effects_raw[j] = to_row_vector(ame_sigma .*(L_ame * ame_alpha[j]));
+    area_margin_effects_raw[j] = to_row_vector(ame_sigma .*(ame_alpha[j]));
+      // area_margin_effects_raw[j] = to_row_vector(ame_sigma .*(L_ame * ame_alpha[j]));
+
 
 
     // area_col_effect[j, C] = 0;
@@ -304,13 +321,15 @@ transformed parameters{
 
 }
 model{
-  matrix[non0_rm, C] obs_prob;
-  matrix[non0_rm, C] cell_values_matrix;
+  // matrix[non0_rm, C] obs_prob;
+  vector[n_areas * R] e_rm;
+  vector[n_areas * C] e_cm;
+  vector[n_areas * R * C] e_cell;
+  row_vector[n_areas * R * C] cell_values_row_vector;
   // matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
-  int counter = 1;
-  matrix[non0_cm, R] cell_values_matrix_c;
-  int counter_c = 1;
-  matrix[non0_cm, R] obs_prob_c;
+  // matrix[non0_cm, R] cell_values_matrix_c;
+  // int counter_c = 1;
+  // matrix[non0_cm, R] obs_prob_c;
   array[n_areas] vector[C - 1] mu_col_effect_raw;
   array[n_areas] vector[R - 1] mu_row_effect_raw;
   vector[R] tmp_col_effects;
@@ -318,11 +337,14 @@ model{
   vector[C] tmp_row_effects;
   vector[C] tmp_row_effects_ref;
 
-  L_ame ~ lkj_corr_cholesky(prior_lkj);
+  // if(has_L_ame==1){
+  //    L_ame_raw ~ lkj_corr_cholesky(prior_lkj);
+  // }
 
-  for(r in 1:R){
-    d_theta_r[r] ~ dirichlet(rep_vector(1, C));
-  }
+
+  // for(r in 1:R){
+  //   d_theta_r[r] ~ dirichlet(rep_vector(1, C));
+  // }
 
 
 //
@@ -340,30 +362,25 @@ model{
 
   for (j in 1:n_areas){
     for (r in 1:R){
-      theta_jr[j,r] ~ dirichlet(d_theta_r[r]);
-      if(row_margins[j, r] > 0){
-          cell_values_matrix[counter] = to_row_vector(cell_values[j, r, 1:C]);
-          if(lflag_dist ==0) {
-            obs_prob[counter] = to_row_vector(theta_jr[j, r]).*sum(exp(log_e_cell_value[j, r, 1:C]));
-          }else if(lflag_dist== 1){
-            obs_prob[counter] = to_row_vector(theta_jr[j, r]);
-          } else  if (lflag_dist==2){
-            // phi_matrix[counter, c] = phi[r];
-            // obs_prob[counter, c] = theta_area[j, r, c]*row_margins[j, r] - (theta_area[j,r,c]*row_margins[j, r] * phi[r]);
-          }
-      counter += 1;
-    }
+      e_rm[(j - 1) * R + r] = sum(exp(log_e_cell_value[j, r, 1:C]));
+      // theta_jr[j,r] ~ dirichlet(d_theta_r[r]);
+
    }
 
      for (c in 1:C){
-       if(col_margins[j, c] > 0){
-         for(r in 1:R){
-           cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
-           // obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
-           obs_prob_c[counter_c, r] = exp(log_e_cell_value[j, r, c]);
-         }
-         counter_c += 1;
-        }
+       e_cm[(j - 1) * C + c] = sum(exp(log_e_cell_value[j, 1:R, c]));
+       for(r in 1:R){
+         cell_values_row_vector[(j - 1)*R*C + (r - 1)*C + c] = cell_values[j,r,c];
+         e_cell[(j - 1)*R*C + (r - 1)*C + c] = exp(log_e_cell_value[j, r, c]);
+       }
+       // if(col_margins[j, c] > 0){
+       //   for(r in 1:R){
+       //     cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
+       //     // obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
+       //     obs_prob_c[counter_c, r] = exp(log_e_cell_value[j, r, c]);
+       //   }
+       //   counter_c += 1;
+        // }
       }
     }
   // if(lflag_dist == 1){
@@ -379,9 +396,12 @@ model{
   // }
 
 
-    target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
+    // target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
+    target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
-    target +=realpoisson_lpdf(to_row_vector(cell_values_matrix)| to_vector(obs_prob));
+    target +=realpoisson_lpdf(to_row_vector(row_margins')| e_rm);
+    target +=realpoisson_lpdf(to_row_vector(col_margins')| e_cm);
+
 
     // sigma_c ~ normal(0, 5);
     if(lflag_vary_sd == 2){
@@ -395,6 +415,7 @@ model{
     }
     mu_ce_raw~ normal(0, prior_mu_ce_scale);
     mu_re_raw~ normal(0, prior_mu_re_scale);
+
 
     // sigma_re~normal(0, prior_sigma_re_scale);
     to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
