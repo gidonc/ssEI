@@ -21,6 +21,7 @@ data{
  int<lower=0> C;  // number of columns
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
+ int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
@@ -46,6 +47,12 @@ transformed data{
   int free_C[n_areas];
   int non0_rm;
   int non0_cm;
+  int n_poss_cells=0;
+  int n_structural_zeros=0;
+  int structural_zero_rows[n_areas, R];
+  int n_poss_rows=0;
+  int structural_zero_cols[n_areas, C];
+  int n_poss_cols=0;
   int phi_length;
   int has_area_re;
   int has_free_area;
@@ -100,6 +107,7 @@ transformed data{
   }
 
 
+
   K_t = (R - 1)* (C - 1);
   K_ame = (R - 1) + has_area_col_effects * (C - 1); // number of area margin effects to estimate (area row effects + area col effects)
 
@@ -116,8 +124,26 @@ transformed data{
 
   array[2] vector[K -1] shapes = create_shapes(K_t, prior_lkj);
 
+// following code to distinguish structural zeros from sampling zeros in the log-linear model - identifying rows and columns, and number of structural zeros in the data
 
-  // calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
+  for(j in 1:n_areas){
+    for(r in 1:R){
+      structural_zero_rows[j, r] = sum(structural_zeros[j, r, 1:C])==C ? 1 :0;
+      n_poss_rows += sum(structural_zeros[j, r, 1:C])==C ? 0 :1;
+      n_structural_zeros += sum(structural_zeros[j, r, 1:C]);
+    }
+    for(c in 1:C){
+      structural_zero_cols[j, c] = sum(structural_zeros[j, 1:R, c])==R ? 1 : 0;
+      n_poss_cols += sum(structural_zeros[j, 1:R, c])==R ? 0 :1;
+    }
+  }
+  n_poss_cells = n_areas*R*C - n_structural_zeros;
+
+  print("poss rows", n_poss_rows);
+  print("poss cols", n_poss_cols);
+  print(n_structural_zeros);
+
+  // to deal with zeros in the sequential sampling: calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
   int n_param = 0;
   int param_count_from[n_areas];
@@ -324,10 +350,12 @@ transformed parameters{
 }
 model{
   // matrix[non0_rm, C] obs_prob;
-  vector[n_areas * R] e_rm;
-  vector[n_areas * C] e_cm;
-  vector[n_areas * R * C] e_cell;
-  row_vector[n_areas * R * C] cell_values_row_vector;
+  vector[n_poss_rows] e_rm;
+  row_vector[n_poss_rows] poss_rows;
+  vector[n_poss_cols] e_cm;
+  row_vector[n_poss_cols] poss_cols;
+  vector[n_poss_cells] e_cell;
+  row_vector[n_poss_cells] cell_values_row_vector;
   // matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
   // matrix[non0_cm, R] cell_values_matrix_c;
   // int counter_c = 1;
@@ -358,22 +386,32 @@ model{
 //     R2 ~ beta(shapes[1], shapes[2]);
 //   }
 
-
-
+  int counter_r=0;
+  int counter_c=0;
+  int counter_cell=0;
 
 
   for (j in 1:n_areas){
     for (r in 1:R){
-      e_rm[(j - 1) * R + r] = sum(exp(log_e_cell_value[j, r, 1:C]));
-      // theta_jr[j,r] ~ dirichlet(d_theta_r[r]);
-
+      if(structural_zero_rows[j,r]==0){
+        counter_r += 1;
+        e_rm[counter_r] = sum(exp(log_e_cell_value[j, r, 1:C]));
+        poss_rows[counter_r] = row_margins[j, r];
+      }
    }
 
      for (c in 1:C){
-       e_cm[(j - 1) * C + c] = sum(exp(log_e_cell_value[j, 1:R, c]));
+       if(structural_zero_cols[j,c]==0){
+         counter_c += 1;
+         e_cm[counter_c] = sum(exp(log_e_cell_value[j, 1:R, c]));
+         poss_cols[counter_c] = col_margins[j,c];
+       }
        for(r in 1:R){
-         cell_values_row_vector[(j - 1)*R*C + (r - 1)*C + c] = cell_values[j,r,c];
-         e_cell[(j - 1)*R*C + (r - 1)*C + c] = exp(log_e_cell_value[j, r, c]);
+         if(structural_zeros[j,r,c]==0){
+           counter_cell += 1;
+           cell_values_row_vector[counter_cell] = cell_values[j,r,c];
+           e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
+         }
        }
        // if(col_margins[j, c] > 0){
        //   for(r in 1:R){
@@ -401,8 +439,8 @@ model{
     // target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
-    target +=realpoisson_lpdf(to_row_vector(row_margins')| e_rm);
-    target +=realpoisson_lpdf(to_row_vector(col_margins')| e_cm);
+    target +=realpoisson_lpdf(poss_rows| e_rm);
+    target +=realpoisson_lpdf(poss_cols| e_cm);
 
     // for(r in 1:R){
     //   for(c in 1:C){

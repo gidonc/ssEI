@@ -13,6 +13,24 @@ prep_data_stan <- function(row_margins, col_margins){
   return(standata)
 }
 
+prep_zeros <- function(struc_zero_rm="", struc_zero_cm=""){
+  J = nrow(struc_zero_rm)
+  R = ncol(struc_zero_rm)
+  C = ncol(struc_zero_cm)
+
+  struc_zero_array = array(dim=c(J, R, C))
+  for(j in 1:J){
+    for(r in 1:R){
+      for(c in 1:C){
+        struc_zero_array[j,r,c] = ifelse(struc_zero_rm[j,r]==0|struc_zero_cm[j,c]==0, 1, 0)
+      }
+    }
+  }
+  list(
+    structural_zeros = struc_zero_array
+  )
+}
+
 prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
