@@ -318,6 +318,8 @@ transformed parameters{
     }
 
 
+  #include include/generateratesandsummaries.stan
+
 
 }
 model{
@@ -401,6 +403,17 @@ model{
 
     target +=realpoisson_lpdf(to_row_vector(row_margins')| e_rm);
     target +=realpoisson_lpdf(to_row_vector(col_margins')| e_cm);
+
+    // for(r in 1:R){
+    //   for(c in 1:C){
+    //     e_overall_cv[C * (r - 1) + c]=sum(exp(log_e_cell_value[1:n_areas, r, c]));
+    //   }
+    // }
+    // vector[R * C] e_overall_cv;
+    // target +=realpoisson_lpdf(to_row_vector(overall_cell_values')| e_overall_cv);
+
+    // print(to_row_vector(overall_cell_values'));
+    // print(e_overall_cv);
 
 
     // sigma_c ~ normal(0, 5);
@@ -508,7 +521,5 @@ model{
 
 }
 generated quantities{
-
-  #include include/generateratesandsummaries.stan
 
 }
