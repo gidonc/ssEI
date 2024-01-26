@@ -139,9 +139,6 @@ transformed data{
   }
   n_poss_cells = n_areas*R*C - n_structural_zeros;
 
-  print("poss rows", n_poss_rows);
-  print("poss cols", n_poss_cols);
-  print(n_structural_zeros);
 
   // to deal with zeros in the sequential sampling: calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
@@ -350,10 +347,10 @@ transformed parameters{
 }
 model{
   // matrix[non0_rm, C] obs_prob;
-  vector[n_poss_rows] e_rm;
-  row_vector[n_poss_rows] poss_rows;
-  vector[n_poss_cols] e_cm;
-  row_vector[n_poss_cols] poss_cols;
+  // vector[n_poss_rows] e_rm;
+  // row_vector[n_poss_rows] poss_rows;
+  // vector[n_poss_cols] e_cm;
+  // row_vector[n_poss_cols] poss_cols;
   vector[n_poss_cells] e_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
   // matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
@@ -386,26 +383,26 @@ model{
 //     R2 ~ beta(shapes[1], shapes[2]);
 //   }
 
-  int counter_r=0;
-  int counter_c=0;
+  // int counter_r=0;
+  // int counter_c=0;
   int counter_cell=0;
 
 
   for (j in 1:n_areas){
-    for (r in 1:R){
-      if(structural_zero_rows[j,r]==0){
-        counter_r += 1;
-        e_rm[counter_r] = sum(exp(log_e_cell_value[j, r, 1:C]));
-        poss_rows[counter_r] = row_margins[j, r];
-      }
-   }
+    // for (r in 1:R){
+    //   if(structural_zero_rows[j,r]==0){
+    //     counter_r += 1;
+    //     e_rm[counter_r] = sum(exp(log_e_cell_value[j, r, 1:C]));
+    //     poss_rows[counter_r] = row_margins[j, r];
+    //   }
+   // }
 
      for (c in 1:C){
-       if(structural_zero_cols[j,c]==0){
-         counter_c += 1;
-         e_cm[counter_c] = sum(exp(log_e_cell_value[j, 1:R, c]));
-         poss_cols[counter_c] = col_margins[j,c];
-       }
+       // if(structural_zero_cols[j,c]==0){
+       //   counter_c += 1;
+       //   e_cm[counter_c] = sum(exp(log_e_cell_value[j, 1:R, c]));
+       //   poss_cols[counter_c] = col_margins[j,c];
+       // }
        for(r in 1:R){
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
@@ -439,8 +436,8 @@ model{
     // target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
-    target +=realpoisson_lpdf(poss_rows| e_rm);
-    target +=realpoisson_lpdf(poss_cols| e_cm);
+    // target +=realpoisson_lpdf(poss_rows| e_rm);
+    // target +=realpoisson_lpdf(poss_cols| e_cm);
 
     // for(r in 1:R){
     //   for(c in 1:C){
