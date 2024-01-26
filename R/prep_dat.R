@@ -1,3 +1,12 @@
+#' Title
+#'
+#' @param row_margins
+#' @param col_margins
+#'
+#' @return
+#' @export
+#'
+#' @examples
 prep_data_stan <- function(row_margins, col_margins){
   R <- ncol(row_margins)
   C <- ncol(col_margins)
@@ -13,6 +22,15 @@ prep_data_stan <- function(row_margins, col_margins){
   return(standata)
 }
 
+#' Title
+#'
+#' @param struc_zero_rm
+#' @param struc_zero_cm
+#'
+#' @return
+#' @export
+#'
+#' @examples
 prep_zeros <- function(struc_zero_rm="", struc_zero_cm=""){
   J = nrow(struc_zero_rm)
   R = ncol(struc_zero_rm)
@@ -31,6 +49,20 @@ prep_zeros <- function(struc_zero_rm="", struc_zero_cm=""){
   )
 }
 
+#' Title
+#'
+#' @param use_dist
+#' @param area_re
+#' @param inc_rm
+#' @param predictors_rm
+#' @param vary_sd
+#' @param llmod_const
+#' @param llmod_structure_omit
+#'
+#' @return
+#' @export
+#'
+#' @examples
 prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
@@ -102,6 +134,21 @@ prep_options_stan <- function(use_dist,
   )
 }
 
+#' Title
+#'
+#' @param prior_lkj
+#' @param prior_mu_ce_scale
+#' @param prior_mu_re_scale
+#' @param prior_sigma_c_scale
+#' @param prior_sigma_c_mu_scale
+#' @param prior_sigma_ce_scale
+#' @param prior_sigma_re_scale
+#' @param prior_cell_effect_scale
+#'
+#' @return
+#' @export
+#'
+#' @examples
 prep_priors_stan <- function(prior_lkj,
                              prior_mu_ce_scale,
                              prior_mu_re_scale,
