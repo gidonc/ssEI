@@ -189,7 +189,7 @@ parameters{
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  // array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
  array[has_area_cell_effects*n_areas] matrix[(R - 1), (C - 1)] area_cell_effect_raw;    // logit column probabilities for area j and cols
- real area_effect_raw[has_free_area*n_areas];
+ real area_effect_raw[has_free_area*(n_areas-1)];
  real area_effect_mu[has_free_area];
  // matrix[n_areas, (R - 1)] area_row_effect_raw;
  // matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
@@ -322,7 +322,11 @@ transformed parameters{
       }
     }
   if(has_free_area == 1){
-    area_effect[j] = area_effect_raw[j];
+    if(j == n_areas){
+      area_effect[j] = area_effect_mu[1];
+    } else{
+      area_effect[j] = area_effect_raw[j];
+    }
   } else {
     area_effect[j] = log(sum(row_margins[j])) - log_sum_exp(to_vector(area_effect_components[j]));
   }
