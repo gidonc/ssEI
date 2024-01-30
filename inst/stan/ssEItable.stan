@@ -208,6 +208,7 @@ parameters{
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
  real<lower=0> sigma_c_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
+  // real<lower=0> sigma_c_raw_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
  real<lower=0> sigma_c_sigma[(lflag_vary_sd ==2) ? 1 : 0]; //hierarchical standard deviatation on standard deviations
  vector[(lflag_vary_sd ==2) ? 1 : 0] sigma_c_mu; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
@@ -501,10 +502,14 @@ model{
 
 
     }
+    if(lflag_vary_sd == 2){
+       ame_sigma~lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
+    } else{
+       ame_sigma~normal(0, 3);
+    }
     if(has_free_area == 1){
       area_effect_raw ~ normal(area_effect_mu[1], sigma_area_effect[1]);
       sigma_area_effect~normal(0, 3);
-      ame_sigma~normal(0, 3);
       area_effect_mu~normal(0, 10);
     }
 
