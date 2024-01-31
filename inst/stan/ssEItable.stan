@@ -196,7 +196,7 @@ parameters{
  array[n_areas] vector[(R - 1) + has_area_col_effects* (C - 1)] ame_alpha;
  vector<lower=0>[(R - 1) + has_area_col_effects* (C - 1)] ame_sigma;
  // matrix[(R - 1), (C - 1)] cell_effect_raw;
- vector[(R -1) * (C - 1)] mu_area_cell_effect_raw;
+ vector[(R -1) * (C - 1)] inv_mu_area_cell_effect_raw;
  // real<lower=0> cell_effect_sigma;
 
  // matrix[R, C] cell_effect;
@@ -240,7 +240,7 @@ transformed parameters{
   matrix[n_areas, (R - 1)] area_row_effect_raw;
   matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
   // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
-
+  vector[(R -1) * (C - 1)] mu_area_cell_effect_raw;
 
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
 
@@ -283,6 +283,7 @@ transformed parameters{
     if(has_area_col_effects == 1){
       mu_ame[R:R + C - 2] = mu_ce_raw;
     }
+    mu_area_cell_effect_raw = 1/inv_mu_area_cell_effect_raw;
 
   // for(r in 1:R){
   //   for(c in 1:C){
@@ -507,6 +508,7 @@ model{
     } else{
        ame_sigma~normal(0, 3);
     }
+    inv_mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
     if(has_free_area == 1){
       area_effect_raw ~ normal(area_effect_mu[1], sigma_area_effect[1]);
       sigma_area_effect~normal(0, 3);
