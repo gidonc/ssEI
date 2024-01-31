@@ -207,10 +207,10 @@ parameters{
  real<lower=0> sigma_area_effect[has_free_area];
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
- real<lower=0> sigma_c_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
+ real<lower=0> sigma_c_raw[has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1))]; //scale of area col variation from mu_c
   // real<lower=0> sigma_c_raw_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
- real<lower=0> sigma_c_sigma[(lflag_vary_sd ==2) ? 1 : 0]; //hierarchical standard deviatation on standard deviations
- vector[(lflag_vary_sd ==2) ? 1 : 0] sigma_c_mu; //hierarchical mean on standard deviations
+ real<lower=0> sigma_c_sigma[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)]; //hierarchical standard deviatation on standard deviations
+ vector[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)] sigma_c_mu; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  // cholesky_factor_corr[has_L_ame*K_ame] L_ame_raw; // for modelling correlation matrix
  // array[n_areas, R] simplex[C] theta_jr;
@@ -235,7 +235,7 @@ transformed parameters{
   matrix[n_areas, C] area_col_effect;
   // matrix[R, C] cell_effect;
   array[n_areas] matrix[R, C] area_cell_effect;    // logit column probabilities for area j and cols
-  real<lower=0> sigma_c[(R - 1) * (C - 1)]; //scale of area col variation from mu_c
+  real<lower=0> sigma_c[has_area_cell_effects * (R - 1) * (C - 1)]; //scale of area col variation from mu_c
   real area_effect[n_areas];
   matrix[n_areas, (R - 1)] area_row_effect_raw;
   matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
@@ -345,10 +345,12 @@ transformed parameters{
       }
     }
 
-    if(lflag_vary_sd == 0){
-      sigma_c = rep_array(sigma_c_raw[1], (R - 1)*(C - 1));
-    } else {
-      sigma_c = sigma_c_raw;
+    if(has_area_cell_effects==1){
+      if(lflag_vary_sd == 0){
+        sigma_c = rep_array(sigma_c_raw[1], (R - 1)*(C - 1));
+      } else {
+          sigma_c = sigma_c_raw;
+      }
     }
 
 
@@ -461,18 +463,20 @@ model{
 
 
     // sigma_c ~ normal(0, 5);
-    if(lflag_vary_sd == 2){
-      sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
-      sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-      for(s in 1:K_t){
-        sigma_c_raw[s]~lognormal(sigma_c_mu, sigma_c_sigma);
+    if(has_area_cell_effects==1){
+      if(lflag_vary_sd == 2){
+        sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
+        sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
+        for(s in 1:K_t){
+          sigma_c_raw[s]~lognormal(sigma_c_mu, sigma_c_sigma);
+        }
+      } else {
+        sigma_c_raw ~ normal(0, prior_sigma_c_scale);
       }
-    } else {
-      sigma_c_raw ~ normal(0, prior_sigma_c_scale);
     }
     mu_ce_raw~ normal(0, prior_mu_ce_scale);
     mu_re_raw~ normal(0, prior_mu_re_scale);
-
+    mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
     // sigma_re~normal(0, prior_sigma_re_scale);
     // to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
@@ -508,12 +512,13 @@ model{
 
 
     }
-    if(lflag_vary_sd == 2){
+    if(lflag_vary_sd == 2 && has_area_cell_effects == 1){
        ame_sigma~lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
     } else{
        ame_sigma~normal(0, 3);
     }
-    mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
+
+
     if(has_free_area == 1){
       area_effect_raw ~ normal(area_effect_mu[1], sigma_area_effect[1]);
       sigma_area_effect~normal(0, 3);
