@@ -291,13 +291,16 @@ transformed parameters{
 
   // cell_effect = rep_matrix(0.0, R, C);
   // cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
-    mu_re[1:R -1] = mu_row_effects + scale_row_effects * mu_re_raw;
+    // mu_re[1:R -1] = mu_row_effects + scale_row_effects * mu_re_raw;
+    mu_re[1:R -1] = mu_re_raw;
     mu_ame[1:R - 1] = mu_re[1:R - 1];
-    mu_ce[1: C - 1] = mu_col_effects + scale_col_effects*mu_ce_raw;
+    // mu_ce[1: C - 1] = mu_col_effects + scale_col_effects*mu_ce_raw;
+    mu_ce[1: C - 1] = mu_ce_raw;
     if(has_area_col_effects == 1){
       mu_ame[R:R + C - 2] = mu_ce[1:C - 1];
     }
-    mu_area_cell_effect = mu_cell_effects + scale_cell_effects * mu_area_cell_effect_raw;
+    // mu_area_cell_effect = mu_cell_effects + scale_cell_effects * mu_area_cell_effect_raw;
+    mu_area_cell_effect = mu_area_cell_effect_raw;
 
 
   // for(r in 1:R){
@@ -494,12 +497,12 @@ model{
     // mu_re_raw~ normal(0, prior_mu_re_scale);
     // mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
-    // mu_ce_raw~ normal(mu_col_effects, scale_col_effects);
-    mu_ce_raw ~ std_normal();
-    // mu_re_raw~ normal(mu_row_effects, scale_row_effects);
-    mu_re_raw ~ std_normal();
-    // mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
-    mu_area_cell_effect_raw ~ std_normal();
+    mu_ce~ normal(mu_col_effects, scale_col_effects);
+    // mu_ce_raw ~ std_normal();
+    mu_re_raw~ normal(mu_row_effects, scale_row_effects);
+    // mu_re_raw ~ std_normal();
+    mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
+    // mu_area_cell_effect_raw ~ std_normal();
     mu_cell_effects_raw ~ std_normal();
     mu_col_effects_raw ~ std_normal();
     mu_row_effects_raw ~ std_normal();
