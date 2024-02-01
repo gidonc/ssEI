@@ -244,6 +244,7 @@ transformed parameters{
   real area_effect[n_areas];
   matrix[n_areas, (R - 1)] area_row_effect_raw;
   matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
+  vector[(R -1) * (C - 1)] mu_area_cell_effect;
   // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
 
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
@@ -281,12 +282,13 @@ transformed parameters{
 
   // cell_effect = rep_matrix(0.0, R, C);
   // cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
-    mu_re[1:R -1] = mu_re_raw;
-    mu_ame[1:R - 1] = mu_re_raw;
-    mu_ce[1: C - 1] = mu_ce_raw;
+    mu_re[1:R -1] = mu_row_effects + scale_row_effects * mu_re_raw;
+    mu_ame[1:R - 1] = mu_re[1:R - 1];
+    mu_ce[1: C - 1] = mu_col_effects + scale_col_effects*mu_ce_raw;
     if(has_area_col_effects == 1){
-      mu_ame[R:R + C - 2] = mu_ce_raw;
+      mu_ame[R:R + C - 2] = mu_ce[1:C - 1];
     }
+    mu_area_cell_effect = mu_cell_effects + scale_cell_effects * mu_area_cell_effect_raw;
 
 
   // for(r in 1:R){
@@ -311,7 +313,7 @@ transformed parameters{
     } else if(has_area_cell_effects==0){
       for(r in 1:(R - 1)){
         for(c in 1:(C  - 1)){
-          area_cell_effect[j, r, c] = mu_area_cell_effect_raw[((C - 1) * (r - 1)) + c ];
+          area_cell_effect[j, r, c] = mu_area_cell_effect[((C - 1) * (r - 1)) + c ];
         }
       }
     }
@@ -483,9 +485,12 @@ model{
     // mu_re_raw~ normal(0, prior_mu_re_scale);
     // mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
-    mu_ce_raw~ normal(mu_col_effects, scale_col_effects);
-    mu_re_raw~ normal(mu_row_effects, scale_row_effects);
-    mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
+    // mu_ce_raw~ normal(mu_col_effects, scale_col_effects);
+    mu_ce_raw ~ std_normal();
+    // mu_re_raw~ normal(mu_row_effects, scale_row_effects);
+    mu_re_raw ~ std_normal();
+    // mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
+    mu_area_cell_effect_raw ~ std_normal();
     mu_cell_effects ~ normal(0, prior_cell_effect_scale);
     scale_cell_effects~normal(0, prior_cell_effect_scale);
     mu_col_effects ~ normal(0, prior_mu_ce_scale);
