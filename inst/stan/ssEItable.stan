@@ -218,7 +218,12 @@ parameters{
  // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
  // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
  // matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
-
+ real mu_cell_effects;
+ real<lower=0> scale_cell_effects;
+ real mu_col_effects;
+ real<lower=0> scale_col_effects;
+ real mu_row_effects;
+ real<lower=0> scale_row_effects;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -474,9 +479,20 @@ model{
         sigma_c_raw ~ normal(0, prior_sigma_c_scale);
       }
     }
-    mu_ce_raw~ normal(0, prior_mu_ce_scale);
-    mu_re_raw~ normal(0, prior_mu_re_scale);
-    mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
+    // mu_ce_raw~ normal(0, prior_mu_ce_scale);
+    // mu_re_raw~ normal(0, prior_mu_re_scale);
+    // mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
+
+    mu_ce_raw~ normal(mu_col_effects, scale_col_effects);
+    mu_re_raw~ normal(mu_row_effects, scale_row_effects);
+    mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
+    mu_cell_effects ~ normal(0, prior_cell_effect_scale);
+    scale_cell_effects~normal(0, prior_cell_effect_scale);
+    mu_col_effects ~ normal(0, prior_mu_ce_scale);
+    scale_col_effects~normal(0, prior_mu_ce_scale);
+    mu_row_effects ~ normal(0, prior_mu_re_scale);
+    scale_col_effects~normal(0, prior_mu_re_scale);
+
 
     // sigma_re~normal(0, prior_sigma_re_scale);
     // to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
