@@ -53,7 +53,7 @@ transformed data{
   int n_poss_rows=0;
   int structural_zero_cols[n_areas, C];
   int n_poss_cols=0;
-  int phi_length;
+  int has_phi;
   int has_area_re;
   int has_free_area;
   int has_area_col_effects;
@@ -63,11 +63,14 @@ transformed data{
   // int mu_re_ce_in_cell_effects  = 1;
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
+  real<lower=0> prior_phi_scale;
 
-    if(lflag_dist==2){
-    phi_length = 1;
+  prior_phi_scale =3;
+
+  if(lflag_dist==2){
+    has_phi = 1;
   } else{
-    phi_length = 0;
+    has_phi = 0;
   }
 
   if(lflag_area_re == 0){
@@ -193,7 +196,8 @@ parameters{
  real area_effect_mu[has_free_area];
  // matrix[n_areas, (R - 1)] area_row_effect_raw;
  // matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
- array[n_areas] vector[(R - 1) + has_area_col_effects* (C - 1)] ame_alpha;
+ // array[n_areas] vector[(R - 1) + has_area_col_effects* (C - 1)] ame_alpha;
+ array[n_areas] row_vector[(R - 1) + has_area_col_effects* (C - 1)] area_margin_effects_raw;
  vector<lower=0>[(R - 1) + has_area_col_effects* (C - 1)] ame_sigma;
  // matrix[(R - 1), (C - 1)] cell_effect_raw;
  vector[(R -1) * (C - 1)] mu_area_cell_effect_raw;
@@ -226,6 +230,9 @@ parameters{
  real<lower=0> scale_row_effects;
  real mu_effects;
  real<lower=0> scale_effects;
+ real<lower=0, upper=1> phi[has_phi];
+ real mu_log_phi[has_phi];
+ real<lower=0> log_phi_scale[has_phi];
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -236,7 +243,7 @@ transformed parameters{
   vector[R] mu_re;
   vector[C] mu_ce;
   real log_e_cell_value[n_areas, R, C];
-  matrix[n_areas, (R - 1) + has_area_col_effects* (C - 1)] area_margin_effects_raw;
+  // matrix[n_areas, (R - 1) + has_area_col_effects* (C - 1)] area_margin_effects_raw;
   vector[(R - 1) + has_area_col_effects * (C - 1)] mu_ame;
   matrix[n_areas, R] area_row_effect;
   matrix[n_areas, C] area_col_effect;
@@ -250,6 +257,7 @@ transformed parameters{
   real mu_cell_effects;
   real mu_row_effects;
   real mu_col_effects;
+  // real<lower=0> phi[has_phi*n_areas];
   // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
 
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
@@ -266,6 +274,7 @@ transformed parameters{
   // } else{
   //   L_ame = diag_matrix(rep_vector(1, K_ame));
   // }
+
 
 
 
@@ -291,11 +300,11 @@ transformed parameters{
 
   // cell_effect = rep_matrix(0.0, R, C);
   // cell_effect[1:(R - 1), 1:(C - 1)] = cell_effect_raw;
-    mu_re[1:R -1] = mu_row_effects + scale_row_effects * mu_re_raw;
-    // mu_re[1:R -1] = mu_re_raw;
+    // mu_re[1:R -1] = mu_row_effects + scale_row_effects * mu_re_raw;
+    mu_re[1:R -1] = mu_re_raw;
     mu_ame[1:R - 1] = mu_re[1:R - 1];
-    mu_ce[1: C - 1] = mu_col_effects + scale_col_effects*mu_ce_raw;
-    // mu_ce[1: C - 1] = mu_ce_raw;
+    // mu_ce[1: C - 1] = mu_col_effects + scale_col_effects*mu_ce_raw;
+    mu_ce[1: C - 1] = mu_ce_raw;
     if(has_area_col_effects == 1){
       mu_ame[R:R + C - 2] = mu_ce[1:C - 1];
     }
@@ -316,6 +325,7 @@ transformed parameters{
 
 
   for(j in 1:n_areas){
+
     area_cell_effect[j] = rep_matrix(0.0, R, C);
     if(has_area_cell_effects == 1){
       for(r in 1:(R - 1)){
@@ -330,7 +340,7 @@ transformed parameters{
       }
     }
 
-    area_margin_effects_raw[j] = to_row_vector(mu_ame + ame_sigma .*(ame_alpha[j]));
+    // area_margin_effects_raw[j] = to_row_vector(mu_ame + ame_sigma .*(ame_alpha[j]));
 
     area_row_effect_raw[j] = rep_row_vector(0, R - 1);
     area_row_effect[j] = rep_row_vector(0, R);
@@ -384,6 +394,7 @@ model{
   // vector[n_poss_cols] e_cm;
   // row_vector[n_poss_cols] poss_cols;
   vector[n_poss_cells] e_cell;
+  vector[has_phi*n_poss_cells] alpha_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
   // matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
   // matrix[non0_cm, R] cell_values_matrix_c;
@@ -437,7 +448,12 @@ model{
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
-           e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
+           if(lflag_dist == 0){
+             e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
+           } else if(lflag_dist == 2){
+             alpha_cell[counter_cell] = phi[1];
+             e_cell[counter_cell] = exp(log_e_cell_value[j, r, c])/(phi[1] + exp(log_e_cell_value[j, r, c]));
+           }
          }
        }
        // if(col_margins[j, c] > 0){
@@ -464,7 +480,14 @@ model{
 
 
     // target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
-    target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+    if(lflag_dist == 0){
+      target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+    } else if(lflag_dist==1){
+      phi ~ normal(0, prior_phi_scale);
+      mu_log_phi ~ normal(0, 1);
+      log_phi_scale ~ normal(0, 1);
+      target +=realnegbinom3_lpdf(cell_values_row_vector | alpha_cell, e_cell);
+    }
 
     // target +=realpoisson_lpdf(poss_rows| e_rm);
     // target +=realpoisson_lpdf(poss_cols| e_cm);
@@ -497,10 +520,10 @@ model{
     // mu_re_raw~ normal(0, prior_mu_re_scale);
     // mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
-    // mu_ce~ normal(mu_col_effects, scale_col_effects);
-    mu_ce_raw ~ std_normal();
-    // mu_re_raw~ normal(mu_row_effects, scale_row_effects);
-    mu_re_raw ~ std_normal();
+    mu_ce~ normal(mu_col_effects, scale_col_effects);
+    // mu_ce_raw ~ std_normal();
+    mu_re_raw~ normal(mu_row_effects, scale_row_effects);
+    // mu_re_raw ~ std_normal();
     mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
     // mu_area_cell_effect_raw ~ std_normal();
     mu_cell_effects_raw ~ std_normal();
@@ -531,7 +554,8 @@ model{
     // cell_effect_sigma ~ cauchy(0,2);
     // to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
-      ame_alpha[j] ~ std_normal();
+      // ame_alpha[j] ~ std_normal();
+      area_margin_effects_raw[j] ~ normal(mu_ame, ame_sigma);
       if(has_area_cell_effects==1){
         if(j < n_areas){
           to_vector(area_cell_effect_raw[j]) ~ normal(mu_area_cell_effect_raw, sigma_c);
