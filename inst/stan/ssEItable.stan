@@ -64,6 +64,9 @@ transformed data{
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
   real<lower=0> prior_phi_scale;
+  int n_margin_sigmas;
+  int n_cell_sigmas;
+  int n_table_sigmas;
 
   prior_phi_scale =3;
 
@@ -181,6 +184,10 @@ transformed data{
 
   has_L_ame = 0;
 
+  n_margin_sigmas = (R - 1) + has_area_col_effects* (C - 1);
+  n_cell_sigmas = has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1));
+  n_table_sigmas = n_margin_sigmas + n_cell_sigmas;
+
 
 
 
@@ -198,7 +205,6 @@ parameters{
  // matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
  // array[n_areas] vector[(R - 1) + has_area_col_effects* (C - 1)] ame_alpha;
  array[n_areas] row_vector[(R - 1) + has_area_col_effects* (C - 1)] area_margin_effects_raw;
- vector<lower=0>[(R - 1) + has_area_col_effects* (C - 1)] ame_sigma;
  // matrix[(R - 1), (C - 1)] cell_effect_raw;
  vector[(R -1) * (C - 1)] mu_area_cell_effect_raw;
  // real<lower=0> cell_effect_sigma;
@@ -211,7 +217,8 @@ parameters{
  real<lower=0> sigma_area_effect[has_free_area];
 
  // vector<lower=0>[(R - 1) * (C - 1)] sigma_c; //scale of area col variation from mu_c
- real<lower=0> sigma_c_raw[has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1))]; //scale of area col variation from mu_c
+ real<lower=0> all_table_sigmas_raw[n_table_sigmas];
+
   // real<lower=0> sigma_c_raw_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
  real<lower=0> sigma_c_sigma[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)]; //hierarchical standard deviatation on standard deviations
  vector[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)] sigma_c_mu; //hierarchical mean on standard deviations
@@ -257,7 +264,10 @@ transformed parameters{
   real mu_cell_effects;
   real mu_row_effects;
   real mu_col_effects;
+  real<lower=0> sigma_c_raw[n_cell_sigmas]; //scale of area col variation from mu_c
   // real<lower=0> phi[has_phi*n_areas];
+  vector<lower=0>[n_margin_sigmas] ame_sigma;
+
   // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
 
   // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
@@ -274,6 +284,10 @@ transformed parameters{
   // } else{
   //   L_ame = diag_matrix(rep_vector(1, K_ame));
   // }
+
+
+  sigma_c_raw = all_table_sigmas_raw[1:n_cell_sigmas];
+  ame_sigma = to_vector(all_table_sigmas_raw[n_cell_sigmas + 1:n_cell_sigmas + n_margin_sigmas]);
 
 
 
@@ -557,9 +571,7 @@ model{
       // ame_alpha[j] ~ std_normal();
       area_margin_effects_raw[j] ~ normal(mu_ame, ame_sigma);
       if(has_area_cell_effects==1){
-        if(j < n_areas){
           to_vector(area_cell_effect_raw[j]) ~ normal(mu_area_cell_effect_raw, sigma_c);
-        }
       }
       // area_row_effect_raw[j] ~ normal(0, sigma_re);
       // if(has_area_col_effects == 1){
