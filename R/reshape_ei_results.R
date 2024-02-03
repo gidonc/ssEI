@@ -156,3 +156,25 @@ summarize_cvdraws <- function(cv_draws){
         est_cell_value = median(est_cell_value))
   }
 }
+
+ei_modval_summary <- function(ei_stanfit, pars = "log_e_cell_value", probs = c(0.025, 0.25, 0.50, 0.75, 0.975), exponentiate = TRUE, ...){
+
+  modval_summary <- rstan::summary(ei_stanfit,
+                               pars = pars,
+                               probs = probs,
+                               ...
+  )
+  modval_summary <- modval_summary$summary |>
+    as.matrix() |>
+    tibble::as_tibble(rownames="param") |>
+    tidyr::separate("param",
+                    into=c("param_name", "area_no", "row_no", "col_no", NA),
+                    sep="[\\[,\\]]",
+                    remove=FALSE) |>
+    dplyr::mutate(dplyr::across(c(area_no, row_no, col_no), as.numeric))
+  if(exponentiate == TRUE){
+    modval_summary <- modval_summary |>
+      dplyr::mutate(dplyr::across(-c(param, param_name, area_no, row_no, col_no), .fn = exp))
+  }
+  modval_summary
+}
