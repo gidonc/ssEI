@@ -561,7 +561,7 @@ model{
     // mu_re_raw~ normal(0, prior_mu_re_scale);
     // mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
-    mu_ce~ normal(mu_col_effects, scale_col_effects);
+    mu_ce_raw ~ normal(mu_col_effects, scale_col_effects);
     // mu_ce_raw ~ std_normal();
     mu_re_raw~ normal(mu_row_effects, scale_row_effects);
     // mu_re_raw ~ std_normal();
