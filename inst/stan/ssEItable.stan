@@ -199,7 +199,7 @@ parameters{
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  // array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
  array[has_area_cell_effects*n_areas] vector[(R - 1) * (C - 1)] area_cell_effect_raw;    // logit column probabilities for area j and cols
- real area_effect_raw[has_free_area*n_areas];
+ real area_effect_raw[has_free_area*(n_areas - 1)];
  real area_effect_mu[has_free_area];
  // matrix[n_areas, (R - 1)] area_row_effect_raw;
  // matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
@@ -240,6 +240,7 @@ parameters{
  real<lower=0, upper=1> phi[has_phi];
  real mu_log_phi[has_phi];
  real<lower=0> log_phi_scale[has_phi];
+ real overall_mu;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -257,7 +258,7 @@ transformed parameters{
   // matrix[R, C] cell_effect;
   array[n_areas] matrix[R, C] area_cell_effect;    // logit column probabilities for area j and cols
   real<lower=0> sigma_c[has_area_cell_effects * (R - 1) * (C - 1)]; //scale of area col variation from mu_c
-  real area_effect[n_areas];
+  vector[n_areas] area_effect;
   matrix[n_areas, (R - 1)] area_row_effect_raw;
   matrix[has_area_col_effects*n_areas, has_area_col_effects*(C - 1)] area_col_effect_raw;
   vector[(R -1) * (C - 1)] mu_area_cell_effect;
@@ -310,6 +311,7 @@ transformed parameters{
 
   mu_re = rep_vector(0, R);
   mu_ce = rep_vector(0, C);
+  area_effect = rep_vector(0, n_areas);
 
 
   // cell_effect = rep_matrix(0.0, R, C);
@@ -376,14 +378,16 @@ transformed parameters{
       }
     }
   if(has_free_area == 1){
-    area_effect[j] = area_effect_raw[j];
+    if(j<n_areas){
+      area_effect[j] = area_effect_raw[j];
+    }
   } else {
     area_effect[j] = log(sum(row_margins[j])) - log_sum_exp(to_vector(area_effect_components[j]));
   }
 
     for(r in 1:R){
         for(c in 1:C){
-          log_e_cell_value[j, r, c] = area_effect[j] +area_row_effect[j, r] + area_col_effect[j, c] + area_cell_effect[j, r, c];
+          log_e_cell_value[j, r, c] = overall_mu + area_effect[j] +area_row_effect[j, r] + area_col_effect[j, c] + area_cell_effect[j, r, c];
         }
       }
     }
@@ -599,6 +603,7 @@ model{
       area_effect_raw ~ normal(area_effect_mu[1], sigma_area_effect[1]);
       sigma_area_effect~normal(0, 3);
       area_effect_mu~normal(0, 10);
+      overall_mu ~ normal(0, 3);
     }
 
 }
