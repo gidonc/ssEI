@@ -72,6 +72,7 @@ prep_options_stan <- function(use_dist,
                               llmod_omit_jr,
                               llmod_omit_jc,
                               llmod_omit_jrc,
+                              llmod_centred,
                               llmod_structure_omit
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
@@ -103,6 +104,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!llmod_omit_jrc %in% c(TRUE, FALSE)){
     stop("llmod_omit_jrc must be one of TRUE, FALSE")
+  }
+  if(!llmod_centred %in% c(TRUE, FALSE)){
+    stop("llmod_centred must be one of TRUE, FALSE")
   }
   if(!llmod_structure_omit %in% c("none", "area*r*c", "area*c")){
     stop("llmod_const must be one of none, area*r*c, area*c")
@@ -149,6 +153,10 @@ prep_options_stan <- function(use_dist,
     lflag_llmod_omit_jrc = dplyr::case_when(
       llmod_omit_jrc == TRUE ~ 1,
       llmod_omit_jrc == FALSE ~ 0
+    ),
+    lflag_llmod_centred = dplyr::case_when(
+      llmod_centred == TRUE ~ 1,
+      llmod_centred == FALSE ~ 0
     ),
     lflag_llmod_structure = dplyr::case_when(
       llmod_structure_omit == "none" ~ 0,
