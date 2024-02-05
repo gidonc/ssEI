@@ -69,6 +69,9 @@ prep_options_stan <- function(use_dist,
                               predictors_rm,
                               vary_sd,
                               llmod_const,
+                              llmod_omit_jr,
+                              llmod_omit_jc,
+                              llmod_omit_jrc,
                               llmod_structure_omit
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
@@ -91,6 +94,15 @@ prep_options_stan <- function(use_dist,
   }
   if(!llmod_const %in% c("none", "area_tot")){
     stop("llmod_const must be one of none, area_tot")
+  }
+  if(!llmod_omit_jr %in% c(TRUE, FALSE)){
+    stop("llmod_omit_jr must be one of TRUE, FALSE")
+  }
+  if(!llmod_omit_jc %in% c(TRUE, FALSE)){
+    stop("llmod_omit_jc must be one of TRUE, FALSE")
+  }
+  if(!llmod_omit_jrc %in% c(TRUE, FALSE)){
+    stop("llmod_omit_jrc must be one of TRUE, FALSE")
   }
   if(!llmod_structure_omit %in% c("none", "area*r*c", "area*c")){
     stop("llmod_const must be one of none, area*r*c, area*c")
@@ -125,6 +137,18 @@ prep_options_stan <- function(use_dist,
     lflag_llmod_const = dplyr::case_when(
       llmod_const == "none" ~ 0,
       llmod_const == "area_tot" ~ 1
+    ),
+    lflag_llmod_omit_jr = dplyr::case_when(
+      llmod_omit_jr == TRUE ~ 1,
+      llmod_omit_jr == FALSE ~ 0
+    ),
+    lflag_llmod_omit_jc = dplyr::case_when(
+      llmod_omit_jc == TRUE ~ 1,
+      llmod_omit_jc == FALSE ~ 0
+    ),
+    lflag_llmod_omit_jrc = dplyr::case_when(
+      llmod_omit_jrc == TRUE ~ 1,
+      llmod_omit_jrc == FALSE ~ 0
     ),
     lflag_llmod_structure = dplyr::case_when(
       llmod_structure_omit == "none" ~ 0,
