@@ -358,7 +358,7 @@ transformed parameters{
     if(lflag_centred_r==1){
       row_effect[1:R -1] = row_effect_raw;
     } else if (lflag_centred_r==0){
-      row_effect[1:R - 1] = mu_row_effects + ame_sigma .* row_effect_raw;
+      row_effect[1:R - 1] = mu_row_effects + scale_row_effects .* row_effect_raw;
     }
     if(has_area_row_effects == 1){
         mu_ame[1:R - 1] = row_effect[1:R - 1];
@@ -426,7 +426,7 @@ transformed parameters{
       if(lflag_centred_jr== 1){
         area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
       } else{
-        area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect + are_sigma .* area_row_effect_raw[j]');
+        area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect[1:(R - 1)] + are_sigma .* area_row_effect_raw[j]');
       }
     } else if(has_area_row_effects==0){
       area_row_effect_raw[j] = to_row_vector(row_effect_raw[1:(R - 1)]);
@@ -442,7 +442,7 @@ transformed parameters{
      if(lflag_centred_jc == 1){
         area_col_effect[j, 1:(C - 1)] = area_col_effect_raw[j];
       } else {
-        area_col_effect[j, 1:(C - 1)] = to_row_vector(col_effect + ace_sigma.*area_col_effect_raw[j]');
+        area_col_effect[j, 1:(C - 1)] = to_row_vector(col_effect[1:(C - 1)] + ace_sigma.*area_col_effect_raw[j]');
       }
     } else if(has_area_col_effects==0){
       area_col_effect_raw[j] = to_row_vector(col_effect[1:(C - 1)]);
@@ -664,7 +664,7 @@ model{
       // ame_alpha[j] ~ std_normal();
       if(has_area_row_effects ==1){
         if(lflag_centred_jr ==1){
-          area_row_effect_raw[j] ~ normal(row_effect, are_sigma);
+          area_row_effect_raw[j] ~ normal(row_effect[1:(R - 1)], are_sigma);
         } else{
           area_row_effect_raw[j] ~ std_normal();
         }
@@ -672,7 +672,7 @@ model{
 
       if(has_area_col_effects==1){
         if(lflag_centred_jc == 1){
-          area_col_effect_raw[j] ~ normal(col_effect, ace_sigma);
+          area_col_effect_raw[j] ~ normal(col_effect[1:(C - 1)], ace_sigma);
         } else {
           area_col_effect_raw[j] ~ std_normal();
         }
