@@ -29,11 +29,19 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
-  int<lower = 0, upper =1> lflag_llmod_centred; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_j; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_r; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_c; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_rc; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_jr; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_jc; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_jrc; // flag indicating whether to use (1) centred or (0) decentred parameterization
+  int<lower = 0, upper =1> lflag_centred_m; // flag indicating whether to use (1) centred or (0) decentred parameterization
+
  int<lower = 0, upper =2> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect) [replaced by other flags]
  real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
- real<lower=0> prior_mu_ce_scale; // prior for scale of mu_ce (mean column effect)
+ real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 3)
  real<lower=0> prior_sigma_c_mu_scale; //prior for scale of sigma_c_mu (only if lflag_vary_sd == 3)
  real<lower=0> prior_sigma_ce_scale; //prior of scale for sigma_ce
@@ -195,6 +203,8 @@ transformed data{
   has_L_ame = 0;
 
   n_margin_sigmas = K_ame;
+  int n_row_sigmas = has_area_row_effects * (R - 1);
+  int n_col_sigmas = has_area_col_effects * (C - 1);
   n_cell_sigmas = has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1));
   n_table_sigmas = n_margin_sigmas + n_cell_sigmas;
 
@@ -208,7 +218,7 @@ parameters{
 
  // matrix[has_area_re*n_areas, has_area_re * R * (C - 1)] alpha; // area variation from mu (logit probability row mean)
  // array[has_area_re*n_areas] vector[has_area_re*K] alpha;    // logit column probabilities for area j and rows
- array[has_area_cell_effects*(n_areas -1)] vector[(R - 1) * (C - 1)] area_cell_effect_raw;    // logit column probabilities for area j and cols
+ array[has_area_cell_effects*n_areas] vector[(R - 1) * (C - 1)] area_cell_effect_raw;    // logit column probabilities for area j and cols
  real area_effect_raw[has_free_area*(n_areas)];
  real area_effect_mu[has_free_area];
  // matrix[n_areas, (R - 1)] area_row_effect_raw;
@@ -216,13 +226,12 @@ parameters{
  // array[n_areas] vector[(R - 1) + has_area_col_effects* (C - 1)] ame_alpha;
  array[n_areas] row_vector[K_ame] area_margin_effects_raw;
  // matrix[(R - 1), (C - 1)] cell_effect_raw;
- vector[(R -1) * (C - 1)] mu_area_cell_effect_raw;
  vector[(R -1) * (C - 1)] cell_effect_raw;
  // real<lower=0> cell_effect_sigma;
 
  // matrix[R, C] cell_effect;
- vector[(C - 1)] mu_ce_raw;
- vector[(R - 1)] mu_re_raw;
+ vector[(C - 1)] col_effect_raw;
+ vector[(R - 1)] row_effect_raw;
  // vector[C - 1] col_effect_raw;
  // vector[R - 1] row_effect_raw;
  // vector<lower=0>[has_area_col_effects*(C - 1)] sigma_ce;
@@ -266,15 +275,15 @@ transformed parameters{
   real log_e_cell_value[n_areas, R, C];
   // matrix[n_areas, (R - 1) + has_area_col_effects* (C - 1)] area_margin_effects_raw;
 
-  vector[R] mu_re;
-  vector[C] mu_ce;
+  vector[R] row_effect;
+  vector[C] col_effect;
   vector[K_ame] mu_ame;
   matrix[n_areas, R] area_row_effect;
   matrix[n_areas, C] area_col_effect;
   vector[n_areas] area_effect;
   matrix[n_areas, (R - 1)] area_row_effect_raw;
   matrix[n_areas, (C - 1)] area_col_effect_raw;
-  vector[(R -1) * (C - 1)] mu_area_cell_effect;
+  vector[(R -1) * (C - 1)] cell_effect;
   array[n_areas] matrix[R, C] area_cell_effect;
 
   real<lower=0> sigma_c[has_area_cell_effects * (R - 1) * (C - 1)]; //scale of area col variation from mu_c
@@ -283,6 +292,8 @@ transformed parameters{
   real mu_col_effects;
   real<lower=0> sigma_c_raw[n_cell_sigmas]; //scale of area col variation from mu_c
   vector<lower=0>[n_margin_sigmas] ame_sigma;
+  vector<lower=0>[n_row_sigmas] are_sigma;
+  vector<lower=0>[n_col_sigmas] ace_sigma;
   // real hinge_delta_floor = 1/(100 + inv_hinge_delta_floor);
   // real hinge_delta_min = 1/(100 + inv_hinge_delta_min);
   // // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
@@ -318,45 +329,56 @@ transformed parameters{
 
   sigma_c_raw = all_table_sigmas_raw[1:n_cell_sigmas];
   ame_sigma = to_vector(all_table_sigmas_raw[n_cell_sigmas + 1:n_cell_sigmas + n_margin_sigmas]);
+  are_sigma = to_vector(all_table_sigmas_raw[n_cell_sigmas + 1:n_cell_sigmas +n_row_sigmas]);
+  ace_sigma = to_vector(all_table_sigmas_raw[n_cell_sigmas + n_row_sigmas + 1:n_cell_sigmas +n_margin_sigmas]);
+  if(has_area_cell_effects==1){
+    if(lflag_vary_sd == 0){
+        sigma_c = rep_array(sigma_c_raw[1], (R - 1)*(C - 1));
+      } else {
+        sigma_c = sigma_c_raw;
+      }
+    }
 
-  if(lflag_llmod_centred == 1){
-    mu_cell_effects = mu_cell_effects_raw;
-    mu_col_effects = mu_col_effects_raw;
+
+
+  if(lflag_centred_m == 1){
     mu_row_effects = mu_row_effects_raw;
-  } else if(lflag_llmod_centred == 0){
-    mu_cell_effects = mu_effects + scale_effects*mu_cell_effects_raw;
-    mu_col_effects = mu_effects + scale_effects*mu_col_effects_raw;
+    mu_col_effects = mu_col_effects_raw;
+    mu_cell_effects = mu_cell_effects_raw;
+  } else if(lflag_centred_m == 0){
     mu_row_effects = mu_effects + scale_effects*mu_row_effects_raw;
+    mu_col_effects = mu_effects + scale_effects*mu_col_effects_raw;
+    mu_cell_effects = mu_effects + scale_effects*mu_cell_effects_raw;
   }
 
-  mu_re = rep_vector(0, R);
-  mu_ce = rep_vector(0, C);
+  row_effect = rep_vector(0, R);
+  col_effect = rep_vector(0, C);
   area_effect = rep_vector(0, n_areas);
 
-    if(lflag_llmod_centred==1){
-      mu_re[1:R -1] = mu_re_raw;
-    } else if (lflag_llmod_centred==0){
-      mu_re[1:R - 1] = mu_row_effects + scale_row_effects * mu_re_raw;
+    if(lflag_centred_r==1){
+      row_effect[1:R -1] = row_effect_raw;
+    } else if (lflag_centred_r==0){
+      row_effect[1:R - 1] = mu_row_effects + ame_sigma .* row_effect_raw;
     }
     if(has_area_row_effects == 1){
-        mu_ame[1:R - 1] = mu_re[1:R - 1];
+        mu_ame[1:R - 1] = row_effect[1:R - 1];
     }
 
 
 
-    if(lflag_llmod_centred == 0){
-      mu_ce[1: C - 1] = mu_col_effects + scale_col_effects*mu_ce_raw;
-    } else if(lflag_llmod_centred == 1){
-      mu_ce[1: C - 1] = mu_ce_raw;
+    if(lflag_centred_c == 0){
+      col_effect[1: C - 1] = mu_col_effects + scale_col_effects*col_effect_raw;
+    } else if(lflag_centred_c == 1){
+      col_effect[1: C - 1] = col_effect_raw;
     }
     if(has_area_col_effects == 1){
-      mu_ame[has_area_row_effects*(R - 1) + 1:has_area_row_effects*(R - 1) + 1 + C - 2] = mu_ce[1:C - 1];
+      mu_ame[has_area_row_effects*(R - 1) + 1:has_area_row_effects*(R - 1) + 1 + C - 2] = col_effect[1:C - 1];
     }
 
-    if(lflag_llmod_centred == 0){
-      mu_area_cell_effect = mu_cell_effects + scale_cell_effects*mu_area_cell_effect_raw;
-    } else if(lflag_llmod_centred ==1){
-      mu_area_cell_effect = mu_area_cell_effect_raw;
+    if(lflag_centred_rc == 0){
+      cell_effect = mu_cell_effects + scale_cell_effects*cell_effect_raw;
+    } else if(lflag_centred_rc ==1){
+      cell_effect = cell_effect_raw;
     }
 
 
@@ -376,10 +398,14 @@ transformed parameters{
 
     area_cell_effect[j] = rep_matrix(0.0, R, C);
     for(r in 1:(R - 1)){
-      if(has_area_cell_effects == 1 && j < n_areas){
-        area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
+      if(has_area_cell_effects == 1){
+        if(lflag_centred_jrc){
+          area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
+        } else{
+          area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(cell_effect[((r - 1)*(C - 1) + 1):r*(C - 1)] + to_vector(sigma_c[((r - 1)*(C - 1) + 1):r*(C - 1)]) .* area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
+        }
       } else if(has_area_cell_effects == 0){
-        area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(mu_area_cell_effect[((r - 1)*(C - 1) + 1):r*(C - 1)]);
+        area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(cell_effect[((r - 1)*(C - 1) + 1):r*(C - 1)]);
       }
 
     // } else if(has_area_cell_effects==0){
@@ -397,21 +423,29 @@ transformed parameters{
 
    if(has_area_row_effects == 1){
       area_row_effect_raw[j] = area_margin_effects_raw[j, 1:(R - 1)];
-      area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
+      if(lflag_centred_jr== 1){
+        area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
+      } else{
+        area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect + are_sigma .* area_row_effect_raw[j]');
+      }
     } else if(has_area_row_effects==0){
-      area_row_effect_raw[j] = to_row_vector(mu_re[1:(R - 1)]);
-      area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
+      area_row_effect_raw[j] = to_row_vector(row_effect_raw[1:(R - 1)]);
+      area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect[1:(R -1)]);
     }
 
 
     area_col_effect_raw[j] = rep_row_vector(0, C - 1);
     area_col_effect[j] = rep_row_vector(0, C);
 
-    if(has_area_col_effects == 1 && j < n_areas){
-      area_col_effect_raw[j, 1:(C - 1)] = area_margin_effects_raw[j, (R - 1 + 1): (R - 1 + C - 1)];
-      area_col_effect[j, 1:(C - 1)] = area_col_effect_raw[j];
+   if(has_area_col_effects == 1){
+     area_col_effect_raw[j, 1:(C - 1)] = area_margin_effects_raw[j, (has_area_row_effects*(R - 1) + 1): (has_area_row_effects*(R - 1) + (C - 1))];
+     if(lflag_centred_jc == 1){
+        area_col_effect[j, 1:(C - 1)] = area_col_effect_raw[j];
+      } else {
+        area_col_effect[j, 1:(C - 1)] = to_row_vector(col_effect + ace_sigma.*area_col_effect_raw[j]');
+      }
     } else if(has_area_col_effects==0){
-      area_col_effect_raw[j] = to_row_vector(mu_ce[1:(C - 1)]);
+      area_col_effect_raw[j] = to_row_vector(col_effect[1:(C - 1)]);
       area_col_effect[j, 1:(R - 1)] = area_col_effect_raw[j];
     }
 
@@ -423,9 +457,9 @@ transformed parameters{
     }
   if(has_free_area == 1){
     // if(j<n_areas){
-      if(lflag_llmod_centred==1){
+      if(lflag_centred_j==1){
         area_effect[j] = area_effect_raw[j];
-      } else if (lflag_llmod_centred == 0){
+      } else if (lflag_centred_j == 0){
         area_effect[j] = area_effect_mu[1] + sigma_area_effect[1]*area_effect_raw[j];
       }
     // }
@@ -437,14 +471,6 @@ transformed parameters{
         for(c in 1:C){
           log_e_cell_value[j, r, c] = area_effect[j] + area_row_effect[j, r] + area_col_effect[j, c] + area_cell_effect[j, r, c];
         }
-      }
-    }
-
-    if(has_area_cell_effects==1){
-      if(lflag_vary_sd == 0){
-        sigma_c = rep_array(sigma_c_raw[1], (R - 1)*(C - 1));
-      } else {
-          sigma_c = sigma_c_raw;
       }
     }
 
@@ -582,25 +608,31 @@ model{
         sigma_c_raw ~ normal(0, prior_sigma_c_scale);
       }
     }
-    // mu_ce_raw~ normal(0, prior_mu_ce_scale);
-    // mu_re_raw~ normal(0, prior_mu_re_scale);
-    // mu_area_cell_effect_raw ~ normal(0, prior_cell_effect_scale);
+    // cell_effect_raw~ normal(0, prior_mu_ce_scale);
+    // row_effect_raw~ normal(0, prior_mu_re_scale);
+    // cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
-    if(lflag_llmod_centred ==0 ){
-       mu_ce_raw ~ std_normal();
-       mu_re_raw ~ std_normal();
-       mu_area_cell_effect_raw ~ std_normal();
-    } else if(lflag_llmod_centred==1){
-       mu_ce_raw ~ normal(mu_col_effects, scale_col_effects);
-       mu_re_raw~ normal(mu_row_effects, scale_row_effects);
-       mu_area_cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
+    if(lflag_centred_c  == 0){
+       col_effect_raw ~ std_normal();
+    } else {
+       col_effect_raw ~ normal(mu_col_effects, scale_col_effects);
+    }
+    if(lflag_centred_r == 0){
+       row_effect_raw ~ std_normal();
+    } else {
+       row_effect_raw~ normal(mu_row_effects, scale_row_effects);
+    }
+    if(lflag_centred_rc == 0){
+       cell_effect_raw ~ std_normal();
+    } else {
+       cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
     }
 
 
     scale_effects ~ normal(0, prior_cell_effect_scale);
     mu_effects ~ normal(0, prior_cell_effect_scale);
 
-    if(lflag_llmod_centred == 1){
+    if(lflag_centred_m == 1){
       mu_row_effects ~ normal(mu_effects, scale_effects);
       mu_col_effects_raw ~ normal(mu_effects, scale_effects);
       mu_cell_effects ~ normal(mu_effects, scale_effects);
@@ -628,13 +660,31 @@ model{
     // // cell_effect_raw ~ normal(mu_cell_effect, cell_effect_sigma);
     // cell_effect_sigma ~ cauchy(0,2);
     // to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
-    for (j in 1:(n_areas - 1)){
+    for (j in 1:n_areas){
       // ame_alpha[j] ~ std_normal();
-      if(has_area_row_effects==1 || has_area_col_effects == 1){
-          area_margin_effects_raw[j] ~ normal(mu_ame, ame_sigma);
+      if(has_area_row_effects ==1){
+        if(lflag_centred_jr ==1){
+          area_row_effect_raw[j] ~ normal(row_effect, are_sigma);
+        } else{
+          area_row_effect_raw[j] ~ std_normal();
+        }
       }
+
+      if(has_area_col_effects==1){
+        if(lflag_centred_jc == 1){
+          area_col_effect_raw[j] ~ normal(col_effect, ace_sigma);
+        } else {
+          area_col_effect_raw[j] ~ std_normal();
+        }
+
+      }
+
       if(has_area_cell_effects==1){
-          to_vector(area_cell_effect_raw[j]) ~ normal(mu_area_cell_effect_raw, sigma_c);
+        if(lflag_centred_jrc == 1) {
+          to_vector(area_cell_effect_raw[j]) ~ normal(cell_effect_raw, sigma_c);
+        } else{
+          to_vector(area_cell_effect_raw[j]) ~ std_normal();
+        }
       }
       // area_row_effect_raw[j] ~ normal(0, sigma_re);
       // if(has_area_col_effects == 1){
@@ -659,7 +709,7 @@ model{
 
 
     if(has_free_area == 1){
-      if(lflag_llmod_centred  == 1){
+      if(lflag_centred_j  == 1){
         area_effect_raw ~ normal(area_effect_mu[1], sigma_area_effect[1]);
       } else {
         area_effect_raw ~ std_normal();
