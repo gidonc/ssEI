@@ -72,7 +72,14 @@ prep_options_stan <- function(use_dist,
                               llmod_omit_jr,
                               llmod_omit_jc,
                               llmod_omit_jrc,
-                              llmod_centred,
+                              centred_j,
+                              centred_r,
+                              centred_c,
+                              centred_rc,
+                              centred_jr,
+                              centred_jc,
+                              centred_jrc,
+                              centred_m,
                               llmod_structure_omit
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
@@ -105,8 +112,29 @@ prep_options_stan <- function(use_dist,
   if(!llmod_omit_jrc %in% c(TRUE, FALSE)){
     stop("llmod_omit_jrc must be one of TRUE, FALSE")
   }
-  if(!llmod_centred %in% c(TRUE, FALSE)){
-    stop("llmod_centred must be one of TRUE, FALSE")
+  if(!centred_j %in% c(TRUE, FALSE)){
+    stop("centred_j must be one of TRUE, FALSE")
+  }
+  if(!centred_r %in% c(TRUE, FALSE)){
+    stop("centred_r must be one of TRUE, FALSE")
+  }
+  if(!centred_c %in% c(TRUE, FALSE)){
+    stop("centred_c must be one of TRUE, FALSE")
+  }
+  if(!centred_rc %in% c(TRUE, FALSE)){
+    stop("centred_rc must be one of TRUE, FALSE")
+  }
+  if(!centred_jr %in% c(TRUE, FALSE)){
+    stop("centre_jr must be one of TRUE, FALSE")
+  }
+  if(!centred_jc %in% c(TRUE, FALSE)){
+    stop("centred_jc must be one of TRUE, FALSE")
+  }
+  if(!centred_jrc %in% c(TRUE, FALSE)){
+    stop("centre_jrc must be one of TRUE, FALSE")
+  }
+  if(!centred_m %in% c(TRUE, FALSE)){
+    stop("centred_m must be one of TRUE, FALSE")
   }
   if(!llmod_structure_omit %in% c("none", "area*r*c", "area*c")){
     stop("llmod_const must be one of none, area*r*c, area*c")
@@ -154,9 +182,37 @@ prep_options_stan <- function(use_dist,
       llmod_omit_jrc == TRUE ~ 1,
       llmod_omit_jrc == FALSE ~ 0
     ),
-    lflag_llmod_centred = dplyr::case_when(
-      llmod_centred == TRUE ~ 1,
-      llmod_centred == FALSE ~ 0
+    lflag_centred_j = dplyr::case_when(
+      centred_j == TRUE ~ 1,
+      centred_j == FALSE ~ 0
+    ),
+    lflag_centred_r = dplyr::case_when(
+      centred_r == TRUE ~ 1,
+      centred_r == FALSE ~ 0
+    ),
+    lflag_centred_c = dplyr::case_when(
+      centred_c == TRUE ~ 1,
+      centred_c == FALSE ~ 0
+    ),
+    lflag_centred_rc = dplyr::case_when(
+      centred_rc == TRUE ~ 1,
+      centred_rc == FALSE ~ 0
+    ),
+    lflag_centred_jr = dplyr::case_when(
+      centred_jr == TRUE ~ 1,
+      centred_jr == FALSE ~ 0
+    ),
+    lflag_centred_jc = dplyr::case_when(
+      centred_jc == TRUE ~ 1,
+      centred_jc == FALSE ~ 0
+    ),
+    lflag_centred_jrc = dplyr::case_when(
+      centred_jrc == TRUE ~ 1,
+      centred_jrc == FALSE ~ 0
+    ),
+    lflag_centred_m = dplyr::case_when(
+      centred_m == TRUE ~ 1,
+      centred_m == FALSE ~ 0
     ),
     lflag_llmod_structure = dplyr::case_when(
       llmod_structure_omit == "none" ~ 0,
