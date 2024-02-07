@@ -42,8 +42,8 @@ data{
  real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
- real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 3)
- real<lower=0> prior_sigma_c_mu_scale; //prior for scale of sigma_c_mu (only if lflag_vary_sd == 3)
+ real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
+ real<lower=0> prior_sigma_c_mu_scale; //prior for scale of sigma_c_mu (only if lflag_vary_sd == 2)
  real<lower=0> prior_sigma_ce_scale; //prior of scale for sigma_ce
  real<lower=0> prior_sigma_re_scale; //prior of scale for sigma_re
  real<lower=0> prior_cell_effect_scale; //prior of scale for average cell effects
@@ -399,7 +399,7 @@ transformed parameters{
     area_cell_effect[j] = rep_matrix(0.0, R, C);
     for(r in 1:(R - 1)){
       if(has_area_cell_effects == 1){
-        if(lflag_centred_jrc){
+        if(lflag_centred_jrc==1){
           area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
         } else{
           area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(cell_effect[((r - 1)*(C - 1) + 1):r*(C - 1)] + to_vector(sigma_c[((r - 1)*(C - 1) + 1):r*(C - 1)]) .* area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
@@ -681,7 +681,7 @@ model{
 
       if(has_area_cell_effects==1){
         if(lflag_centred_jrc == 1) {
-          to_vector(area_cell_effect_raw[j]) ~ normal(cell_effect_raw, sigma_c);
+          to_vector(area_cell_effect_raw[j]) ~ normal(cell_effect, sigma_c);
         } else{
           to_vector(area_cell_effect_raw[j]) ~ std_normal();
         }
