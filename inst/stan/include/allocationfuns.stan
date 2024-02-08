@@ -1,28 +1,10 @@
 
-
-      real hinge_max(vector x, real delta){
-        real weight = inv_logit((x[2] - x[1])/delta);
-        return x[1]*weight + x[2]*(1 - weight);
-      }
       real robust_hinge_min(vector x, real delta){
-        if((x[1] - x[2])/delta < -1000) {
-          return x[1];
-        } else if((x[1] - x[2])/delta > 1000){
-          return x[2];
-        } else {
-          real weight = inv_logit((x[1] - x[2])/delta);
-          return weight*x[2] + (1 - weight)*x[1];
-        }
+        return(-1*delta*log_sum_exp(-1 * x/delta));
       }
 
       real robust_hinge_floor_zero(real x, real delta) {
-        if(x/delta > 1000){
-          return(x);
-        } else if(x/delta < -1000){
-          return(0);
-        } else {
-          return(delta*log1p_exp(x/delta));
-        }
+        return(delta*log1p_exp(x/delta));
       }
 
 
