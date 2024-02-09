@@ -146,7 +146,6 @@ transformed data{
   // }
   // K_no_rm = R * (C - 1);
 
-  array[2] vector[K -1] shapes = create_shapes(K_t, prior_lkj);
 
 // following code to distinguish structural zeros from sampling zeros in the log-linear model - identifying rows and columns, and number of structural zeros in the data
 
@@ -207,7 +206,8 @@ transformed data{
   int n_col_sigmas = has_area_col_effects * (C - 1);
   n_cell_sigmas = has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1));
   n_table_sigmas = n_margin_sigmas + n_cell_sigmas;
-
+  int K_all = n_table_sigmas;
+  array[2] vector[K_all - 1] shapes = create_shapes(K_all, prior_lkj);
 
 
 
@@ -245,11 +245,11 @@ parameters{
  real<lower=0> sigma_c_sigma[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)]; //hierarchical standard deviatation on standard deviations
  vector[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)] sigma_c_mu; //hierarchical mean on standard deviations
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
- // cholesky_factor_corr[has_L_ame*K_ame] L_ame_raw; // for modelling correlation matrix
+ cholesky_factor_corr[has_L*K_all] L_raw; // for modelling correlation matrix
  // array[n_areas, R] simplex[C] theta_jr;
  // array[R] simplex[C] d_theta_r;
- // row_vector[has_onion * (choose(K, 2) - 1)] l; // do NOT init with 0 for all elements
- // vector<lower = 0, upper = 1>[has_onion * (K - 1)] R2; // first element is not really a R^2 but is on (0,1)
+ row_vector[has_onion * (choose(K_all, 2) - 1)] l; // do NOT init with 0 for all elements
+ vector<lower = 0, upper = 1>[has_onion * (K_all - 1)] R2; // first element is not really a R^2 but is on (0,1)
  // matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
  real mu_cell_effects_raw;
  real<lower=0> scale_cell_effects;
@@ -294,11 +294,13 @@ transformed parameters{
   vector<lower=0>[n_margin_sigmas] ame_sigma;
   vector<lower=0>[n_row_sigmas] are_sigma;
   vector<lower=0>[n_col_sigmas] ace_sigma;
-  // real hinge_delta_floor = 1/(100 + inv_hinge_delta_floor);
-  // real hinge_delta_min = 1/(100 + inv_hinge_delta_min);
-  // // matrix[has_L_ame * K_ame, has_L_ame * K_ame] L_ame;
+  vector[K_all] area_means;
+  vector[K_all] area_sigmas;
+  array[n_areas] vector[K_all] area_effects_raw;
 
-  // matrix[max(has_onion, has_L) * K, max(has_onion, has_L) * K] L;
+  // matrix[has_L * K_all, has_L * K_all] L;
+
+  matrix[max(has_onion, has_L) * K_all, max(has_onion, has_L) * K_all] L;
 
   // if(has_onion == 1){
   //   L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix
@@ -306,13 +308,6 @@ transformed parameters{
   // if(has_L == 1){
   //   L = L_a; // cholesky_factor corr matrix
   // }
-
-  // if(has_L_ame == 1){
-  //   L_ame = L_ame_raw;
-  // } else{
-  //   L_ame = diag_matrix(rep_vector(1, K_ame));
-  // }
-
 
 
   for (j in 1:n_areas){
@@ -364,8 +359,6 @@ transformed parameters{
         mu_ame[1:R - 1] = row_effect[1:R - 1];
     }
 
-
-
     if(lflag_centred_c == 0){
       col_effect[1: C - 1] = mu_col_effects + scale_col_effects*col_effect_raw;
     } else if(lflag_centred_c == 1){
@@ -381,73 +374,111 @@ transformed parameters{
       cell_effect = cell_effect_raw;
     }
 
+    if(has_L + has_onion > 0){
+        if(has_area_row_effects == 1){
+          area_means[1:(R - 1)] = row_effect[1:(R - 1)];
+          area_sigmas[1:(R - 1)] = are_sigma;
+        }
+        if(has_area_col_effects == 1){
+          area_means[has_area_row_effects * (R - 1) + 1: has_area_row_effects * (R - 1) + (C - 1)] = col_effect[1:(C - 1)];
+          area_sigmas[has_area_row_effects * (R - 1) + 1: has_area_row_effects * (R - 1) + (C - 1)] = ace_sigma;
+        }
+        if(has_area_cell_effects == 1){
+          area_means[K_ame + 1: K_all] = cell_effect;
+          area_sigmas[K_ame + 1: K_all] = to_vector(sigma_c);
+        }
+     }
 
-  // for(r in 1:R){
-  //   for(c in 1:C){
-  //     if(r == R && c ==C){
-  //       cell_effect[r, c] = 0;
-  //     } else{
-  //       cell_effect[r, c] = cell_effect_raw[(r - 1)*C + c];
-  //     }
-  //
-  //   }
-  // }
+ if(has_L == 1){
+    L = L_raw;
+  }
+  if(has_onion == 1){
+    L = lkj_onion(K_all, l, R2, shapes); // cholesky_factor corr matrix
+  }
+
+
 
 
   for(j in 1:n_areas){
+
+    area_row_effect_raw[j] = rep_row_vector(0, R - 1);
+    area_row_effect[j] = rep_row_vector(0, R);
+
+
+    if(has_area_row_effects == 1){
+      area_row_effect_raw[j] = area_margin_effects_raw[j, 1:(R - 1)];
+      if(lflag_centred_jr== 1){
+        area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
+      } else if(has_L + has_onion ==0){
+        area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect[1:(R - 1)] + are_sigma .* area_row_effect_raw[j]');
+      }
+    } else if(has_area_row_effects==0){
+      area_row_effect_raw[j] = to_row_vector(row_effect_raw[1:(R - 1)]);
+      area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect[1:(R -1)]);
+      }
+
+    area_col_effect_raw[j] = rep_row_vector(0, C - 1);
+    area_col_effect[j] = rep_row_vector(0, C);
+    if(has_area_col_effects == 1){
+      area_col_effect_raw[j, 1:(C - 1)] = area_margin_effects_raw[j, (has_area_row_effects*(R - 1) + 1): (has_area_row_effects*(R - 1) + (C - 1))];
+      if(lflag_centred_jc == 1){
+        area_col_effect[j, 1:(C - 1)] = area_col_effect_raw[j];
+      } else if(has_L + has_onion ==0){
+        area_col_effect[j, 1:(C - 1)] = to_row_vector(col_effect[1:(C - 1)] + ace_sigma.*area_col_effect_raw[j]');
+        }
+      } else if(has_area_col_effects==0){
+        area_col_effect_raw[j] = to_row_vector(col_effect[1:(C - 1)]);
+        area_col_effect[j, 1:(R - 1)] = area_col_effect_raw[j];
+    }
 
     area_cell_effect[j] = rep_matrix(0.0, R, C);
     for(r in 1:(R - 1)){
       if(has_area_cell_effects == 1){
         if(lflag_centred_jrc==1){
           area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
-        } else{
+        } else if(has_L + has_onion ==0){
           area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(cell_effect[((r - 1)*(C - 1) + 1):r*(C - 1)] + to_vector(sigma_c[((r - 1)*(C - 1) + 1):r*(C - 1)]) .* area_cell_effect_raw[j, ((r - 1)*(C - 1) + 1):r*(C - 1)]);
         }
       } else if(has_area_cell_effects == 0){
         area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(cell_effect[((r - 1)*(C - 1) + 1):r*(C - 1)]);
       }
-
-    // } else if(has_area_cell_effects==0){
-    //   for(r in 1:(R - 1)){
-    //     for(c in 1:(C  - 1)){
-    //       area_cell_effect[j, r, c] = mu_area_cell_effect[((C - 1) * (r - 1)) + c ];
-    //     }
-    //   }
-    }
-
-    // area_margin_effects_raw[j] = to_row_vector(mu_ame + ame_sigma .*(ame_alpha[j]));
-
-    area_row_effect_raw[j] = rep_row_vector(0, R - 1);
-    area_row_effect[j] = rep_row_vector(0, R);
-
-   if(has_area_row_effects == 1){
-      area_row_effect_raw[j] = area_margin_effects_raw[j, 1:(R - 1)];
-      if(lflag_centred_jr== 1){
-        area_row_effect[j, 1:(R - 1)] = area_row_effect_raw[j];
-      } else{
-        area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect[1:(R - 1)] + are_sigma .* area_row_effect_raw[j]');
-      }
-    } else if(has_area_row_effects==0){
-      area_row_effect_raw[j] = to_row_vector(row_effect_raw[1:(R - 1)]);
-      area_row_effect[j, 1:(R - 1)] = to_row_vector(row_effect[1:(R -1)]);
     }
 
 
-    area_col_effect_raw[j] = rep_row_vector(0, C - 1);
-    area_col_effect[j] = rep_row_vector(0, C);
+    if(has_L + has_onion > 0){
+      {
+        vector[K_all] area_all_effects;
+        if(has_area_row_effects == 1){
+          area_effects_raw[j, 1:(R - 1)] = to_vector(area_row_effect_raw[j]);
+        }
+        if(has_area_col_effects == 1){
+          area_effects_raw[j, has_area_row_effects * (R - 1) + 1: has_area_row_effects * (R - 1) + (C - 1)] = to_vector(area_col_effect_raw[j]);
+        }
+        if(has_area_cell_effects == 1){
+          area_effects_raw[j, K_ame + 1: K_all] = to_vector(area_cell_effect_raw[j]);
+        }
 
-   if(has_area_col_effects == 1){
-     area_col_effect_raw[j, 1:(C - 1)] = area_margin_effects_raw[j, (has_area_row_effects*(R - 1) + 1): (has_area_row_effects*(R - 1) + (C - 1))];
-     if(lflag_centred_jc == 1){
-        area_col_effect[j, 1:(C - 1)] = area_col_effect_raw[j];
-      } else {
-        area_col_effect[j, 1:(C - 1)] = to_row_vector(col_effect[1:(C - 1)] + ace_sigma.*area_col_effect_raw[j]');
-      }
-    } else if(has_area_col_effects==0){
-      area_col_effect_raw[j] = to_row_vector(col_effect[1:(C - 1)]);
-      area_col_effect[j, 1:(R - 1)] = area_col_effect_raw[j];
-    }
+        if(lflag_centred_jrc == 0){
+          area_all_effects = area_means + diag_pre_multiply(area_sigmas, L) * area_effects_raw[j];
+          if(has_area_row_effects == 1){
+            area_row_effect[j, 1:(R - 1)] = to_row_vector(area_all_effects[1:(R - 1)]);
+          }
+          if(has_area_col_effects == 1){
+            area_col_effect[j, 1:(C - 1)] = to_row_vector(area_all_effects[has_area_row_effects * (R - 1) + 1: has_area_row_effects * (R - 1) + (C - 1)]);
+          }
+          if(has_area_cell_effects == 1){
+             for(r in 1:(R - 1)){
+               area_cell_effect[j, r, 1:(C - 1)] = to_row_vector(area_all_effects[K_ame + (r - 1)*(C - 1) + 1: K_ame + (r - 1)*(C - 1) + (C - 1)]);
+               }
+             }
+          }
+       }
+     }
+
+
+
+
+
 
 
     for(r in 1:R){
@@ -497,9 +528,16 @@ model{
 
   // vector[R * C - 1] mu_cell_effect;
 
-  // if(has_L_ame==1){
-  //    L_ame_raw ~ lkj_corr_cholesky(prior_lkj);
-  // }
+  if(has_L==1){
+     L_raw ~ lkj_corr_cholesky(prior_lkj);
+  }
+  if(has_onion == 1){
+    l ~ std_normal();
+    R2 ~ beta(shapes[1], shapes[2]);
+  }
+
+
+
 
 
   // for(r in 1:R){
@@ -662,28 +700,40 @@ model{
     // to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
       // ame_alpha[j] ~ std_normal();
-      if(has_area_row_effects ==1){
+      if(has_area_row_effects ==1  && has_L + has_onion == 0){
         if(lflag_centred_jr ==1){
           area_row_effect_raw[j] ~ normal(row_effect[1:(R - 1)], are_sigma);
-        } else{
+        } else {
           area_row_effect_raw[j] ~ std_normal();
         }
       }
 
-      if(has_area_col_effects==1){
+      if(has_area_col_effects==1 && has_L + has_onion == 0){
         if(lflag_centred_jc == 1){
           area_col_effect_raw[j] ~ normal(col_effect[1:(C - 1)], ace_sigma);
-        } else {
+        } else if(has_L + has_onion == 0){
           area_col_effect_raw[j] ~ std_normal();
         }
-
       }
 
-      if(has_area_cell_effects==1){
+      if(has_area_cell_effects==1 && has_L + has_onion == 0){
         if(lflag_centred_jrc == 1) {
           to_vector(area_cell_effect_raw[j]) ~ normal(cell_effect, sigma_c);
         } else{
           to_vector(area_cell_effect_raw[j]) ~ std_normal();
+        }
+      }
+
+      if(has_L == 0){
+        if(lflag_centred_jrc == 1){
+            vector[K_all] tmp_random;
+            if(has_area_row_effects==1){
+
+            area_effects_raw[j] ~ multi_normal_cholesky(area_means, diag_pre_multiply(area_sigmas, L));
+
+          }
+        } else{
+
         }
       }
       // area_row_effect_raw[j] ~ normal(0, sigma_re);
