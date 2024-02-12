@@ -598,7 +598,7 @@ model{
         tmp_col_effects[R] = area_effect[j];
         col_effect_constrain[j, c] = log(col_margins[j, c] + .01) - log_sum_exp(tmp_col_effects);
       }
-      area_col_effect[j, 1:C - 1] ~ normal(col_effect_constrain[j], sigma_constrain);
+      // area_col_effect[j, 1:C - 1] ~ normal(col_effect_constrain[j], sigma_constrain);
 
       for(c in 1:C){
         tmp_row_effects_ref[c] = area_col_effect[j, c];
@@ -610,7 +610,7 @@ model{
         tmp_row_effects[C] = area_effect[j];
         row_effect_constrain[j, r] = log(row_margins[j, r] + .01) - log_sum_exp(tmp_row_effects);
       }
-      area_row_effect[j, 1:R - 1] ~ normal(row_effect_constrain[j], sigma_constrain);
+      // area_row_effect[j, 1:R - 1] ~ normal(row_effect_constrain[j], sigma_constrain);
   }
 
 
