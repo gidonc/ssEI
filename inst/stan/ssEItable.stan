@@ -245,6 +245,8 @@ parameters{
   // real<lower=0> sigma_c_raw_raw[(lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1)]; //scale of area col variation from mu_c
  real<lower=0> sigma_c_sigma[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)]; //hierarchical standard deviatation on standard deviations
  vector[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)] sigma_c_mu; //hierarchical mean on standard deviations
+  vector[has_area_cell_effects * ((lflag_vary_sd ==2) ? 1 : 0)] sigma_ame_mu; //hierarchical mean on margin standard deviations relative to cell standard deviations
+
  // cholesky_factor_corr[has_L * K] L_a; // for modelling correlation matrix
  cholesky_factor_corr[has_L*K_all] L_raw; // for modelling correlation matrix
  // array[n_areas, R] simplex[C] theta_jr;
@@ -632,6 +634,7 @@ model{
     if(has_area_cell_effects==1){
       if(lflag_vary_sd == 2){
         sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
+        sigma_ame_mu ~ normal(-2, prior_sigma_c_mu_scale);
         sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
         for(s in 1:K_t){
           sigma_c_raw[s]~lognormal(sigma_c_mu, sigma_c_sigma);
@@ -743,7 +746,7 @@ model{
 
     }
     if(lflag_vary_sd == 2 && has_area_cell_effects == 1){
-       ame_sigma~lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
+       ame_sigma~lognormal(sigma_c_mu[1] + sigma_ame_mu[1], sigma_c_sigma[1]);
     } else{
        ame_sigma~normal(0, 3);
     }
