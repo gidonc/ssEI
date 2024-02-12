@@ -80,6 +80,7 @@ transformed data{
   int n_margin_sigmas;
   int n_cell_sigmas;
   int n_table_sigmas;
+  real sigma_constrain = .001;
 
   prior_phi_scale =3;
 
@@ -294,9 +295,9 @@ transformed parameters{
   vector<lower=0>[n_margin_sigmas] ame_sigma;
   vector<lower=0>[n_row_sigmas] are_sigma;
   vector<lower=0>[n_col_sigmas] ace_sigma;
-  vector[K_all] area_means;
-  vector[K_all] area_sigmas;
-  array[n_areas] vector[K_all] area_effects_raw;
+  vector[max(has_L, has_onion)*K_all] area_means;
+  vector[max(has_L, has_onion)*K_all] area_sigmas;
+  array[max(has_L, has_onion)*n_areas] vector[max(has_L, has_onion)*K_all] area_effects_raw;
 
   // matrix[has_L * K_all, has_L * K_all] L;
 
@@ -479,8 +480,6 @@ transformed parameters{
 
 
 
-
-
     for(r in 1:R){
       for(c in 1:C){
         area_effect_components[j, r, c] = area_row_effect[j, r] + area_col_effect[j, c] + area_cell_effect[j, r, c];
@@ -511,22 +510,18 @@ transformed parameters{
 
 }
 model{
-  // matrix[non0_rm, C] obs_prob;
-  // vector[n_poss_rows] e_rm;
-  // row_vector[n_poss_rows] poss_rows;
-  // vector[n_poss_cols] e_cm;
-  // row_vector[n_poss_cols] poss_cols;
   vector[n_poss_cells] e_cell;
   vector[has_phi*n_poss_cells] alpha_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
-  // matrix[phi_length*non0_rm, phi_length*C] phi_matrix;
-  // matrix[non0_cm, R] cell_values_matrix_c;
-  // int counter_c = 1;
-  // matrix[non0_cm, R] obs_prob_c;
   array[n_areas] vector[C - 1] mu_col_effect_raw;
   array[n_areas] vector[R - 1] mu_row_effect_raw;
+  vector[R] tmp_col_effects_ref;
+  vector[C] tmp_row_effects_ref;
+  vector[C] tmp_col_effects;
+  vector[R] tmp_row_effects;
+  array[n_areas] vector[C - 1] col_effect_constrain;
+  array[n_areas] vector[R - 1] row_effect_constrain;
 
-  // vector[R * C - 1] mu_cell_effect;
 
   if(has_L==1){
      L_raw ~ lkj_corr_cholesky(prior_lkj);
@@ -586,27 +581,42 @@ model{
            }
          }
        }
-       // if(col_margins[j, c] > 0){
-       //   for(r in 1:R){
-       //     cell_values_matrix_c[counter_c, r] = cell_values[j, r, c];
-       //     // obs_prob_c[counter_c, r] = theta_c_area[j, c, r] * col_margins[j, c];
-       //     obs_prob_c[counter_c, r] = exp(log_e_cell_value[j, r, c]);
-       //   }
-       //   counter_c += 1;
-        // }
+     }
+
+      // area_row_effect_raw[j] ~ normal(mu_re, sigma_re);
+      // area_col_effect_raw[j] ~ normal(mu_ce, sigma_ce);
+
+      // area_col_effects are to meet column proportion sufficient statistics
+      // area_col effect = log(Tc) + log_sum_exp(row_effect + cell_effect [within the reference column]) - log(Tref) - log_wum_exp(row_effect + cell_effect[within the column])
+      for(r in 1:R){
+        tmp_col_effects_ref[r] = area_row_effect[j, r];
       }
-    }
-  // if(lflag_dist == 1){
-  //   target += realmultinom_lpdf(cell_values_matrix | obs_prob);
-  // } else if(lflag_dist == 0) {
-  //   target += realpoisson_lpdf(to_row_vector(cell_values_matrix) | to_vector(obs_prob));
-  // } else if(lflag_dist == 2) {
-  //   phi ~ cauchy(0, 3);
-  //   target += realnegbinom3_lpdf(to_row_vector(cell_values_matrix) | to_vector(obs_prob), to_vector(phi_matrix));
-  // }
-  // if(lflag_inc_rm){
-  //     target += realmultinom_lpdf(row_margins| rm_prob);
-  // }
+      for(c in 1:(C - 1)){
+        for(r in 1:R - 1){
+          tmp_col_effects[r] = area_effect[j] + area_row_effect[j, r] + area_cell_effect[j, r, c];
+        }
+        tmp_col_effects[R] = area_effect[j];
+        col_effect_constrain[j, c] = log(col_margins[j, c] + .01) - log_sum_exp(tmp_col_effects);
+      }
+      area_col_effect[j, 1:C - 1] ~ normal(col_effect_constrain[j], sigma_constrain);
+
+      for(c in 1:C){
+        tmp_row_effects_ref[c] = area_col_effect[j, c];
+      }
+      for(r in 1:(R - 1)){
+        for(c in 1:C - 1){
+          tmp_row_effects[c] = area_effect[j] + area_col_effect[j, c] + area_cell_effect[j, r, c];
+        }
+        tmp_row_effects[C] = area_effect[j];
+        row_effect_constrain[j, r] = log(row_margins[j, r] + .01) - log_sum_exp(tmp_row_effects);
+      }
+      area_row_effect[j, 1:R - 1] ~ normal(row_effect_constrain[j], sigma_constrain);
+  }
+
+
+
+
+
 
 
     // target +=realpoisson_lpdf(to_row_vector(cell_values_matrix_c)| to_vector(obs_prob_c));
@@ -619,22 +629,6 @@ model{
       target +=realnegbinom3_lpdf(cell_values_row_vector | alpha_cell, e_cell);
     }
 
-    // target +=realpoisson_lpdf(poss_rows| e_rm);
-    // target +=realpoisson_lpdf(poss_cols| e_cm);
-
-    // for(r in 1:R){
-    //   for(c in 1:C){
-    //     e_overall_cv[C * (r - 1) + c]=sum(exp(log_e_cell_value[1:n_areas, r, c]));
-    //   }
-    // }
-    // vector[R * C] e_overall_cv;
-    // target +=realpoisson_lpdf(to_row_vector(overall_cell_values')| e_overall_cv);
-
-    // print(to_row_vector(overall_cell_values'));
-    // print(e_overall_cv);
-
-
-    // sigma_c ~ normal(0, 5);
     if(has_area_cell_effects==1){
       if(lflag_vary_sd == 2){
         sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
@@ -646,9 +640,6 @@ model{
         sigma_c_raw ~ normal(0, prior_sigma_c_scale);
       }
     }
-    // cell_effect_raw~ normal(0, prior_mu_ce_scale);
-    // row_effect_raw~ normal(0, prior_mu_re_scale);
-    // cell_effect_raw ~ normal(0, prior_cell_effect_scale);
 
     if(lflag_centred_c  == 0){
        col_effect_raw ~ std_normal();
@@ -724,7 +715,7 @@ model{
         }
       }
 
-      if(has_L == 0){
+      if(max(has_L, has_onion) == 1){
         if(lflag_centred_jrc == 1){
             vector[K_all] tmp_random;
             if(has_area_row_effects==1){
