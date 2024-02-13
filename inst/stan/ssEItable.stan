@@ -81,6 +81,8 @@ transformed data{
   int n_cell_sigmas;
   int n_table_sigmas;
   real sigma_constrain = .001;
+  vector[C - 1] mu_col_effects;
+  vector[R - 1] mu_row_effects;
 
   prior_phi_scale =3;
 
@@ -210,6 +212,13 @@ transformed data{
   int K_all = n_table_sigmas;
   array[2] vector[K_all - 1] shapes = create_shapes(K_all, prior_lkj);
 
+  for(c in 1:C - 1){
+    mu_row_effects[c] = log(sum(col(col_margins, c))) - log(sum(col(col_margins, C)));
+  }
+
+  for(r in 1:R - 1){
+    mu_col_effects[r] = log(sum(col(row_margins, r))) - log(sum(col(row_margins, R)));
+  }
 
 
 }
@@ -253,15 +262,9 @@ parameters{
  // array[R] simplex[C] d_theta_r;
  row_vector[has_onion * (choose(K_all, 2) - 1)] l; // do NOT init with 0 for all elements
  vector<lower = 0, upper = 1>[has_onion * (K_all - 1)] R2; // first element is not really a R^2 but is on (0,1)
+ row_vector[has_onion * (choose(K_all, 2) - 1)] l_me; // do NOT init with 0 for all elements
+ vector<lower = 0, upper = 1>[has_onion * (K_all - 1)] R2_me; // first element is not really a R^2 but is on (0
  // matrix[lflag_predictors_rm * K_no_rm, lflag_predictors_rm * (R - 1)] betas_rm;
- real mu_cell_effects_raw;
- real<lower=0> scale_cell_effects;
- real mu_col_effects_raw;
- real<lower=0> scale_col_effects;
- real mu_row_effects_raw;
- real<lower=0> scale_row_effects;
- real mu_effects;
- real<lower=0> scale_effects;
  real<lower=0, upper=1> phi[has_phi];
  real mu_log_phi[has_phi];
  real<lower=0> log_phi_scale[has_phi];
@@ -290,9 +293,6 @@ transformed parameters{
   array[n_areas] matrix[R, C] area_cell_effect;
 
   real<lower=0> sigma_c[has_area_cell_effects * (R - 1) * (C - 1)]; //scale of area col variation from mu_c
-  real mu_cell_effects;
-  real mu_row_effects;
-  real mu_col_effects;
   real<lower=0> sigma_c_raw[n_cell_sigmas]; //scale of area col variation from mu_c
   vector<lower=0>[n_margin_sigmas] ame_sigma;
   vector<lower=0>[n_row_sigmas] are_sigma;
@@ -300,10 +300,14 @@ transformed parameters{
   vector[max(has_L, has_onion)*K_all] area_means;
   vector[max(has_L, has_onion)*K_all] area_sigmas;
   array[max(has_L, has_onion)*n_areas] vector[max(has_L, has_onion)*K_all] area_effects_raw;
-
+  vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effects;
+  vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effect_means;
+  vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effect_scales;
+  vector[max(has_L, has_onion)*(R - 1) + (C - 1) + (R - 1)*(C - 1)] all_main_effect_raw;
   // matrix[has_L * K_all, has_L * K_all] L;
 
   matrix[max(has_onion, has_L) * K_all, max(has_onion, has_L) * K_all] L;
+  matrix[max(has_onion, has_L) * K_all, max(has_onion, has_L) * K_all] Lme;
 
   // if(has_onion == 1){
   //   L = lkj_onion(K, l, R2, shapes); // cholesky_factor corr matrix
@@ -339,43 +343,57 @@ transformed parameters{
 
 
 
-  if(lflag_centred_m == 1){
-    mu_row_effects = mu_row_effects_raw;
-    mu_col_effects = mu_col_effects_raw;
-    mu_cell_effects = mu_cell_effects_raw;
-  } else if(lflag_centred_m == 0){
-    mu_row_effects = mu_effects + scale_effects*mu_row_effects_raw;
-    mu_col_effects = mu_effects + scale_effects*mu_col_effects_raw;
-    mu_cell_effects = mu_effects + scale_effects*mu_cell_effects_raw;
-  }
-
   row_effect = rep_vector(0, R);
   col_effect = rep_vector(0, C);
   area_effect = rep_vector(0, n_areas);
 
+      if(has_L + has_onion > 0){
+        all_main_effect_means[1:(R - 1)] = mu_row_effects;
+        all_main_effect_scales[1:(R - 1)] = rep_vector(prior_sigma_re_scale, R - 1);
+        all_main_effect_raw[1:(R - 1)] = row_effect_raw;
+        all_main_effect_means[R:R + C - 2] = mu_col_effects;
+        all_main_effect_scales[R:R + C - 2] = rep_vector(prior_sigma_ce_scale, C - 1);
+        all_main_effect_raw[R:R + C - 2] = col_effect_raw;
+        all_main_effect_means[R + C - 1: R + C - 2 + (R - 1)*(C - 1)] = rep_vector(0, (R - 1) * (C - 1));
+        all_main_effect_scales[R + C - 1: R + C - 2 + (R - 1)*(C - 1)] = rep_vector(prior_cell_effect_scale, (R - 1)* (C - 1));
+        all_main_effect_raw[R + C - 1: R + C - 2 + (R - 1)*(C - 1)] = cell_effect_raw;
+
+        if(lflag_centred_rc == 0){
+          all_main_effects = all_main_effect_means + diag_pre_multiply(all_main_effect_scales, Lme) * all_main_effect_raw;
+        } else {
+          all_main_effects = all_main_effect_raw;
+        }
+        row_effect[1:(R - 1)] = all_main_effects[1:(R - 1)];
+        col_effect[1:(C - 1)] = all_main_effects[R: R + C - 2];
+        cell_effect[1:(C - 1)*(R - 1)] = all_main_effects[R + C - 1: R + C - 2 + (R - 1)*(C - 1)];
+    } else{
     if(lflag_centred_r==1){
       row_effect[1:R -1] = row_effect_raw;
     } else if (lflag_centred_r==0){
-      row_effect[1:R - 1] = mu_row_effects + scale_row_effects .* row_effect_raw;
-    }
-    if(has_area_row_effects == 1){
-        mu_ame[1:R - 1] = row_effect[1:R - 1];
+      row_effect[1:R - 1] = mu_row_effects + prior_sigma_re_scale .* row_effect_raw;
     }
 
     if(lflag_centred_c == 0){
-      col_effect[1: C - 1] = mu_col_effects + scale_col_effects*col_effect_raw;
+      col_effect[1: C - 1] = mu_col_effects + prior_sigma_ce_scale .*col_effect_raw;
     } else if(lflag_centred_c == 1){
       col_effect[1: C - 1] = col_effect_raw;
+    }
+    if(lflag_centred_rc == 0){
+      cell_effect = rep_vector(0, (R - 1)*(C - 1)) + prior_cell_effect_scale.*cell_effect_raw;
+    } else if(lflag_centred_rc ==1){
+      cell_effect = cell_effect_raw;
+    }
+
+
+    }
+
+    if(has_area_row_effects == 1){
+        mu_ame[1:R - 1] = row_effect[1:R - 1];
     }
     if(has_area_col_effects == 1){
       mu_ame[has_area_row_effects*(R - 1) + 1:has_area_row_effects*(R - 1) + 1 + C - 2] = col_effect[1:C - 1];
     }
 
-    if(lflag_centred_rc == 0){
-      cell_effect = mu_cell_effects + scale_cell_effects*cell_effect_raw;
-    } else if(lflag_centred_rc ==1){
-      cell_effect = cell_effect_raw;
-    }
 
     if(has_L + has_onion > 0){
         if(has_area_row_effects == 1){
@@ -397,6 +415,7 @@ transformed parameters{
   }
   if(has_onion == 1){
     L = lkj_onion(K_all, l, R2, shapes); // cholesky_factor corr matrix
+    Lme = lkj_onion(K_all, l_me, R2_me, shapes); // cholesky_factor corr matrix
   }
 
 
@@ -515,8 +534,6 @@ model{
   vector[n_poss_cells] e_cell;
   vector[has_phi*n_poss_cells] alpha_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
-  array[n_areas] vector[C - 1] mu_col_effect_raw;
-  array[n_areas] vector[R - 1] mu_row_effect_raw;
   vector[R] tmp_col_effects_ref;
   vector[C] tmp_row_effects_ref;
   vector[C] tmp_col_effects;
@@ -531,6 +548,8 @@ model{
   if(has_onion == 1){
     l ~ std_normal();
     R2 ~ beta(shapes[1], shapes[2]);
+    l_me ~std_normal();
+    R2_me ~ beta(shapes[1], shapes[2]);
   }
 
 
@@ -644,54 +663,37 @@ model{
       }
     }
 
-    if(lflag_centred_c  == 0){
+    if(max(has_L, has_onion) > 0){
+      if(lflag_centred_rc == 0){
+        col_effect_raw ~ std_normal();
+        row_effect_raw ~ std_normal();
+        cell_effect_raw ~ std_normal();
+      } else {
+        all_main_effect_raw ~ multi_normal_cholesky(all_main_effect_means, diag_pre_multiply(all_main_effect_scales, Lme));
+      }
+
+    } else {
+      if(lflag_centred_c  == 0){
        col_effect_raw ~ std_normal();
     } else {
-       col_effect_raw ~ normal(mu_col_effects, scale_col_effects);
+       col_effect_raw ~ normal(mu_col_effects, prior_sigma_ce_scale);
     }
     if(lflag_centred_r == 0){
        row_effect_raw ~ std_normal();
     } else {
-       row_effect_raw~ normal(mu_row_effects, scale_row_effects);
+       row_effect_raw~ normal(mu_row_effects, prior_sigma_re_scale);
     }
     if(lflag_centred_rc == 0){
        cell_effect_raw ~ std_normal();
     } else {
-       cell_effect_raw ~ normal(mu_cell_effects, scale_cell_effects);
+       cell_effect_raw ~ normal(rep_vector(0, (R - 1) * (C - 1)), prior_cell_effect_scale);
     }
 
 
-    scale_effects ~ normal(0, prior_cell_effect_scale);
-    mu_effects ~ normal(0, prior_cell_effect_scale);
-
-    if(lflag_centred_m == 1){
-      mu_row_effects ~ normal(mu_effects, scale_effects);
-      mu_col_effects_raw ~ normal(mu_effects, scale_effects);
-      mu_cell_effects ~ normal(mu_effects, scale_effects);
-    } else {
-      mu_col_effects_raw ~ std_normal();
-      mu_row_effects_raw ~ std_normal();
-      mu_cell_effects_raw ~ std_normal();
     }
 
-    // mu_cell_effects ~ normal(0, prior_cell_effect_scale);
-    scale_cell_effects~normal(0, prior_cell_effect_scale);
-    scale_col_effects~normal(0, prior_mu_ce_scale);
-    scale_row_effects~normal(0, prior_mu_re_scale);
 
 
-    // sigma_re~normal(0, prior_sigma_re_scale);
-    // to_vector(cell_effect_raw) ~ normal(0, prior_cell_effect_scale);
-    // for(r in 1:R){
-    //   for(c in 1:C){
-    //     if( (r + c) < (R + C)){
-    //        mu_cell_effect[(r - 1)*C + c] = log(overall_cell_values[r, c]) - log(overall_cell_values[R, C]);
-    //     }
-    //   }
-    // }
-    // // cell_effect_raw ~ normal(mu_cell_effect, cell_effect_sigma);
-    // cell_effect_sigma ~ cauchy(0,2);
-    // to_vector(cell_effect) ~ normal(0, prior_cell_effect_scale);
     for (j in 1:n_areas){
       // ame_alpha[j] ~ std_normal();
       if(has_area_row_effects ==1  && has_L + has_onion == 0){
