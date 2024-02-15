@@ -303,7 +303,7 @@ transformed parameters{
   vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effects;
   vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effect_means;
   vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effect_scales;
-  vector[max(has_L, has_onion)*(R - 1) + (C - 1) + (R - 1)*(C - 1)] all_main_effect_raw;
+  vector[max(has_L, has_onion)*((R - 1) + (C - 1) + (R - 1)*(C - 1))] all_main_effect_raw;
   // matrix[has_L * K_all, has_L * K_all] L;
 
   matrix[max(has_onion, has_L) * K_all, max(has_onion, has_L) * K_all] L;
