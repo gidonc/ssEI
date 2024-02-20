@@ -224,24 +224,33 @@ transformed data{
 }
 parameters{
  real lambda_unpadded[n_param]; // sequential cell weights
- vector[R *  C - 1] log_mu_cv_raw;
- array[n_areas] matrix[R, C] log_e_cell_value;
- real<lower=0> sigma_lcv_r;
- real<lower=0> sigma_lcv_c;
-
-
+  matrix[R - 1,  C - 1] L_rc_raw;
+  array[n_areas]  matrix[R - 1,  C - 1] L_jrc_raw;
+  array[n_areas] vector[C - 1] L_jc_raw;
+  array[n_areas] vector[R - 1] L_jr_raw;
+  vector[n_areas] L_j;
+  vector[R * C - 1]log_mu_cv_raw;
+  real<lower=0> sigma_lcv_r;
+  real<lower=0> sigma_lcv_c;
+  vector<lower=0>[(R - 1)*(C - 1)] sigma_jrc;
+  real<lower=0> sigma_j;
+  real mu_j;
  real<lower=0, upper = .001> hinge_delta_floor;
  real<lower=0, upper = .001> hinge_delta_min;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
-  // array[n_areas, R] simplex[C] theta_area; // prob row vector for each area
-  // array[n_areas, C] simplex[R] theta_c_area; // prob col vector for each area
-
+  array[n_areas] matrix[R, C] log_e_cell_value;
   matrix[R, C] log_mu_cv;
   matrix[R, C] log_mu_cv_r;
   matrix[R, C] log_mu_cv_c;
+  matrix[R,  C] L_rc = rep_matrix(0, R, C);
+  array[n_areas] matrix[R,  C] L_jrc = rep_array(rep_matrix(0, R, C), n_areas);
+  array[n_areas] vector[C] L_jc = rep_array(rep_vector(0, C), n_areas);
+  array[n_areas] vector[R] L_jr = rep_array(rep_vector(0, R), n_areas);
+
+
 
 
   for (j in 1:n_areas){
@@ -256,6 +265,20 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
 
+  L_rc[1:R - 1, 1: C - 1] = L_rc_raw;
+  for(j in 1:n_areas){
+    if(lflag_centred_jrc == 1){
+      L_jrc[j, 1:R - 1, 1:C - 1] = L_jrc_raw[j];
+    } else if(lflag_centred_jrc ==0){
+      for(r in 1:R - 1){
+        for(c in 1:C - 1){
+          L_jrc[j, r, c] = L_rc[r, c] + sigma_jrc[(r - 1) * (C - 1) + c] * L_jrc_raw[j, r, c];
+        }
+      }
+    }
+    L_jc[j, 1: C - 1] = L_jc_raw[j];
+    L_jr[j, 1: R - 1] = L_jr_raw[j];
+  }
   for(r in 1:R){
     for(c in 1:C){
       if(c == C && r == R){
@@ -267,11 +290,18 @@ transformed parameters{
   }
   for(r in 1:R){
     for(c in 1:C){
-      log_mu_cv_r[r, c] = log_mu_cv[r, c] - log_sum_exp(log_mu_cv[r, 1:C]);
-      log_mu_cv_c[r, c] = log_mu_cv[r, c] - log_sum_exp(log_mu_cv[1:R, c]);
+      log_mu_cv_r[r, c] = log_mu_cv[r, c] - log_mu_cv[R, c];
+      log_mu_cv_c[r, c] = log_mu_cv[r, c] - log_mu_cv[r, C];
     }
   }
 
+  for(j in 1:n_areas){
+    for(r in 1:R){
+      for(c in 1:C){
+        log_e_cell_value[j, r, c] = L_j[j] + L_jr[j, r] + L_jc[j, c] + L_jrc[j, r, c];
+      }
+    }
+  }
 
 }
 model{
@@ -294,17 +324,34 @@ model{
 
     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
-    for(j in 1:n_areas){
-      for(r in 1:R){
-        for(c in 1:C){
-          log_e_cell_value[j, r, c] ~ normal(log_mu_cv_r[r,c] + log(row_margins[j, r] + .001), sigma_lcv_r);
-          log_e_cell_value[j, r, c] ~ normal(log_mu_cv_c[r,c] + log(col_margins[j, c] + .001), sigma_lcv_c);
-          }
-        }
+  for(j in 1:n_areas){
+    if(lflag_centred_jrc==1){
+      to_vector(L_jrc_raw[j])~normal(to_vector(L_rc_raw), sigma_jrc);
+    } else if(lflag_centred_jrc == 0){
+      to_vector(L_jrc_raw[j]) ~ std_normal();
     }
+    for(r in 1:R - 1){
+      for(c in 1:C){
+         L_jr_raw[j, r] ~ normal(log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r);
+      }
+    }
+    for(r in 1:R){
+      for(c in 1:C - 1){
+        L_jc_raw[j, c] ~ normal(log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c);
+      }
+    }
+  }
 
-    sigma_lcv_r ~ normal(0, prior_sigma_c_scale);
-    sigma_lcv_c ~ normal(0, prior_sigma_re_scale);
+  L_j ~ normal(mu_j, sigma_j);
+
+  mu_j ~ normal(0, 3);
+  sigma_j ~ cauchy(0, 3);
+  to_vector(L_rc_raw) ~ normal(0, prior_mu_re_scale);
+  to_vector(log_mu_cv) ~ normal(0, prior_mu_re_scale);
+  sigma_jrc ~ cauchy(0, prior_cell_effect_scale);
+  sigma_lcv_r ~ cauchy(0, prior_mu_re_scale);
+  sigma_lcv_c ~ cauchy(0, prior_mu_re_scale);
+
 
     hinge_delta_floor ~ normal(0, .001);
     hinge_delta_min ~ normal(0, .001);
