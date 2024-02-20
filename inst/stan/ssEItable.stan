@@ -224,12 +224,12 @@ transformed data{
 }
 parameters{
  real lambda_unpadded[n_param]; // sequential cell weights
- array[n_areas] vector[R * (C - 1)] arow_lr;
- array[n_areas] vector[R] arow_logits;
- vector[R * (C - 1)] row_lr;
- vector[R] row_logits;
- real<lower=0> sigma_arow_lr;
- real<lower=0> sigma_arow_logit;
+ vector[R *  C - 1] log_mu_cv_raw;
+ array[n_areas] matrix[R, C] log_e_cell_value;
+ real<lower=0> sigma_lcv_r;
+ real<lower=0> sigma_lcv_c;
+
+
  real<lower=0, upper = .001> hinge_delta_floor;
  real<lower=0, upper = .001> hinge_delta_min;
 }
@@ -238,15 +238,10 @@ transformed parameters{
   real<lower=0> cell_values[n_areas, R, C];
   // array[n_areas, R] simplex[C] theta_area; // prob row vector for each area
   // array[n_areas, C] simplex[R] theta_c_area; // prob col vector for each area
-  real log_e_cell_value[n_areas, R, C];
 
-  vector[n_areas] L_j;
-  vector[R] L_r = rep_vector(0, R);
-  vector[C] L_c = rep_vector(0, C);
-  matrix[R, C] L_rc = rep_matrix(0, R, C);
-  matrix[n_areas, R] L_jr = rep_matrix(0, n_areas, R);
-  matrix[n_areas, C] L_jc = rep_matrix(0, n_areas, C);
-  array[n_areas] matrix[R, C] L_jrc = rep_array(rep_matrix(0, R, C), n_areas);
+  matrix[R, C] log_mu_cv;
+  matrix[R, C] log_mu_cv_r;
+  matrix[R, C] log_mu_cv_c;
 
 
   for (j in 1:n_areas){
@@ -261,30 +256,19 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
 
-
-  L_c[1: C - 1] = row_lr[(R - 1) * (C -1) + 1: R * (C - 1)];
-  for (j in 1:n_areas){
-      L_jc[j, 1: C - 1] = to_row_vector(arow_lr[j, (R - 1) * (C -1) + 1: R * (C - 1)]);
-  }
-  for(j in 1:n_areas){
-    for(r in 1:(R - 1)){
-      for(c in 1:(C - 1)){
-        L_jrc[j, r, c] = arow_lr[j, (r - 1) * (C - 1) + c] - L_jc[j, c];
+  for(r in 1:R){
+    for(c in 1:C){
+      if(c == C && r == R){
+        log_mu_cv[r, c] = 0;
+      } else{
+        log_mu_cv[r, c] = log_mu_cv_raw[c +(r - 1) * C];
       }
     }
   }
-  for(j in 1:n_areas){
-    L_j[j] = arow_logits[j, R];
-    for(r in 1:R - 1){
-      L_jr[j, r] = arow_logits[j, r] - L_j[j];
-    }
-  }
-
-  for(j in 1:n_areas){
-    for(r in 1:R){
-      for(c in 1:C){
-        log_e_cell_value[j, r, c] = L_j[j] + L_jr[j, r] + L_jc[j, c] + L_jrc[j, r, c];
-      }
+  for(r in 1:R){
+    for(c in 1:C){
+      log_mu_cv_r[r, c] = log_mu_cv[r, c] - log_sum_exp(log_mu_cv[r, 1:C]);
+      log_mu_cv_c[r, c] = log_mu_cv[r, c] - log_sum_exp(log_mu_cv[1:R, c]);
     }
   }
 
@@ -311,12 +295,16 @@ model{
     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
     for(j in 1:n_areas){
-      arow_lr[j] ~ normal(row_lr, sigma_arow_lr);
-      arow_logits[j] ~ normal(row_logits, sigma_arow_logit);
+      for(r in 1:R){
+        for(c in 1:C){
+          log_e_cell_value[j, r, c] ~ normal(log_mu_cv_r[r,c] + log(row_margins[j, r] + .001), sigma_lcv_r);
+          log_e_cell_value[j, r, c] ~ normal(log_mu_cv_c[r,c] + log(col_margins[j, c] + .001), sigma_lcv_c);
+          }
+        }
     }
 
-    sigma_arow_lr ~ normal(0, prior_sigma_c_scale);
-    sigma_arow_logit ~ normal(0, prior_sigma_re_scale);
+    sigma_lcv_r ~ normal(0, prior_sigma_c_scale);
+    sigma_lcv_c ~ normal(0, prior_sigma_re_scale);
 
     hinge_delta_floor ~ normal(0, .001);
     hinge_delta_min ~ normal(0, .001);
