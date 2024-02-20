@@ -230,9 +230,9 @@ parameters{
   array[n_areas] vector[R - 1] L_jr_raw;
   vector[n_areas] L_j;
   vector[R * C - 1]log_mu_cv_raw;
-  real<lower=0> sigma_lcv_r;
-  real<lower=0> sigma_lcv_c;
-  vector<lower=0>[(R - 1)*(C - 1)] sigma_jrc;
+  real<lower=0> sigma_lcv_r[(R - 1) * C];
+  real<lower=0> sigma_lcv_c[R * (C - 1)];
+  real<lower=0> sigma_jrc;
   real<lower=0> sigma_j;
   real mu_j;
  real<lower=0, upper = .001> hinge_delta_floor;
@@ -272,7 +272,7 @@ transformed parameters{
     } else if(lflag_centred_jrc ==0){
       for(r in 1:R - 1){
         for(c in 1:C - 1){
-          L_jrc[j, r, c] = L_rc[r, c] + sigma_jrc[(r - 1) * (C - 1) + c] * L_jrc_raw[j, r, c];
+          L_jrc[j, r, c] = L_rc[r, c] + sigma_jrc * L_jrc_raw[j, r, c];
         }
       }
     }
@@ -332,12 +332,12 @@ model{
     }
     for(r in 1:R - 1){
       for(c in 1:C){
-         L_jr_raw[j, r] ~ normal(log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r);
+         L_jr_raw[j, r] ~ normal(log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r[(r - 1)*C + c]);
       }
     }
     for(r in 1:R){
       for(c in 1:C - 1){
-        L_jc_raw[j, c] ~ normal(log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c);
+        L_jc_raw[j, c] ~ normal(log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c[(r - 1)*(C - 1) + c]);
       }
     }
   }
