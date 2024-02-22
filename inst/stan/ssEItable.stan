@@ -265,20 +265,6 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
 
-  L_rc[1:R - 1, 1: C - 1] = L_rc_raw;
-  for(j in 1:n_areas){
-    if(lflag_centred_jrc == 1){
-      L_jrc[j, 1:R - 1, 1:C - 1] = L_jrc_raw[j];
-    } else if(lflag_centred_jrc ==0){
-      for(r in 1:R - 1){
-        for(c in 1:C - 1){
-          L_jrc[j, r, c] = L_rc[r, c] + sigma_jrc * L_jrc_raw[j, r, c];
-        }
-      }
-    }
-    L_jc[j, 1: C - 1] = L_jc_raw[j];
-    L_jr[j, 1: R - 1] = L_jr_raw[j];
-  }
   for(r in 1:R){
     for(c in 1:C){
       if(c == C && r == R){
@@ -294,6 +280,40 @@ transformed parameters{
       log_mu_cv_c[r, c] = log_mu_cv[r, c] - log_mu_cv[r, C];
     }
   }
+
+
+  L_rc[1:R - 1, 1: C - 1] = L_rc_raw;
+  for(j in 1:n_areas){
+    if(lflag_centred_jrc == 1){
+      L_jrc[j, 1:R - 1, 1:C - 1] = L_jrc_raw[j];
+    } else if(lflag_centred_jrc ==0){
+      for(r in 1:R - 1){
+        for(c in 1:C - 1){
+          L_jrc[j, r, c] = L_rc[r, c] + sigma_jrc * L_jrc_raw[j, r, c];
+        }
+      }
+    }
+    L_jc[j, 1: C - 1] = L_jc_raw[j];
+    if(lflag_centred_jr == 1){
+      L_jr[j, 1: R - 1] = L_jr_raw[j];
+    } else if(lflag_centred_jr ==0) {
+      for (r in 1:R - 1){
+        for(c in 1:C){
+          L_jr[j, r] += exp(-log(C)) * (log_mu_cv_r[r, c] - L_jrc[j, r, c] + L_jr_raw[j, r] * sigma_lcv_r[(r - 1)*C + c]);
+        }
+      }
+    }
+    if(lflag_centred_jc == 1){
+      L_jc[j, 1: C - 1] = L_jc_raw[j];
+    } else if(lflag_centred_jc ==0) {
+      for (c in 1:C - 1){
+        for(r in 1:R){
+          L_jc[j, c] += exp(-log(R)) * (log_mu_cv_c[r, c] - L_jrc[j, r, c] + L_jc_raw[j, c] * sigma_lcv_c[(r - 1)*(C - 1) + c]);
+        }
+      }
+    }
+  }
+
 
   for(j in 1:n_areas){
     for(r in 1:R){
@@ -325,21 +345,37 @@ model{
     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
   for(j in 1:n_areas){
+
     if(lflag_centred_jrc==1){
       to_vector(L_jrc_raw[j])~normal(to_vector(L_rc_raw), sigma_jrc);
     } else if(lflag_centred_jrc == 0){
       to_vector(L_jrc_raw[j]) ~ std_normal();
     }
-    for(r in 1:R - 1){
-      for(c in 1:C){
-         L_jr_raw[j, r] ~ normal(log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r[(r - 1)*C + c]);
-      }
+    if(lflag_centred_jr==1){
+      for(r in 1:R - 1){
+        vector[C] ljr_comp = rep_vector(-log(C), C);
+        for(c in 1:C){
+          ljr_comp[c] += normal_lpdf(L_jr_raw[j, r]| log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r[(r - 1)*C + c]);
+        }
+        target += log_sum_exp(ljr_comp);
+        }
+    } else if(lflag_centred_jr==0){
+        L_jr_raw[j] ~ std_normal();
     }
-    for(r in 1:R){
+
+    if(lflag_centred_jc==1){
       for(c in 1:C - 1){
-        L_jc_raw[j, c] ~ normal(log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c[(r - 1)*(C - 1) + c]);
-      }
-    }
+        vector[R] ljc_comp = rep_vector(-log(R), R);
+        for(r in 1:R){
+          ljc_comp[r] = normal_lpdf(L_jc_raw[j, c]| log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c[(r - 1)*(C - 1) + c]);
+          }
+          target += log_sum_exp(ljc_comp);
+        }
+     } else if(lflag_centred_jc==0){
+       L_jc_raw[j] ~ std_normal();
+     }
+
+
   }
 
   L_j ~ normal(mu_j, sigma_j);
