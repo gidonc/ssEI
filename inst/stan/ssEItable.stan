@@ -308,7 +308,7 @@ transformed parameters{
     } else if(lflag_centred_jr ==0) {
       for (r in 1:R - 1){
         for(c in 1:C){
-          L_jr[j, r] += exp(-log(C)) * (log_mu_cv_r[r, c] - L_jrc[j, r, c] + L_jr_raw[j, r] * sigma_lcv_r[r]);
+          L_jr[j, r] += cm_prop[j, c] * (log_mu_cv_r[r, c] - L_jrc[j, r, c] + L_jr_raw[j, r] * sigma_lcv_r[r]);
         }
       }
     }
@@ -317,7 +317,7 @@ transformed parameters{
     } else if(lflag_centred_jc ==0) {
       for (c in 1:C - 1){
         for(r in 1:R){
-          L_jc[j, c] += exp(-log(R)) * (log_mu_cv_c[r, c] - L_jrc[j, r, c] + L_jc_raw[j, c] * sigma_lcv_c[c]);
+          L_jc[j, c] += rm_prop[j, r] * (log_mu_cv_c[r, c] - L_jrc[j, r, c] + L_jc_raw[j, c] * sigma_lcv_c[c]);
         }
       }
     }
@@ -362,7 +362,8 @@ model{
     }
     if(lflag_centred_jr==1){
       for(r in 1:R - 1){
-        vector[C] ljr_comp = rep_vector(-log(C), C);
+        // vector[C] ljr_comp = log(to_vector(cm_prop[j]));
+        vector[C] ljr_comp = rep_vector(1, C);
         for(c in 1:C){
           ljr_comp[c] += normal_lpdf(L_jr_raw[j, r]| log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r[r]);
         }
@@ -374,7 +375,8 @@ model{
 
     if(lflag_centred_jc==1){
       for(c in 1:C - 1){
-        vector[R] ljc_comp = rep_vector(-log(R), R);
+        // vector[R] ljc_comp = log(to_vector(rm_prop[j]));
+        vector[R] ljc_comp = rep_vector(1, R);
         for(r in 1:R){
           ljc_comp[r] = normal_lpdf(L_jc_raw[j, c]| log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c[c]);
           }
