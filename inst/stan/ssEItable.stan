@@ -238,9 +238,9 @@ parameters{
   array[n_areas] vector[C - 1] L_jc_raw;
   array[n_areas] vector[R - 1] L_jr_raw;
   vector[n_areas] L_j;
-  vector[R * C - 1]log_mu_cv_raw;
-  real<lower=0> sigma_lcv_r[(R - 1)];
-  real<lower=0> sigma_lcv_c[(C - 1)];
+  vector[R * C - 1]log_mu_table_lr_raw;
+  real<lower=0> sigma_jr[(R - 1)];
+  real<lower=0> sigma_jc[(C - 1)];
   real<lower=0> sigma_jrc[(R - 1)*(C - 1)];
   real<lower=0> sigma_j;
   real mu_j;
@@ -251,9 +251,9 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas] matrix[R, C] log_e_cell_value;
-  matrix[R, C] log_mu_cv;
-  matrix[R, C] log_mu_cv_r;
-  matrix[R, C] log_mu_cv_c;
+  matrix[R, C] log_mu_table_lr;
+  matrix[R, C] log_mu_rlr;
+  matrix[R, C] log_mu_clr;
   matrix[R,  C] L_rc = rep_matrix(0, R, C);
   array[n_areas] matrix[R,  C] L_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] vector[C] L_jc = rep_array(rep_vector(0, C), n_areas);
@@ -277,16 +277,16 @@ transformed parameters{
   for(r in 1:R){
     for(c in 1:C){
       if(c == C && r == R){
-        log_mu_cv[r, c] = 0;
+        log_mu_table_lr[r, c] = 0;
       } else{
-        log_mu_cv[r, c] = log_mu_cv_raw[c +(r - 1) * C];
+        log_mu_table_lr[r, c] = log_mu_table_lr_raw[c +(r - 1) * C];
       }
     }
   }
   for(r in 1:R){
     for(c in 1:C){
-      log_mu_cv_r[r, c] = log_mu_cv[r, c] - log_mu_cv[R, c];
-      log_mu_cv_c[r, c] = log_mu_cv[r, c] - log_mu_cv[r, C];
+      log_mu_rlr[r, c] = log_mu_table_lr[r, c] - log_mu_table_lr[r, C];
+      log_mu_clr[r, c] = log_mu_table_lr[r, c] - log_mu_table_lr[R, c];
     }
   }
 
@@ -308,7 +308,7 @@ transformed parameters{
     } else if(lflag_centred_jr ==0) {
       for (r in 1:R - 1){
         for(c in 1:C){
-          L_jr[j, r] += cm_prop[j, c] * (log_mu_cv_r[r, c] - L_jrc[j, r, c] + L_jr_raw[j, r] * sigma_lcv_r[r]);
+          L_jr[j, r] += cm_prop[j, c] * (log_mu_rlr[r, c] - L_jrc[j, r, c] + L_jr_raw[j, r] * sigma_jr[r]);
         }
       }
     }
@@ -317,7 +317,7 @@ transformed parameters{
     } else if(lflag_centred_jc ==0) {
       for (c in 1:C - 1){
         for(r in 1:R){
-          L_jc[j, c] += rm_prop[j, r] * (log_mu_cv_c[r, c] - L_jrc[j, r, c] + L_jc_raw[j, c] * sigma_lcv_c[c]);
+          L_jc[j, c] += rm_prop[j, r] * (log_mu_clr[r, c] - L_jrc[j, r, c] + L_jc_raw[j, c] * sigma_jc[c]);
         }
       }
     }
@@ -356,18 +356,23 @@ model{
   for(j in 1:n_areas){
 
     if(lflag_centred_jrc==1){
-      to_vector(L_jrc_raw[j])~normal(to_vector(L_rc_raw), sigma_jrc);
+      for(r in 1:R - 1){
+        for(c in 1:C - 1){
+        // vector[2] L_jrc_comp = rep_vector(log(.5), 2);
+         // L_jrc_raw[j, r, c] ~ normal(log_mu_clr[r, c] - L_jr[j, r], sqrt(square(sigma_jrc[(r - 1)*(C - 1) + c]) + square(sigma_jr[r])));
+         // L_jrc_comp[1] = normal_lpdf(L_jrc_raw[j, r, c]|log_mu_clr[r, c] - L_jr[j, r], sqrt(square(sigma_jrc[(r - 1)*(C - 1) + c]) + square(sigma_jr[r])));
+         L_jrc_raw[j, r, c] ~ normal(log_mu_rlr[r, c] - L_jc[j, c], sigma_jrc[(r - 1)*(C - 1) + c]); //sqrt(square(sigma_jrc[(r - 1)*(C - 1) + c]) + square(sigma_jc[c])));
+         // L_jrc_comp[2] = normal_lpdf(L_jrc_raw[j, r, c]|log_mu_rlr[r, c] - L_jc[j, c], sqrt(square(sigma_jrc[(r - 1)*(C - 1) + c]) + square(sigma_jc[c])));
+         // target += log_sum_exp(L_jrc_comp);
+
+        }
+      }
     } else if(lflag_centred_jrc == 0){
       to_vector(L_jrc_raw[j]) ~ std_normal();
     }
     if(lflag_centred_jr==1){
       for(r in 1:R - 1){
-        // vector[C] ljr_comp = log(to_vector(cm_prop[j]));
-        vector[C] ljr_comp = rep_vector(1, C);
-        for(c in 1:C){
-          ljr_comp[c] += normal_lpdf(L_jr_raw[j, r]| log_mu_cv_r[r, c] - L_jrc[j, r, c], sigma_lcv_r[r]);
-        }
-        target += log_sum_exp(ljr_comp);
+        L_jr_raw[r] ~ normal(log_mu_clr[r, C], sigma_jr[r]);
         }
     } else if(lflag_centred_jr==0){
         L_jr_raw[j] ~ std_normal();
@@ -375,13 +380,8 @@ model{
 
     if(lflag_centred_jc==1){
       for(c in 1:C - 1){
-        // vector[R] ljc_comp = log(to_vector(rm_prop[j]));
-        vector[R] ljc_comp = rep_vector(1, R);
-        for(r in 1:R){
-          ljc_comp[r] = normal_lpdf(L_jc_raw[j, c]| log_mu_cv_c[r, c] - L_jrc[j, r, c], sigma_lcv_c[c]);
-          }
-          target += log_sum_exp(ljc_comp);
-        }
+            L_jc_raw[c] ~ normal(log_mu_rlr[R, c], sigma_jc[c]);
+      }
      } else if(lflag_centred_jc==0){
        L_jc_raw[j] ~ std_normal();
      }
@@ -394,10 +394,10 @@ model{
   mu_j ~ normal(0, 3);
   sigma_j ~ cauchy(0, 3);
   to_vector(L_rc_raw) ~ normal(0, prior_mu_re_scale);
-  to_vector(log_mu_cv) ~ normal(0, prior_mu_re_scale);
+  to_vector(log_mu_table_lr_raw) ~ normal(0, prior_mu_re_scale);
   sigma_jrc ~ cauchy(0, prior_cell_effect_scale);
-  sigma_lcv_r ~ cauchy(0, prior_mu_re_scale);
-  sigma_lcv_c ~ cauchy(0, prior_mu_re_scale);
+  sigma_jr ~ cauchy(0, prior_mu_re_scale);
+  sigma_jc ~ cauchy(0, prior_mu_re_scale);
 
 
     hinge_delta_floor ~ normal(0, .001);
