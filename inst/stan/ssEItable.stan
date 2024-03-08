@@ -82,7 +82,9 @@ transformed data{
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
   matrix[n_areas, R] rm_prop;
+  matrix[n_areas, R] rm_log;
   matrix[n_areas, C] cm_prop;
+  matrix[n_areas, C] cm_log;
   real<lower=0> prior_phi_scale;
   int n_margin_sigmas;
   int n_jrc_sigmas;
@@ -207,9 +209,20 @@ transformed data{
     }
     for(r in 1:R){
       rm_prop[j, r] = (row_margins[j, r] + .01)/(sum(row_margins[j, 1:R]) + R*.01);
+      if(row_margins[j, r] == 0){
+        rm_log[j, r] = .1;
+      } else{
+        rm_log[j, r] = log(row_margins[j, r]);
+      }
     }
     for(c in 1:C){
       cm_prop[j, c] = (col_margins[j, c] + .01)/(sum(col_margins[j, 1:C]) + C*.01);
+      if(col_margins[j, c] == 0){
+        cm_log[j, c] = .1;
+      } else{
+        cm_log[j, c] = log(col_margins[j, c]);
+      }
+
     }
 
   }
@@ -272,7 +285,7 @@ transformed parameters{
     E_jr[j, 1: R - 1] = E_j_all[j, 1: R - 1];
     E_jc[j, 1: C - 1] = E_j_all[j, R: R + C -2];
     for(r in 1:R - 1){
-      E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
+      E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]) - to_row_vector(E_jc[j, 1:C - 1]);
     }
   }
 
@@ -290,6 +303,9 @@ transformed parameters{
 model{
   vector[n_poss_cells] e_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
+  vector[n_poss_cells] e_rlr;
+  vector[n_poss_cells] e_clr;
+
 
   int counter_cell=0;
 
@@ -300,13 +316,16 @@ model{
            counter_cell += 1;
            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
            e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
-
+           e_rlr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r]);
+           e_clr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, 1:R, c]) + cm_log[j, r]);
          }
        }
      }
   }
 
-    target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+    target +=realpoisson_lpdf(cell_values_row_vector| e_rlr);
+    // target +=realpoisson_lpdf(cell_values_row_vector| e_clr);
+    // target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
