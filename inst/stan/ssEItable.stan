@@ -85,6 +85,7 @@ transformed data{
   matrix[n_areas, R] rm_log;
   matrix[n_areas, C] cm_prop;
   matrix[n_areas, C] cm_log;
+  vector[n_areas] tot_log;
   real<lower=0> prior_phi_scale;
   int n_margin_sigmas;
   int n_jrc_sigmas;
@@ -204,6 +205,7 @@ transformed data{
   non0_cm = sum(free_C);
 
   for (j in 1:n_areas){
+    tot_log[j] = log(sum(row_margins[j, 1:R]));
     for(r in 1:(R - 1)){
       row_margins_lr[j, r] = log((row_margins[j, r]+ .5)/(sum(row_margins[r, (r + 1):R]) + .5));
     }
@@ -262,7 +264,8 @@ transformed parameters{
   array[n_areas] matrix[R,  C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
-  matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
+  // matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
+  matrix[K_j, K_j] L_Omega;
 
   for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
@@ -278,9 +281,10 @@ transformed parameters{
 
   if(has_onion == 1){
     L_Omega = lkj_onion(K_j, l, R2, shapes); // cholesky_factor corr matrix
-  }
-  if(has_L == 1){
+  } else if(has_L == 1){
     L_Omega = L_Omega_raw; // cholesky_factor corr matrix
+  } else {
+    L_Omega = identity_matrix(K_j);
   }
 
 
@@ -315,8 +319,8 @@ transformed parameters{
 model{
   vector[n_poss_cells] e_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
-  vector[n_poss_cells] e_rlr;
-  vector[n_poss_cells] e_clr;
+  // vector[n_poss_cells] e_rlr;
+  // vector[n_poss_cells] e_clr;
 
 
   int counter_cell=0;
@@ -327,17 +331,17 @@ model{
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
-           e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]  - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r] - log_sum_exp(log_e_cell_value[j, 1:R, c]) + cm_log[j, c]);
-           e_rlr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r]);
-           e_clr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, 1:R, c]) + cm_log[j, c]);
+           if(lflag_predictors_cm==0){
+             e_cell[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r]);
+           } else if(lflag_predictors_cm ==1){
+             e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]  - log_sum_exp(log_e_cell_value[j, 1:R, 1:C]) + tot_log[j]);
+           }
          }
        }
      }
   }
 
-    target +=realpoisson_lpdf(cell_values_row_vector| e_rlr);
-    // target +=realpoisson_lpdf(cell_values_row_vector| e_clr);
-    // target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+  target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
