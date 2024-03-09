@@ -235,7 +235,7 @@ transformed data{
   n_jrc_sigmas = has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1));
   n_table_sigmas = n_margin_sigmas + n_jrc_sigmas;
   int K_all = n_table_sigmas;
-  array[2] vector[K_all - 1] shapes = create_shapes(K_all, prior_lkj);
+  array[2] vector[K_j - 1] shapes = create_shapes(K_j, prior_lkj);
 
   for(r in 1:R - 1){
     K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 1);
@@ -247,7 +247,9 @@ parameters{
   array[n_areas] vector[R * C] E_j_all_raw;
   vector[R * C] E_mu_all;
   vector<lower=0>[R * C] sigma_j_all;
-  cholesky_factor_corr[K_j] L_Omega;
+  cholesky_factor_corr[has_L * K_j] L_Omega_raw;
+  row_vector[has_onion * (choose(K_j, 2) - 1)] l; // do NOT init with 0 for all elements
+  vector<lower = 0, upper = 1>[has_onion * (K_j - 1)] R2; // first element is not really a R^2 but is on (0,1)
   real<lower=0, upper = .001> hinge_delta_floor;
   real<lower=0, upper = .001> hinge_delta_min;
 }
@@ -260,6 +262,7 @@ transformed parameters{
   array[n_areas] matrix[R,  C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
+  matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
 
   for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
@@ -273,6 +276,14 @@ transformed parameters{
 
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
 
+  if(has_onion == 1){
+    L_Omega = lkj_onion(K_j, l, R2, shapes); // cholesky_factor corr matrix
+  }
+  if(has_L == 1){
+    L_Omega = L_Omega_raw; // cholesky_factor corr matrix
+  }
+
+
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
@@ -285,7 +296,8 @@ transformed parameters{
     E_jr[j, 1: R - 1] = E_j_all[j, 1: R - 1];
     E_jc[j, 1: C - 1] = E_j_all[j, R: R + C -2];
     for(r in 1:R - 1){
-      E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]) - to_row_vector(E_jc[j, 1:C - 1]);
+      // E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]) - to_row_vector(E_jc[j, 1:C - 1]);
+      E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
     }
   }
 
@@ -315,9 +327,9 @@ model{
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
-           e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
+           e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]  - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r] - log_sum_exp(log_e_cell_value[j, 1:R, c]) + cm_log[j, c]);
            e_rlr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r]);
-           e_clr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, 1:R, c]) + cm_log[j, r]);
+           e_clr[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, 1:R, c]) + cm_log[j, c]);
          }
        }
      }
@@ -337,7 +349,14 @@ model{
 
   E_mu_all ~ normal(0, prior_mu_re_scale);
   sigma_j_all ~ cauchy(0, prior_cell_effect_scale);
-  L_Omega ~ lkj_corr_cholesky(prior_lkj);
+
+  if(has_L == 1){
+    L_Omega_raw ~ lkj_corr_cholesky(prior_lkj); // implies L*L'~ lkj_corr(prior_lkj);
+  }
+  if(has_onion == 1){
+    l ~ std_normal();
+    R2 ~ beta(shapes[1], shapes[2]);
+  }
 
 
     hinge_delta_floor ~ normal(0, .001);
