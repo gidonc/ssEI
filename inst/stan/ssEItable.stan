@@ -247,13 +247,15 @@ transformed data{
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[R * C] E_j_all_raw;
-  vector[R * C] E_mu_all;
+  vector[R * C] E_mu_all_raw;
   vector<lower=0>[R * C] sigma_j_all;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
   row_vector[has_onion * (choose(K_j, 2) - 1)] l; // do NOT init with 0 for all elements
   vector<lower = 0, upper = 1>[has_onion * (K_j - 1)] R2; // first element is not really a R^2 but is on (0,1)
   real<lower=0, upper = .001> hinge_delta_floor;
   real<lower=0, upper = .001> hinge_delta_min;
+  real E_mu_mu;
+  real<lower=0> E_mu_sigma;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -266,6 +268,8 @@ transformed parameters{
   array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
   // matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
   matrix[K_j, K_j] L_Omega;
+  vector[R * C] E_mu_all;
+
 
   for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
@@ -285,6 +289,12 @@ transformed parameters{
     L_Omega = L_Omega_raw; // cholesky_factor corr matrix
   } else {
     L_Omega = identity_matrix(K_j);
+  }
+
+  if(lflag_centred_m==1){
+    E_mu_all = E_mu_all_raw;
+  } else {
+    E_mu_all = E_mu_mu + E_mu_sigma * E_mu_all_raw;
   }
 
 
@@ -310,7 +320,7 @@ transformed parameters{
   for(j in 1:n_areas){
     for(r in 1:R){
       for(c in 1:C){
-        log_e_cell_value[j, r, c] = E_j[j] + E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c];
+        log_e_cell_value[j, r, c] = E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c];
       }
     }
   }
@@ -350,9 +360,18 @@ model{
       E_j_all_raw[j] ~ std_normal();
     }
   }
+  E_j ~ normal(0, 1);
 
-  E_mu_all ~ normal(0, prior_mu_re_scale);
-  sigma_j_all ~ cauchy(0, prior_cell_effect_scale);
+  if(lflag_centred_m==1){
+      E_mu_all ~ normal(E_mu_mu, E_mu_sigma);
+  } else{
+     E_mu_all_raw ~ std_normal();
+  }
+
+  E_mu_mu ~ normal(0, prior_cell_effect_scale);
+  E_mu_sigma ~ normal(0, prior_cell_effect_scale);
+
+  sigma_j_all ~ normal(0, prior_cell_effect_scale);
 
   if(has_L == 1){
     L_Omega_raw ~ lkj_corr_cholesky(prior_lkj); // implies L*L'~ lkj_corr(prior_lkj);
