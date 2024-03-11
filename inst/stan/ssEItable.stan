@@ -269,6 +269,9 @@ transformed parameters{
   // matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
   matrix[K_j, K_j] L_Omega;
   vector[R * C] E_mu_all;
+  matrix[R, C] E_rc = rep_matrix(0, R, C);
+  vector[C] E_c = rep_vector(0, C);
+  vector[R] E_r = rep_vector(0, R);
 
 
   for (j in 1:n_areas){
@@ -296,6 +299,14 @@ transformed parameters{
   } else {
     E_mu_all = E_mu_mu + E_mu_sigma * E_mu_all_raw;
   }
+
+  E_r[1: R - 1] = E_mu_all[1: R - 1];
+  E_c[1: C - 1] = E_mu_all[R: R + C -2];
+  for(r in 1:R - 1){
+    E_rc[r, 1: C - 1] = to_row_vector(E_mu_all[K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
+  }
+
+
 
 
 
@@ -325,15 +336,39 @@ transformed parameters{
     }
   }
 
+    #include include/generateratesandsummaries.stan
+
 }
 model{
   vector[n_poss_cells] e_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
+  vector[R * C] e_overall_cell;
+  row_vector[R * C] cell_tot_row_vector;
+  matrix[R, C] e_overall_comp;
   // vector[n_poss_cells] e_rlr;
   // vector[n_poss_cells] e_clr;
 
 
   int counter_cell=0;
+
+  for(r in 1:R){
+    for(c in 1:C){
+      e_overall_comp[r, c] = E_r[r] + E_c[c] + E_rc[r, c];
+    }
+  }
+
+
+  for(r in 1:R){
+    for(c in 1:C){
+      counter_cell += 1;
+      cell_tot_row_vector[counter_cell] = overall_cell_values[r, c];
+      e_overall_cell[counter_cell] = exp(e_overall_comp[r, c] - log_sum_exp(e_overall_comp)) * sum(row_margins);
+    }
+  }
+  target +=realpoisson_lpdf(cell_tot_row_vector| e_overall_cell);
+
+
+  counter_cell = 0;
 
   for (j in 1:n_areas){
      for (c in 1:C){
@@ -352,6 +387,7 @@ model{
   }
 
   target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
@@ -387,6 +423,5 @@ model{
 
 }
 generated quantities{
-  #include include/generateratesandsummaries.stan
 
 }
