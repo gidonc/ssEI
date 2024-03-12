@@ -223,7 +223,7 @@ transformed data{
     for(r in 1:R){
       rm_prop[j, r] = (row_margins[j, r] + .01)/(sum(row_margins[j, 1:R]) + R*.01);
       if(row_margins[j, r] == 0){
-        rm_log[j, r] = log(.1);
+        rm_log[j, r] = log(.001);
       } else{
         rm_log[j, r] = log(row_margins[j, r]);
       }
@@ -234,7 +234,7 @@ transformed data{
     for(c in 1:C){
       cm_prop[j, c] = (col_margins[j, c] + .01)/(sum(col_margins[j, 1:C]) + C*.01);
       if(col_margins[j, c] == 0){
-        cm_log[j, c] = log(.1);
+        cm_log[j, c] = log(.001);
       } else{
         cm_log[j, c] = log(col_margins[j, c]);
       }
@@ -271,15 +271,11 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas] matrix[R, C] log_e_cell_value;
-  array[n_areas] matrix[R, C] e_rlr = rep_array(rep_matrix(0, R, C), n_areas);
-  array[n_areas] matrix[R, C] e_clr = rep_array(rep_matrix(0, R, C), n_areas);
-  array[n_areas] matrix[R, C] e_cell_lr = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] vector[K_j] E_j_all;
   vector[n_areas] E_j;
   array[n_areas] matrix[R,  C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
-  // matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
   matrix[K_j, K_j] L_Omega;
   vector[K_j] E_mu_all;
   matrix[R, C] E_rc = rep_matrix(0, R, C);
@@ -323,11 +319,6 @@ transformed parameters{
     E_r[1: R - 1] = E_mu_all[1: R - 1];
   }
 
-
-
-
-
-
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
       E_j_all[j] = E_j_all_raw[j];
@@ -337,43 +328,39 @@ transformed parameters{
 
     E_jc[j, 1: C - 1] = E_j_all[j, K_jc_start: K_jc_start + C - 2];
     for(r in 1:R - 1){
-      // E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]) - to_row_vector(E_jc[j, 1:C - 1]);
-      E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
+      if(lflag_llmod_structure == 0){
+         E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
+      } else if(lflag_llmod_structure == 1){
+         E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]) - to_row_vector(E_jc[j, 1:C - 1]);
+      }
     }
-
-
 
     if(lflag_predictors_cm == 1){
       E_jr[j, 1: R - 1] = E_j_all[j, 1: R - 1];
       for(r in 1:R){
         for(c in 1:C){
-          e_cell_lr[j, r, c] = E_jr[j, r] + E_jc[j, c] + E_jrc[j,r,c];
+          log_e_cell_value[j, r, c] = E_jr[j, r] + E_jc[j, c] + E_jrc[j,r,c];  //tmp storage of intermediate value
         }
       }
-      E_j[j] = tot_log[j] - log_sum_exp(e_cell_lr[j, 1:R, 1:C]);
+      E_j[j] = tot_log[j] - log_sum_exp(log_e_cell_value[j, 1:R, 1:C]);
     } else{
       for(c in 1:C){
-        e_rlr[j, R, c] = E_jc[j, c]; //tmp storage of intermediate value
+        log_e_cell_value[j, R, c] = E_jc[j, c]; //tmp storage of intermediate value
       }
-      E_j[j] = rm_log[j, R] - log_sum_exp(e_rlr[j, R, 1:C]);
+      E_j[j] = rm_log[j, R] - log_sum_exp(log_e_cell_value[j, R, 1:C]);
       for(r in 1:R - 1){
         for(c in 1: C){
-         e_rlr[j, r, c] = E_jc[j, c] + E_jrc[j, r, c]; //tmp storage of intermediate value
-         e_cell_lr[j, r, c] = E_j[j] +E_jc[j, c] + E_jrc[j, r, c]; //tmp storage of intermediate value
+         log_e_cell_value[j, r, c] = E_j[j] + E_jc[j, c] + E_jrc[j, r, c]; //tmp storage of intermediate value
         }
-        E_jr[j, r] = rm_log[j, r] -log_sum_exp(e_cell_lr[j, r, 1:C]);
+        E_jr[j, r] = rm_log[j, r] -log_sum_exp(log_e_cell_value[j, r, 1:C]);
       }
     }
   }
-
-
 
   for(j in 1:n_areas){
     for(r in 1:R){
       for(c in 1:C){
         log_e_cell_value[j, r, c] = E_j[j] + E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c];
-        // e_rlr[j, r, c] = E_jc[j, c] + E_jrc[j, r, c];
-        e_clr[j, r, c] = E_jr[j, r] + E_jrc[j, r, c];
       }
     }
   }
@@ -389,13 +376,8 @@ model{
        for(r in 1:R){
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
-           cell_values_row_vector[counter_cell] = cell_values[j,r,c];
-           // e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
-           if(lflag_predictors_cm==0){
-             e_cell[counter_cell] = exp(e_rlr[j, r, c] - log_sum_exp(e_rlr[j, r, 1:C])+ rm_log[j, r]);
-           } else if(lflag_predictors_cm ==1){
-             e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]  - log_sum_exp(log_e_cell_value[j, 1:R, 1:C]) + tot_log[j]);
-           }
+           cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+           e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
          }
        }
      }
@@ -411,7 +393,6 @@ model{
       E_j_all_raw[j] ~ std_normal();
     }
   }
-  E_j ~ normal(0, 1);
 
   if(lflag_centred_m==1){
       E_mu_all ~ normal(E_mu_mu, E_mu_sigma);
