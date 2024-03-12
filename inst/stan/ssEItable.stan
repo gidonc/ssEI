@@ -51,13 +51,13 @@ data{
 }
 transformed data{
   int K;
-  int K_j = R*C;
+  int K_j;
   int K_t;
   int K_no_rm;
   int K_c;
   int K_ame;
-  int K_jc_start = R;
-  int K_jrc_start = R + C - 1;
+  int K_jc_start;
+  int K_jrc_start;
   int K_jrc_rstart[R - 1];
   int has_area_cell_effects;
   int free_R[n_areas];
@@ -81,6 +81,7 @@ transformed data{
   // int mu_re_ce_in_cell_effects  = 1;
   real param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
+  matrix[n_areas, C - 1] col_margins_lr;
   matrix[n_areas, R] rm_prop;
   matrix[n_areas, R] rm_log;
   matrix[n_areas, C] cm_prop;
@@ -140,6 +141,16 @@ transformed data{
   } else {
     has_area_row_effects = 1;
   }
+
+  K_j = lflag_predictors_cm == 1 ? (R * C) - 1 : (R - 1) * C ;
+
+  K_jc_start = lflag_predictors_cm == 1 ? R : 1;
+  K_jrc_start = K_jc_start + C - 1;
+
+  for(r in 1:R - 1){
+    K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 1);
+  }
+
 
 
 
@@ -207,20 +218,23 @@ transformed data{
   for (j in 1:n_areas){
     tot_log[j] = log(sum(row_margins[j, 1:R]));
     for(r in 1:(R - 1)){
-      row_margins_lr[j, r] = log((row_margins[j, r]+ .5)/(sum(row_margins[r, (r + 1):R]) + .5));
+      row_margins_lr[j, r] = log((row_margins[j, r]+ .1)/(row_margins[j, R] + .1));
     }
     for(r in 1:R){
       rm_prop[j, r] = (row_margins[j, r] + .01)/(sum(row_margins[j, 1:R]) + R*.01);
       if(row_margins[j, r] == 0){
-        rm_log[j, r] = .1;
+        rm_log[j, r] = log(.1);
       } else{
         rm_log[j, r] = log(row_margins[j, r]);
       }
     }
+    for(c in 1:(C - 1)){
+      col_margins_lr[j, c] = log((col_margins[j, c]+ .1)/(col_margins[j, C] + .1));
+    }
     for(c in 1:C){
       cm_prop[j, c] = (col_margins[j, c] + .01)/(sum(col_margins[j, 1:C]) + C*.01);
       if(col_margins[j, c] == 0){
-        cm_log[j, c] = .1;
+        cm_log[j, c] = log(.1);
       } else{
         cm_log[j, c] = log(col_margins[j, c]);
       }
@@ -239,16 +253,12 @@ transformed data{
   int K_all = n_table_sigmas;
   array[2] vector[K_j - 1] shapes = create_shapes(K_j, prior_lkj);
 
-  for(r in 1:R - 1){
-    K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 1);
-  }
-
 }
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
-  array[n_areas] vector[R * C] E_j_all_raw;
-  vector[R * C] E_mu_all_raw;
-  vector<lower=0>[R * C] sigma_j_all;
+  array[n_areas] vector[K_j] E_j_all_raw;
+  vector[K_j] E_mu_all_raw;
+  vector<lower=0>[K_j] sigma_j_all;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
   row_vector[has_onion * (choose(K_j, 2) - 1)] l; // do NOT init with 0 for all elements
   vector<lower = 0, upper = 1>[has_onion * (K_j - 1)] R2; // first element is not really a R^2 but is on (0,1)
@@ -261,14 +271,17 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas] matrix[R, C] log_e_cell_value;
-  array[n_areas] vector[R * C] E_j_all;
+  array[n_areas] matrix[R, C] e_rlr = rep_array(rep_matrix(0, R, C), n_areas);
+  array[n_areas] matrix[R, C] e_clr = rep_array(rep_matrix(0, R, C), n_areas);
+  array[n_areas] matrix[R, C] e_cell_lr = rep_array(rep_matrix(0, R, C), n_areas);
+  array[n_areas] vector[K_j] E_j_all;
   vector[n_areas] E_j;
   array[n_areas] matrix[R,  C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
   // matrix[max(has_onion, has_L) * K_j, max(has_onion, has_L) * K_j] L_Omega;
   matrix[K_j, K_j] L_Omega;
-  vector[R * C] E_mu_all;
+  vector[K_j] E_mu_all;
   matrix[R, C] E_rc = rep_matrix(0, R, C);
   vector[C] E_c = rep_vector(0, C);
   vector[R] E_r = rep_vector(0, R);
@@ -300,11 +313,16 @@ transformed parameters{
     E_mu_all = E_mu_mu + E_mu_sigma * E_mu_all_raw;
   }
 
-  E_r[1: R - 1] = E_mu_all[1: R - 1];
-  E_c[1: C - 1] = E_mu_all[R: R + C -2];
+
+  E_c[1: C - 1] = E_mu_all[K_jc_start: K_jc_start + C -2];
   for(r in 1:R - 1){
     E_rc[r, 1: C - 1] = to_row_vector(E_mu_all[K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
   }
+
+  if(lflag_predictors_cm == 1){
+    E_r[1: R - 1] = E_mu_all[1: R - 1];
+  }
+
 
 
 
@@ -312,17 +330,39 @@ transformed parameters{
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
-          E_j_all[j] = E_j_all_raw[j];
+      E_j_all[j] = E_j_all_raw[j];
     } else if(lflag_centred_jrc == 0) {
       E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
     }
 
-    E_j[j] = E_j_all[j, R * C];
-    E_jr[j, 1: R - 1] = E_j_all[j, 1: R - 1];
-    E_jc[j, 1: C - 1] = E_j_all[j, R: R + C -2];
+    E_jc[j, 1: C - 1] = E_j_all[j, K_jc_start: K_jc_start + C - 2];
     for(r in 1:R - 1){
       // E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]) - to_row_vector(E_jc[j, 1:C - 1]);
       E_jrc[j, r, 1: C - 1] = to_row_vector(E_j_all[j, K_jrc_rstart[r]: K_jrc_rstart[r] + C - 2]);
+    }
+
+
+
+    if(lflag_predictors_cm == 1){
+      E_jr[j, 1: R - 1] = E_j_all[j, 1: R - 1];
+      for(r in 1:R){
+        for(c in 1:C){
+          e_cell_lr[j, r, c] = E_jr[j, r] + E_jc[j, c] + E_jrc[j,r,c];
+        }
+      }
+      E_j[j] = tot_log[j] - log_sum_exp(e_cell_lr[j, 1:R, 1:C]);
+    } else{
+      for(c in 1:C){
+        e_rlr[j, R, c] = E_jc[j, c]; //tmp storage of intermediate value
+      }
+      E_j[j] = rm_log[j, R] - log_sum_exp(e_rlr[j, R, 1:C]);
+      for(r in 1:R - 1){
+        for(c in 1: C){
+         e_rlr[j, r, c] = E_jc[j, c] + E_jrc[j, r, c]; //tmp storage of intermediate value
+         e_cell_lr[j, r, c] = E_j[j] +E_jc[j, c] + E_jrc[j, r, c]; //tmp storage of intermediate value
+        }
+        E_jr[j, r] = rm_log[j, r] -log_sum_exp(e_cell_lr[j, r, 1:C]);
+      }
     }
   }
 
@@ -331,44 +371,18 @@ transformed parameters{
   for(j in 1:n_areas){
     for(r in 1:R){
       for(c in 1:C){
-        log_e_cell_value[j, r, c] = E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c];
+        log_e_cell_value[j, r, c] = E_j[j] + E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c];
+        // e_rlr[j, r, c] = E_jc[j, c] + E_jrc[j, r, c];
+        e_clr[j, r, c] = E_jr[j, r] + E_jrc[j, r, c];
       }
     }
   }
-
-    #include include/generateratesandsummaries.stan
 
 }
 model{
   vector[n_poss_cells] e_cell;
   row_vector[n_poss_cells] cell_values_row_vector;
-  vector[R * C] e_overall_cell;
-  row_vector[R * C] cell_tot_row_vector;
-  matrix[R, C] e_overall_comp;
-  // vector[n_poss_cells] e_rlr;
-  // vector[n_poss_cells] e_clr;
-
-
-  int counter_cell=0;
-
-  for(r in 1:R){
-    for(c in 1:C){
-      e_overall_comp[r, c] = E_r[r] + E_c[c] + E_rc[r, c];
-    }
-  }
-
-
-  for(r in 1:R){
-    for(c in 1:C){
-      counter_cell += 1;
-      cell_tot_row_vector[counter_cell] = overall_cell_values[r, c];
-      e_overall_cell[counter_cell] = exp(e_overall_comp[r, c] - log_sum_exp(e_overall_comp)) * sum(row_margins);
-    }
-  }
-  target +=realpoisson_lpdf(cell_tot_row_vector| e_overall_cell);
-
-
-  counter_cell = 0;
+  int counter_cell = 0;
 
   for (j in 1:n_areas){
      for (c in 1:C){
@@ -376,8 +390,9 @@ model{
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
+           // e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]);
            if(lflag_predictors_cm==0){
-             e_cell[counter_cell] = exp(log_e_cell_value[j, r, c] - log_sum_exp(log_e_cell_value[j, r, 1:C])+ rm_log[j, r]);
+             e_cell[counter_cell] = exp(e_rlr[j, r, c] - log_sum_exp(e_rlr[j, r, 1:C])+ rm_log[j, r]);
            } else if(lflag_predictors_cm ==1){
              e_cell[counter_cell] = exp(log_e_cell_value[j, r, c]  - log_sum_exp(log_e_cell_value[j, 1:R, 1:C]) + tot_log[j]);
            }
@@ -391,7 +406,7 @@ model{
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
-      E_j_all_raw[j] ~ multi_normal(E_mu_all, diag_pre_multiply(sigma_j_all, L_Omega));
+      E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all, diag_pre_multiply(sigma_j_all, L_Omega));
     } else if(lflag_centred_jrc == 0){
       E_j_all_raw[j] ~ std_normal();
     }
@@ -423,5 +438,6 @@ model{
 
 }
 generated quantities{
+    #include include/generateratesandsummaries.stan
 
 }
