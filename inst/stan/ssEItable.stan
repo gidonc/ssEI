@@ -340,17 +340,26 @@ transformed parameters{
       for(r in 1:R){
         for(c in 1:C){
           log_e_cell_value[j, r, c] = E_jr[j, r] + E_jc[j, c] + E_jrc[j,r,c];  //tmp storage of intermediate value
+          if(structural_zeros[j, r, c] != 0){
+            log_e_cell_value[j, r, c] = -1e-300;
+          }
         }
       }
       E_j[j] = tot_log[j] - log_sum_exp(log_e_cell_value[j, 1:R, 1:C]);
     } else{
       for(c in 1:C){
         log_e_cell_value[j, R, c] = E_jc[j, c]; //tmp storage of intermediate value
+        if(structural_zeros[j, R, c] != 0){
+          log_e_cell_value[j, R, c] = -1e-300;
+        }
       }
       E_j[j] = rm_log[j, R] - log_sum_exp(log_e_cell_value[j, R, 1:C]);
       for(r in 1:R - 1){
         for(c in 1: C){
          log_e_cell_value[j, r, c] = E_j[j] + E_jc[j, c] + E_jrc[j, r, c]; //tmp storage of intermediate value
+         if(structural_zeros[j, r, c] != 0){
+           log_e_cell_value[j, r, c] = -1e-300;
+         }
         }
         E_jr[j, r] = rm_log[j, r] -log_sum_exp(log_e_cell_value[j, r, 1:C]);
       }
@@ -385,7 +394,6 @@ model{
 
   target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
 
-
   for(j in 1:n_areas){
     if(lflag_centred_jrc == 1){
       E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all, diag_pre_multiply(sigma_j_all, L_Omega));
@@ -412,7 +420,6 @@ model{
     l ~ std_normal();
     R2 ~ beta(shapes[1], shapes[2]);
   }
-
 
     hinge_delta_floor ~ normal(0, .001);
     hinge_delta_min ~ normal(0, .001);
