@@ -56,6 +56,7 @@ transformed data{
   int K_no_rm;
   int K_c;
   int K_ame;
+  int K_jr_start;
   int K_jc_start;
   int K_jrc_start;
   int K_jrc_rstart[R - 1];
@@ -142,15 +143,15 @@ transformed data{
     has_area_row_effects = 1;
   }
 
-  K_j = lflag_predictors_cm == 1 ? (R * C) : (R - 1) * C ;
-
-  K_jc_start = lflag_predictors_cm == 1 ? R : 1;
-  K_jrc_start = K_jc_start + C - 1;
+  // K_j = lflag_predictors_cm == 1 ? (R * C) : (R - 1) * C ;
+  K_j = (R - 1) * C ;
+  K_jr_start = 2;
+  K_jc_start = K_jr_start + R - 1;
+  K_jrc_start = K_jc_start + C - 2;
 
   for(r in 1:R - 1){
-    K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 1);
+    K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 2);
   }
-
 
 
 
@@ -309,15 +310,20 @@ transformed parameters{
   for(j in 1:n_areas){
     if(cell_values[j, 1, 1]==0){
       E_j[j] = log(cell_values[j, 1, 1] + .001);
+      E_j_all[j, 1] = log(cell_values[j, 1, 1] + .001) - log(row_margins[j, 1] +.001);
     } else{
       E_j[j] = log(cell_values[j, 1, 1]);
+      E_j_all[j, 1] = log(cell_values[j, 1, 1] + .001) - log(row_margins[j, 1] +.001);
       target_adj += -log(cell_values[j, 1, 1]);
     }
     for(c in 2:C - 1){
       if(cell_values[j, 1, c] == 0){
         E_jc[j, c] = log(cell_values[j, 1, c] + .001) - E_j[j];
+        E_j_all[j, K_jc_start + c - 2] = log(cell_values[j, 1, c] + .001) - log(row_margins[j, 1] +.001);
+
       } else{
         E_jc[j, c] = log(cell_values[j, 1, c]) - E_j[j];
+        E_j_all[j, K_jc_start + c - 2] = log(cell_values[j, 1, c]) - log(row_margins[j, 1]);
         target_adj += -log(cell_values[j, 1, c]);
       }
     }
@@ -326,11 +332,13 @@ transformed parameters{
     } else{
       E_jc[j, C] = log(cell_values[j, 1, C]) - E_j[j];
     }
-    for(r in 2:R - 1){
+    for(r in 2:R){
       if(cell_values[j, r, 1]==0){
         E_jr[j, r] = log(cell_values[j, r, 1] + .001) - E_j[j];
+        E_j_all[j, K_jr_start + r -2] = log(cell_values[j, r, 1]+ .001) - log(row_margins[j, r] + R*.001);
       } else{
         E_jr[j, r] = log(cell_values[j, r, 1]) - E_j[j];
+        E_j_all[j, K_jr_start + r -2] = log(cell_values[j, r, 1]) - log(row_margins[j, r]);
         target_adj += -log(cell_values[j, r, 1]);
       }
     }
@@ -340,24 +348,26 @@ transformed parameters{
       E_jr[j, R] = log(cell_values[j, R, 1]) - E_j[j];
     }
 
-    for(r in 2:R-1){
+    for(r in 2:R){
       for(c in 2:C - 1){
         if(cell_values[j, r, c]==0){
           E_jrc[j, r, c] = log(cell_values[j, r, c] + .001) - E_jr[j, r] - E_jc[j, c] - E_j[j];
+          E_j_all[j, K_jrc_rstart[r - 1] + c - 2] = log(cell_values[j, r, c] + .001) - log(row_margins[j, r] + R*.001);
         } else{
           E_jrc[j, r, c] = log(cell_values[j, r, c]) - E_jr[j, r] - E_jc[j, c] - E_j[j];
+          E_j_all[j, K_jrc_rstart[r - 1] + c - 2] = log(cell_values[j, r, c]) - log(row_margins[j, r]);
           target_adj += -log(cell_values[j, r, c]);
         }
       }
     }
-    for(r in 2:R){
-      if(cell_values[j, r, C]==0){
-        E_jrc[j, r, C] = log(cell_values[j, r, C] + .001) - E_jr[j,r] - E_jc[j, C] - E_j[j];
-      } else{
-        E_jrc[j, r, C] = log(cell_values[j, r, C]) - E_jr[j,r] - E_jc[j, C] - E_j[j];
-      }
-    }
-    for(c in 2:C - 1){
+    // for(r in 2:R){
+    //   if(cell_values[j, r, C]==0){
+    //     E_jrc[j, r, C] = log(cell_values[j, r, C] + .001) - E_jr[j,r] - E_jc[j, C] - E_j[j];
+    //   } else{
+    //     E_jrc[j, r, C] = log(cell_values[j, r, C]) - E_jr[j,r] - E_jc[j, C] - E_j[j];
+    //   }
+    // }
+    for(c in 2:C){
       if(cell_values[j, R, c] ==0){
         E_jrc[j, R, c] = log(cell_values[j, R, c] + .001) - E_jr[j,R] - E_jc[j, c] - E_j[j];
       } else{
@@ -365,10 +375,10 @@ transformed parameters{
       }
     }
 
-    E_j_all[j, 1:R - 1] = E_jr[j, 2:R];
-    E_j_all[j, K_jc_start:K_jc_start + C - 2] = E_jc[j, 2:C];
-    E_j_all[j, K_jrc_start:K_jrc_start + (R - 1)*(C - 1) - 1] = to_vector(E_jrc[j, 2:R, 2:C]);
-    E_j_all[j, K_j] = E_j[j];
+    // E_j_all[j, 1:R - 1] = E_jr[j, 2:R];
+    // E_j_all[j, K_jc_start:K_jc_start + C - 2] = E_jc[j, 2:C];
+    // E_j_all[j, K_jrc_start:K_jrc_start + (R - 1)*(C - 1) - 1] = to_vector(E_jrc[j, 2:R, 2:C]);
+    // E_j_all[j, K_j] = E_j[j];
 
   }
 
