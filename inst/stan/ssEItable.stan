@@ -310,9 +310,9 @@ transformed parameters{
       E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
     }
 
-    log_e_cell_values[j, R, C] = E_j_all[j, R*C];
+    log_e_cell_values[j, R, C] = E_j_all[j, R*C] + rm_log[j, R] + cm_log[j, C];
     for(r in 1:R-1){
-      log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C];
+      log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C] + rm_log[j, r] - rm_log[j, R];
     }
     for(r in 1:R){
       for(c in 1:C - 1){
