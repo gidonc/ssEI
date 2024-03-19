@@ -225,3 +225,53 @@
     return cell_value;
 
   }
+
+      real[,,] ss_log_cvals_wzeros_lp (int n_areas, int R, int C, matrix row_margins, matrix col_margins, real[,,] cell_values){
+
+     real log_cell_values[n_areas, R, C];
+     int free_R[n_areas];
+     int free_C[n_areas];
+     real log_det_J = 0;
+
+     for (j in 1:n_areas){
+       free_R[j] = 0;
+       free_C[j] = 0;
+
+       for (r in 1:R){
+         if(row_margins[j, r]>0){
+           free_R[j] += 1;
+         }
+       }
+       for (c in 1:C){
+         if(col_margins[j, c]>0){
+           free_C[j] += 1;
+         }
+       }
+
+
+      int fr = 0;
+      for (r in 1:R){
+       if(row_margins[j, r]>0){
+         fr += 1;
+       }
+       int fc = 0;
+       for (c in 1:C){
+         if(col_margins[j, c]>0 && row_margins[j, r]>0){
+           fc += 1;
+           log_cell_values[j, r, c] = log(cell_values[j, r, c]);
+           if(fc<free_R[c] && fr<free_R[j]){
+             log_det_J += -log_cell_values[j, r, c];
+           }
+         } else {
+           log_cell_values[j, r, c] = log(.001);
+         }
+       }
+
+     }
+     }
+
+    // Jacobian
+    target += log_det_J;
+    return log_cell_values;
+
+  }
