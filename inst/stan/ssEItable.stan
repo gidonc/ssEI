@@ -143,8 +143,8 @@ transformed data{
     has_area_row_effects = 1;
   }
 
-  // K_j = lflag_predictors_cm == 1 ? (R * C) : (R - 1) * C ;
-  K_j = (R - 1) * C ;
+  K_j = lflag_predictors_cm == 1 ? (R * C) : (R - 1) * C ;
+  // K_j = (R - 1) * C ;
   K_jr_start = 2;
   K_jc_start = K_jr_start + R - 1;
   K_jrc_start = K_jc_start + C - 2;
@@ -257,6 +257,7 @@ transformed data{
 }
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
+  array[n_areas] vector[K_j] E_j_all_raw;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
@@ -270,12 +271,10 @@ parameters{
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
-  real log_cell_values[n_areas, R, C];
   array[n_areas] vector[K_j] E_j_all;
-  array[n_areas] vector[K_j] E_mu_all_j;
+  array[n_areas] matrix[R, C] log_e_cell_values;
   matrix[K_j, K_j] L_Omega;
   vector[K_j] E_mu_all;
-  real target_adj = 0;
 
 
   for (j in 1:n_areas){
@@ -289,7 +288,6 @@ transformed parameters{
 
 
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
-  log_cell_values = ss_log_cvals_wzeros_lp(n_areas, R, C, row_margins, col_margins, cell_values);
 
   if(has_onion == 1){
     L_Omega = lkj_onion(K_j, l, R2, shapes); // cholesky_factor corr matrix
@@ -305,15 +303,41 @@ transformed parameters{
     E_mu_all = E_mu_mu + E_mu_sigma * E_mu_all_raw;
   }
 
-
   for(j in 1:n_areas){
+    if(lflag_centred_jrc == 1){
+      E_j_all[j] = E_j_all_raw[j];
+    } else if(lflag_centred_jrc == 0) {
+      E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
+    }
+
+    log_e_cell_values[j, R, C] = E_j_all[j, R*C];
+    for(r in 1:R-1){
+      log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C];
+    }
     for(r in 1:R){
       for(c in 1:C - 1){
-          E_j_all[j, (r - 1) * (C - 1) + c] = log_cell_values[j, r, c];
-          E_mu_all_j[j, (r - 1) * (C - 1) + c] = E_mu_all[(r - 1)*(C - 1) + c] + log_cell_values[j, r, C];
-        }
+        log_e_cell_values[j, r, c] = E_j_all[j, (r - 1) *(C - 1) + c] + log_e_cell_values[j, r, C];
+      }
     }
   }
+
+//
+//   for(j in 1:n_areas){
+//     for(r in 1:R){
+//       for(c in 1:C - 1){
+//           log_e_cell_values[j, r, c] = E_j_all[j, (r - 1) * (C - 1) + c];
+//           E_mu_all_j[j, (r - 1) * (C - 1) + c] = E_mu_all[(r - 1)*(C - 1) + c] + log_e_cell_values[j, r, C];
+//         }
+//     }
+//     if(lflag_predictors_cm==1){
+//       for(r in 1:R - 1){
+//         E_j_all[j, R*(C - 1) + r] = log_e_cell_values[j, r, C];
+//         E_mu_all_j[j, R *(C - 1)  + r] = E_mu_all[R*(C - 1) + r] + log_e_cell_values[j, R, C];
+//       }
+//       E_j_all[j, R*C] = log_e_cell_values[j, R, C];
+//       E_mu_all_j[j, R *C] = E_mu_all[R*C];
+//     }
+//   }
 
 }
 model{
@@ -321,10 +345,27 @@ model{
   row_vector[n_poss_cells] cell_values_row_vector;
   int counter_cell = 0;
 
-  target += target_adj;
+  for (j in 1:n_areas){
+     for (c in 1:C){
+       for(r in 1:R){
+         if(structural_zeros[j,r,c]==0){
+           counter_cell += 1;
+           cell_values_row_vector[counter_cell] = cell_values[j,r,c];
+           e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
+         }
+       }
+     }
+  }
+
+  target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+
 
   for(j in 1:n_areas){
-    E_j_all[j] ~ multi_normal_cholesky(E_mu_all_j[j], diag_pre_multiply(sigma_j_all, L_Omega));
+    if(lflag_centred_jrc==1){
+      E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all, diag_pre_multiply(sigma_j_all, L_Omega));
+    } else{
+      E_j_all_raw[j] ~ std_normal();
+    }
   }
 
 
