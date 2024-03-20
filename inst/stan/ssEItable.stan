@@ -314,10 +314,10 @@ transformed parameters{
       }
 
       log_e_cell_values[j, R, C] = E_j_all[j, R*C];
-      E_mu_all_j[j, R * C] = E_mu_all[R * C];
+      E_mu_all_j[j, R * C] = log(inv_logit(E_mu_all[R* C])) + rm_log[j, R];
       for(r in 1:R-1){
         log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r];
-        E_mu_all_j[j, R*(C - 1) + r] = E_mu_all[R*(C - 1) + r] + log_e_cell_values[j, R, C];
+        E_mu_all_j[j, R*(C - 1) + r] = log(inv_logit(E_mu_all[R*(C - 1) + r])) + rm_log[j, r];
       }
       for(r in 1:R){
         for(c in 1:C - 1){
