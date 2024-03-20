@@ -272,6 +272,7 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas] vector[K_j] E_j_all;
+  array[n_areas] vector[K_j] E_mu_all_j;
   array[n_areas] matrix[R, C] log_e_cell_values;
   matrix[K_j, K_j] L_Omega;
   vector[K_j] E_mu_all;
@@ -304,22 +305,47 @@ transformed parameters{
   }
 
   for(j in 1:n_areas){
-    if(lflag_centred_jrc == 1){
-      E_j_all[j] = E_j_all_raw[j];
-    } else if(lflag_centred_jrc == 0) {
-      E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
-    }
+    if(lflag_llmod_structure == 1){
+      if(lflag_centred_jrc == 1){
+        E_j_all[j] = E_j_all_raw[j];
+      } else if(lflag_centred_jrc == 0) {
+        // haven't worked this case out yet
+        // E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
+      }
 
-    log_e_cell_values[j, R, C] = E_j_all[j, R*C] + rm_log[j, R] + cm_log[j, C];
-    for(r in 1:R-1){
-      log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C] + rm_log[j, r] - rm_log[j, R];
-    }
-    for(r in 1:R){
-      for(c in 1:C - 1){
+      log_e_cell_values[j, R, C] = E_j_all[j, R*C];
+      E_mu_all_j[j, R * C] = E_mu_all[R * C];
+      for(r in 1:R-1){
+        log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r];
+        E_mu_all_j[j, R*(C - 1) + r] = E_mu_all[R*(C - 1) + r] + log_e_cell_values[j, R, C];
+      }
+      for(r in 1:R){
+        for(c in 1:C - 1){
+        log_e_cell_values[j, r, c] = E_j_all[j, (r - 1) *(C - 1) + c];
+        E_mu_all_j[j, (r - 1) *(C - 1) + c] = E_mu_all[(r - 1) *(C - 1) + c] + log_e_cell_values[j, r, C];
+      }
+     }
+    } else if (lflag_llmod_structure==0){
+      E_mu_all_j[j] = E_mu_all;
+      if(lflag_centred_jrc == 1){
+        E_j_all[j] = E_j_all_raw[j];
+      } else if(lflag_centred_jrc == 0) {
+        E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
+      }
+      log_e_cell_values[j, R, C] = E_j_all[j, R*C] + rm_log[j, R] + cm_log[j, C];
+      for(r in 1:R-1){
+        log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C] + rm_log[j, r] - rm_log[j, R];
+      }
+      for(r in 1:R){
+        for(c in 1:C - 1){
         log_e_cell_values[j, r, c] = E_j_all[j, (r - 1) *(C - 1) + c] + log_e_cell_values[j, r, C];
       }
-    }
-  }
+     }
+   }
+
+
+ }
+
 
 //
 //   for(j in 1:n_areas){
@@ -362,7 +388,7 @@ model{
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc==1){
-      E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all, diag_pre_multiply(sigma_j_all, L_Omega));
+      E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all_j[j], diag_pre_multiply(sigma_j_all, L_Omega));
     } else{
       E_j_all_raw[j] ~ std_normal();
     }
