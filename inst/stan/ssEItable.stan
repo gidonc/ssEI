@@ -143,7 +143,7 @@ transformed data{
     has_area_row_effects = 1;
   }
 
-  K_j = lflag_predictors_cm == 1 ? (R * C) : (R - 1) * C ;
+  K_j = lflag_predictors_cm == 1 ? (R * C) - 1: (R - 1) * C ;
   // K_j = (R - 1) * C ;
   K_jr_start = 2;
   K_jc_start = K_jr_start + R - 1;
@@ -258,6 +258,7 @@ transformed data{
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[K_j] E_j_all_raw;
+  vector[n_areas] last_one;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
@@ -313,11 +314,11 @@ transformed parameters{
         // E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
       }
 
-      log_e_cell_values[j, R, C] = E_j_all[j, R*C];
-      E_mu_all_j[j, R * C] = log(inv_logit(E_mu_all[R* C])) + rm_log[j, R];
+      log_e_cell_values[j, R, C] = last_one[j]; //E_j_all[j, R*C];
+      //E_mu_all_j[j, R * C] = E_mu_all[R* C] + rm_log[j, R];
       for(r in 1:R-1){
         log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r];
-        E_mu_all_j[j, R*(C - 1) + r] = log(inv_logit(E_mu_all[R*(C - 1) + r])) + rm_log[j, r];
+        E_mu_all_j[j, R*(C - 1) + r] = E_mu_all[R*(C - 1) + r] + log_e_cell_values[j, R, C];
       }
       for(r in 1:R){
         for(c in 1:C - 1){
@@ -332,9 +333,9 @@ transformed parameters{
       } else if(lflag_centred_jrc == 0) {
         E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
       }
-      log_e_cell_values[j, R, C] = E_j_all[j, R*C] + rm_log[j, R] + cm_log[j, C];
+      log_e_cell_values[j, R, C] = last_one[j];//E_j_all[j, R*C] + rm_log[j, R] + cm_log[j, C];
       for(r in 1:R-1){
-        log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C] + rm_log[j, r] - rm_log[j, R];
+        log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C];
       }
       for(r in 1:R){
         for(c in 1:C - 1){
@@ -393,6 +394,7 @@ model{
       E_j_all_raw[j] ~ std_normal();
     }
   }
+  last_one ~ normal(0, 10);
 
 
   if(lflag_centred_m==1){
