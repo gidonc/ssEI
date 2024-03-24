@@ -143,14 +143,14 @@ transformed data{
     has_area_row_effects = 1;
   }
 
-  K_j = lflag_predictors_cm == 1 ? (R * C) - 1: (R - 1) * C ;
+  K_j = lflag_predictors_cm == 1 ? (R * C): (R - 1) * C ;
   // K_j = (R - 1) * C ;
-  K_jr_start = 2;
+  K_jr_start = 1;
   K_jc_start = K_jr_start + R - 1;
-  K_jrc_start = K_jc_start + C - 2;
+  K_jrc_start = K_jc_start + C - 1;
 
   for(r in 1:R - 1){
-    K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 2);
+    K_jrc_rstart[r] = K_jrc_start + (r - 1)*(C - 1);
   }
 
 
@@ -258,7 +258,6 @@ transformed data{
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[K_j] E_j_all_raw;
-  vector[n_areas] last_one;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
@@ -274,6 +273,10 @@ transformed parameters{
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas] vector[K_j] E_j_all;
   array[n_areas] vector[K_j] E_mu_all_j;
+  vector[n_areas] E_j;
+  array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
+  array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
+  array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] matrix[R, C] log_e_cell_values;
   matrix[K_j, K_j] L_Omega;
   vector[K_j] E_mu_all;
@@ -306,46 +309,36 @@ transformed parameters{
   }
 
   for(j in 1:n_areas){
-    if(lflag_llmod_structure == 1){
-      if(lflag_centred_jrc == 1){
-        E_j_all[j] = E_j_all_raw[j];
-      } else if(lflag_centred_jrc == 0) {
-        // haven't worked this case out yet
-        // E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
-      }
-
-      log_e_cell_values[j, R, C] = last_one[j]; //E_j_all[j, R*C];
-      //E_mu_all_j[j, R * C] = E_mu_all[R* C] + rm_log[j, R];
-      for(r in 1:R-1){
-        log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r];
-        E_mu_all_j[j, R*(C - 1) + r] = E_mu_all[R*(C - 1) + r] + log_e_cell_values[j, R, C];
-      }
-      for(r in 1:R){
-        for(c in 1:C - 1){
-        log_e_cell_values[j, r, c] = E_j_all[j, (r - 1) *(C - 1) + c];
-        E_mu_all_j[j, (r - 1) *(C - 1) + c] = E_mu_all[(r - 1) *(C - 1) + c] + log_e_cell_values[j, r, C];
-      }
-     }
-    } else if (lflag_llmod_structure==0){
-      E_mu_all_j[j] = E_mu_all;
       if(lflag_centred_jrc == 1){
         E_j_all[j] = E_j_all_raw[j];
       } else if(lflag_centred_jrc == 0) {
         E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
       }
-      log_e_cell_values[j, R, C] = last_one[j];//E_j_all[j, R*C] + rm_log[j, R] + cm_log[j, C];
+
+      E_j[j] = E_j_all[j, R*C];
+      E_mu_all_j[j, R * C] = E_mu_all[R* C];
       for(r in 1:R-1){
-        log_e_cell_values[j, r, C] = E_j_all[j, R*(C - 1) + r] + log_e_cell_values[j, R, C];
+        E_jr[j, r] = E_j_all[j, r];
+        E_mu_all_j[j, r] = E_mu_all[r];
       }
-      for(r in 1:R){
+      for(c in 1:C - 1){
+        E_jc[j, c] = E_j_all[j, K_jc_start + c - 1];
+        E_mu_all_j[j, K_jc_start + c - 1] = E_mu_all[K_jc_start + c - 1];
+      }
+      for(r in 1:R - 1){
         for(c in 1:C - 1){
-        log_e_cell_values[j, r, c] = E_j_all[j, (r - 1) *(C - 1) + c] + log_e_cell_values[j, r, C];
+        E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c - 1];
+        E_mu_all_j[j, K_jrc_rstart[r] + c - 1] = E_mu_all[K_jrc_rstart[r] + c - 1];
       }
      }
-   }
+     for(r in 1:R){
+       for (c in 1:C){
+         log_e_cell_values[j, r, c] = E_j[j] + E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c];
+       }
+     }
 
 
- }
+  }
 
 
 //
@@ -368,13 +361,13 @@ transformed parameters{
 
 }
 model{
-  vector[n_poss_cells] e_cell;
-  row_vector[n_poss_cells] cell_values_row_vector;
+  vector[n_areas*(R - 1)*(C - 1)] e_cell;
+  row_vector[n_areas*(R - 1)*(C - 1)] cell_values_row_vector;
   int counter_cell = 0;
 
   for (j in 1:n_areas){
-     for (c in 1:C){
-       for(r in 1:R){
+     for (c in 1:C - 1){
+       for(r in 1:R - 1){
          if(structural_zeros[j,r,c]==0){
            counter_cell += 1;
            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
@@ -394,7 +387,6 @@ model{
       E_j_all_raw[j] ~ std_normal();
     }
   }
-  last_one ~ normal(0, 10);
 
 
   if(lflag_centred_m==1){
