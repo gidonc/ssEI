@@ -39,7 +39,7 @@ data{
   int<lower = 0, upper =1> lflag_centred_m; // flag indicating whether to use (1) centred or (0) decentred parameterization
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
 
- int<lower = 0, upper =2> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect) [replaced by other flags]
+ int<lower = 0, upper =3> lflag_llmod_structure; // flag indicating what log-linear model parameters should be estimated relative to
  real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
@@ -272,6 +272,7 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   array[n_areas] vector[K_j + 1] E_j_all = rep_array(rep_vector(0, K_j + 1), n_areas);
+  vector[n_areas] E_j;
   array[n_areas] matrix[R, C] log_r_cell_values = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] matrix[R, C] log_e_cell_values;
   array[n_areas] vector[K_j] mu_log_r_cell_values;
@@ -309,27 +310,73 @@ transformed parameters{
     if(lflag_centred_jrc == 1){
       E_j_all[j, 1:K_j] = E_j_all_raw[j];
     } else if(lflag_centred_jrc == 0) {
-      // E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
+      E_j_all[j, 1:K_j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
     }
     for(r in 1:R-1){
-      mu_log_r_cell_values[j, r] = E_mu_all[r];
-      log_r_cell_values[j, r, C] = E_j_all[j, r];
+      if(lflag_llmod_structure==0){
+        mu_log_r_cell_values[j, r] = E_mu_all[r];
+        log_r_cell_values[j, r, C] = E_j_all[j, r];
+      } else if(lflag_llmod_structure==1){
+        mu_log_r_cell_values[j, r] = E_mu_all[r];
+        log_r_cell_values[j, r, C] = E_j_all[j, r];
+      } else if(lflag_llmod_structure==2){
+        mu_log_r_cell_values[j, r] = E_mu_all[r];
+        log_r_cell_values[j, r, C] = E_j_all[j, r];
+      } else if(lflag_llmod_structure==3){
+        mu_log_r_cell_values[j, r] = E_mu_all[r];
+        log_r_cell_values[j, r, C] = E_j_all[j, r];
+      }
     }
     for(c in 1:C - 1){
-      mu_log_r_cell_values[j, R - 1 + c] = E_mu_all[R - 1 + c];
-      log_r_cell_values[j, R, c] = E_j_all[j, R - 1 + c];
+      if(lflag_llmod_structure==0){
+        mu_log_r_cell_values[j, R - 1 + c] = E_mu_all[R - 1 + c];
+        log_r_cell_values[j, R, c] = E_j_all[j, R - 1 + c];
+      } else if(lflag_llmod_structure==1){
+        mu_log_r_cell_values[j, R - 1 + c] = E_mu_all[R - 1 + c];
+        log_r_cell_values[j, R, c] = E_j_all[j, R - 1 + c];
+      } else if(lflag_llmod_structure==2){
+        mu_log_r_cell_values[j, R - 1 + c] = E_mu_all[R - 1 + c];
+        log_r_cell_values[j, R, c] = E_j_all[j, R - 1 + c];
+      } else if(lflag_llmod_structure==3){
+        mu_log_r_cell_values[j, R - 1 + c] = E_mu_all[R - 1 + c];
+        log_r_cell_values[j, R, c] = E_j_all[j, R - 1 + c];
+      }
     }
     for(r in 1:R - 1){
       for(c in 1:C - 1){
-        mu_log_r_cell_values[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c] + E_j_all[j, R - 1 + c];
-        log_r_cell_values[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] + E_j_all[j, r];
+        if(lflag_llmod_structure==0){
+          mu_log_r_cell_values[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
+          log_r_cell_values[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] + E_j_all[j, r];
+        } else if(lflag_llmod_structure==1){
+          if(lflag_centred_jrc==0){
+            E_j_all[j, K_jrc_rstart[r] + c] += E_j_all[j, R - 1 + c];
+          }
+          mu_log_r_cell_values[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c] + E_j_all[j, R - 1 + c];
+          log_r_cell_values[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] + E_j_all[j, r];
+        } else if(lflag_llmod_structure==2){
+          if(lflag_centred_jrc==0){
+            E_j_all[j, K_jrc_rstart[r] + c] += E_j_all[j, R - 1 + c] + E_j_all[j, r];
+          }
+          mu_log_r_cell_values[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c] + E_j_all[j, R - 1 + c] + E_j_all[j, r];
+          log_r_cell_values[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c];
+        } else if(lflag_llmod_structure==3){
+          mu_log_r_cell_values[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
+          log_r_cell_values[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c]  + E_j_all[j, R - 1 + c] + E_j_all[j, r];
+        }
+      }
+    }
+    for(r in 1:R){
+      for(c in 1:C){
+        if(structural_zeros[j,r,c]==1){
+          log_r_cell_values[j, r, c] = -200;
+        }
       }
     }
 
-    log_e_cell_values[j, R, C] = tot_log[j] - log_sum_exp(log_r_cell_values[j]);
+    E_j[j] = tot_log[j] - log_sum_exp(log_r_cell_values[j]);
     for(r in 1:R){
       for(c in 1:C){
-        log_e_cell_values[j, r, c] = log_r_cell_values[j, r, c] + log_e_cell_values[j, R, C];
+        log_e_cell_values[j, r, c] = log_r_cell_values[j, r, c] + E_j[j];
       }
     }
   }
