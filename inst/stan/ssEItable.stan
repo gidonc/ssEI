@@ -357,13 +357,17 @@ transformed parameters{
      }
      for(r in 1:R){
        for(c in 1:C){
-         log_r_cell_values[j, r, c] = E_jrc[j, r, c] + E_jc[j, c] + E_jr[j, r];
+         if(structural_zeros[j,r, c] == 0){
+           log_r_cell_values[j, r, c] = E_jrc[j, r, c] + E_jc[j, c] + E_jr[j, r];
+         } else{
+           log_r_cell_values[j, r, c] = -200;
+         }
        }
      }
      E_j[j] = tot_log[j] -log_sum_exp(to_vector(log_r_cell_values[j]));
      for(r in 1:R){
        for (c in 1:C){
-         log_e_cell_values[j, r, c] = E_jrc[j, r, c] + E_jc[j, c] + E_jr[j, r] + E_j[j];
+         log_e_cell_values[j, r, c] = log_r_cell_values[j, r, c] + E_j[j];
        }
      }
 
@@ -374,40 +378,37 @@ transformed parameters{
 
 }
 model{
-  vector[n_areas*(R - 1)*(C - 1)] e_cell;
-  row_vector[n_areas*(R - 1)*(C - 1)] cell_values_row_vector;
-  row_vector[n_areas*(R)] rm_row_vector;
-  row_vector[n_areas*(C)] cm_row_vector;
-  vector[n_areas*(R)] e_row;
-  vector[n_areas*(C)] e_col;
+  vector[n_poss_cells] e_cell;
+  row_vector[n_poss_cells] cell_values_row_vector;
   int counter_cell = 0;
 
   for (j in 1:n_areas){
     for(r in 1:R){
-      e_row[(j - 1)*(R) +r] = exp(log_sum_exp(log_e_cell_values[j, r, 1:C]));
-      rm_row_vector[(j - 1)*(R) +r] = row_margins[j, r];
+      for(c in 1:C){
+        if(structural_zeros[j,r,c]==0){
+          counter_cell += 1;
+          if(r == R){
+            if(c == C){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, R, C]) + exp(tot_log[j]) -cell_values[j, R, C];
+              cell_values_row_vector[counter_cell] = sum(row_margins[j, 1:R]);
+            } else if(c < C){
+              e_cell[counter_cell]  = exp(log_e_cell_values[j, R, c]) + sum(cell_values[j, 1:R - 1, c]);
+              cell_values_row_vector[counter_cell] = col_margins[j, c];
+            }
+          } else if(c == C){
+              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, C]) + sum(cell_values[j, r, 1:C - 1]);
+              cell_values_row_vector[counter_cell] = row_margins[j, r];
+          } else if (c < C && r < R){
+             e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
+             cell_values_row_vector[counter_cell] = cell_values[j,r,c];
+          }
+        }
+      }
     }
-    for(c in 1:C){
-      e_col[(j - 1)*(C) +c] = exp(log_sum_exp(log_e_cell_values[j, 1:R, c]));
-      cm_row_vector[(j - 1)*(C) +c] = col_margins[j, c];
-    }
-
-     for (c in 1:C - 1){
-       for(r in 1:R - 1){
-         if(structural_zeros[j,r,c]==0){
-           counter_cell += 1;
-           cell_values_row_vector[counter_cell] = cell_values[j,r,c];
-           e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
-         }
-       }
-     }
   }
 
 
   target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
-  target +=realpoisson_lpdf(rm_row_vector| e_row);
-  target +=realpoisson_lpdf(cm_row_vector| e_col);
-
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc==1){
