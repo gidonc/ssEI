@@ -73,7 +73,7 @@ transformed data{
   int n_poss_cols=0;
   int has_phi;
   int has_area_re;
-  int has_free_area;
+  int has_free_E_j;
   int has_area_col_effects;
   int has_area_row_effects;
   int has_L;
@@ -120,10 +120,10 @@ transformed data{
     has_onion = 0;
   }
 
-  if(lflag_llmod_const == 0){
-    has_free_area = 1;
+  if(lflag_llmod_const == 1){
+    has_free_E_j = 1;
   } else {
-    has_free_area = 0;
+    has_free_E_j = 0;
   }
 
   if(lflag_llmod_omit_jrc ==1){
@@ -257,6 +257,8 @@ transformed data{
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[K_j] E_j_all_raw;
+  vector[n_areas] E_j_raw;
+  array[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] vector[R - 1] E_jr_raw;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
@@ -328,8 +330,12 @@ transformed parameters{
       }
 
       for(r in 1:R - 1){
+        if(lflag_predictors_cm == 0){
+          E_jr[j, r] = E_jr_raw[j, r];
+        } else if(lflag_predictors_cm == 1){
           E_jr[j, K_jr_start + r] = E_j_all[j, K_jr_start + r];
           E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
+        }
       }
 
       for(c in 1:C - 1){
@@ -364,7 +370,11 @@ transformed parameters{
          }
        }
      }
-     E_j[j] = tot_log[j] -log_sum_exp(to_vector(log_r_cell_values[j]));
+     if(has_free_E_j == 1){
+       E_j[j] = E_j_raw[j];
+     } else {
+       E_j[j] = tot_log[j] -log_sum_exp(to_vector(log_r_cell_values[j]));
+     }
      for(r in 1:R){
        for (c in 1:C){
          log_e_cell_values[j, r, c] = log_r_cell_values[j, r, c] + E_j[j];
@@ -436,6 +446,14 @@ model{
   if(has_onion == 1){
     l ~ std_normal();
     R2 ~ beta(shapes[1], shapes[2]);
+  }
+  if(has_free_E_j == 1){
+    E_j_raw ~ normal(0, 10);
+  }
+  if(lflag_predictors_cm == 0){
+    for(j in 1:n_areas){
+      E_jr_raw[j] ~ normal(0, 10);
+    }
   }
 
     hinge_delta_floor ~ normal(0, .001);
