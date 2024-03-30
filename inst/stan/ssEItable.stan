@@ -39,7 +39,7 @@ data{
   int<lower = 0, upper =1> lflag_centred_m; // flag indicating whether to use (1) centred or (0) decentred parameterization
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
 
- int<lower = 0, upper =2> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect) [replaced by other flags]
+ int<lower = 0, upper =3> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect) [replaced by other flags]
  real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
@@ -120,7 +120,7 @@ transformed data{
     has_onion = 0;
   }
 
-  if(lflag_llmod_const == 1){
+  if(lflag_llmod_const == 0){
     has_free_E_j = 1;
   } else {
     has_free_E_j = 0;
@@ -280,7 +280,6 @@ transformed parameters{
   array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] matrix[R, C] log_e_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  array[n_areas] matrix[R, C] log_cv;
   real add_mu;
   matrix[K_j, K_j] L_Omega;
   vector[K_j] E_mu_all;
@@ -314,15 +313,7 @@ transformed parameters{
   }
 
   for(j in 1:n_areas){
-    for(r in 1:R){
-      for(c in 1:C){
-        if(cell_values[j, r, c]== 0){
-          log_cv[j, r, c] = log(.0001);
-        } else{
-          log_cv[j, r, c] = log(cell_values[j, r, c]);
-        }
-      }
-    }
+
       if(lflag_centred_jrc == 1){
         E_j_all[j] = E_j_all_raw[j];
       } else if(lflag_centred_jrc == 0) {
@@ -352,6 +343,8 @@ transformed parameters{
           add_mu = E_jc[j, c];
         } else if(lflag_llmod_structure ==2){
           add_mu = E_jc[j, c] + E_jr[j, r];
+        } else if(lflag_llmod_structure ==3){
+          add_mu = E_jr[j, r];
         }
         if(lflag_centred_jrc==0) {
           E_j_all[j, K_jrc_rstart[r] + c] += 0;
@@ -398,15 +391,10 @@ model{
         if(structural_zeros[j,r,c]==0){
           counter_cell += 1;
           if(r == R){
-            if(c == C){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, R, C]) + exp(tot_log[j]) -cell_values[j, R, C];
-              cell_values_row_vector[counter_cell] = sum(row_margins[j, 1:R]);
-            } else if(c < C){
-              e_cell[counter_cell]  = exp(log_e_cell_values[j, R, c]) + sum(cell_values[j, 1:R - 1, c]);
+              e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, 1:R, c]));
               cell_values_row_vector[counter_cell] = col_margins[j, c];
-            }
           } else if(c == C){
-              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, C]) + sum(cell_values[j, r, 1:C - 1]);
+              e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, r, 1:C]));
               cell_values_row_vector[counter_cell] = row_margins[j, r];
           } else if (c < C && r < R){
              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
