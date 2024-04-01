@@ -257,7 +257,7 @@ transformed data{
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[K_j] E_j_all_raw;
-  vector[n_areas] E_j_raw;
+  vector[has_free_E_j*n_areas] E_j_raw;
   array[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] vector[R - 1] E_jr_raw;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
@@ -382,6 +382,7 @@ transformed parameters{
 }
 model{
   vector[n_poss_cells] e_cell;
+  vector[n_poss_cells] e_sigma;
   row_vector[n_poss_cells] cell_values_row_vector;
   int counter_cell = 0;
 
@@ -391,14 +392,21 @@ model{
         if(structural_zeros[j,r,c]==0){
           counter_cell += 1;
           if(r == R){
-              e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, 1:R, c]));
+              // e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, 1:R, c]));
+              // cell_values_row_vector[counter_cell] = col_margins[j, c];
+              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) + sum(cell_values[j, 1:R - 1, c]);
               cell_values_row_vector[counter_cell] = col_margins[j, c];
+              e_sigma[counter_cell] = sqrt(exp(log_e_cell_values[j, r, c]));
           } else if(c == C){
-              e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, r, 1:C]));
+              // e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, r, 1:C]));
+              // cell_values_row_vector[counter_cell] = row_margins[j, r];
+              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) + sum(cell_values[j, r, 1:C - 1]);
               cell_values_row_vector[counter_cell] = row_margins[j, r];
+              e_sigma[counter_cell] = sqrt(exp(log_e_cell_values[j, r, c]));
           } else if (c < C && r < R){
-             e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
-             cell_values_row_vector[counter_cell] = cell_values[j,r,c];
+            e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
+            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
+            e_sigma[counter_cell] = sqrt(exp(log_e_cell_values[j, r, c]));
           }
         }
       }
@@ -407,6 +415,7 @@ model{
 
 
   target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+  // cell_values_row_vector ~ normal(e_cell, e_sigma);
 
   for(j in 1:n_areas){
     if(lflag_centred_jrc==1){
