@@ -24,7 +24,6 @@
 
   real realnegbinom3_lpdf(row_vector x, vector alpha, vector theta){
       vector[num_elements(x)] lpdf;
-      vector[num_elements(x)] lpdf2;
       for (n in 1:num_elements(x)){
         lpdf[n] = lgamma(x[n] + alpha[n]) - lgamma(alpha[n]) - lgamma(x[n] + 1) + x[n]*log(theta[n]) + alpha[n]*log(1 - theta[n]);
 
