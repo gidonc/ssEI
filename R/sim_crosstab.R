@@ -66,6 +66,70 @@ mk_eta <- function(n_areas, mu_raw, n_row, n_col, Sigma){
   eta
 }
 
+mk_E_j_all <- function(n_areas, E_mu, Sigma){
+  E_j_all <- matrix(nrow = n_areas, ncol=nrow(Sigma))
+  for(j in 1:n_areas){
+    E_j_all[j,]<- MASS::mvrnorm(1, E_mu, Sigma)
+  }
+  E_j_all
+}
+
+sim_tables_from_llmod <- function(log_e_cell_values){
+  J <- dim(log_e_cell_values)[1]
+  R <- dim(log_e_cell_values)[2]
+  C <- dim(log_e_cell_values)[3]
+  cell_values_flat <- rpois(J*R*C, exp(c(log_e_cell_values)))
+  cell_values <- array(dim=c(J, R, C))
+  counter = 0
+  sim_df_long <- data.frame(area_no = numeric(), row_no = numeric(), col_no=numeric(), actual_cell_value=numeric())
+  for(c in 1:C){
+    for(r in 1:R){
+      for(j in 1:J){
+        counter = counter + 1
+        cell_values[j, r, c] = cell_values_flat[counter]
+
+        sim_df_long <- bind_rows(sim_df_long, data.frame(area_no = j, row_no = r, col_no = c, actual_cell_value =cell_values_flat[counter]))
+      }
+    }
+  }
+  the_sim_df <- sim_df_long |> dplyr::mutate(col_no = paste0("col_no_", col_no))
+  sim_df_long <- sim_df_long |>
+    dplyr::group_by(area_no) |>
+    dplyr::mutate(actual_area_total = sum(actual_cell_value)) |>
+    dplyr::group_by(area_no, col_no) |>
+    dplyr::mutate(actual_col_margin = sum(actual_cell_value),
+                  actual_col_rate = actual_cell_value/actual_col_margin) |>
+    dplyr::group_by(area_no, row_no) |>
+    dplyr::mutate(actual_row_margin = sum(actual_cell_value),
+                  actual_row_rate = actual_cell_value/actual_row_margin) |>
+    dplyr::ungroup()
+
+  sim_df_wide <- sim_df_long |> dplyr::select(-actual_row_rate, -actual_col_rate, -actual_col_margin) |>
+    dplyr::mutate(col_no = paste0("col_no_", col_no)) |>
+    tidyr::pivot_wider(names_from = col_no, values_from = actual_cell_value)
+
+  row_margins <- sim_df_long |>
+    dplyr::group_by(area_no, row_name = paste0("row_no_", row_no)) |>
+    dplyr::summarise(actual_row_margin = mean(actual_row_margin)) |>
+    pivot_wider(names_from="row_name", values_from = actual_row_margin) |>
+    dplyr::ungroup() |>
+    dplyr::select(-area_no)
+  col_margins <- sim_df_long |>
+    dplyr::group_by(area_no, col_name = paste0("col_no_", col_no)) |>
+    dplyr::summarise(actual_col_margin = mean(actual_col_margin)) |>
+    pivot_wider(names_from="col_name", values_from = actual_col_margin) |>
+    dplyr::ungroup() |>
+    dplyr::select(-area_no)
+
+  list(
+    sim_df_wide = sim_df_wide,
+    sim_df_long = sim_df_long,
+    row_margins= row_margins,
+    col_margins = col_margins,
+    log_e_cell_values = log_e_cell_values
+  )
+}
+
 sim_tables_from_probs <- function(n_areas, row_margins, n_col, eta){
   n_row <- ncol(row_margins)
   the_sim <- vector(length=n_areas, mode = "list")
@@ -129,7 +193,7 @@ sim_tables_from_probs <- function(n_areas, row_margins, n_col, eta){
 #' @export
 #'
 #' @examples
-mk_sim_tables <- function(n_areas, n_row,  n_col,
+mk_sim_tables_old <- function(n_areas, n_row,  n_col,
                           max_row_margin=1000,
                           scale_sd = -2,
                           sd_sd = 1,
@@ -148,7 +212,9 @@ mk_sim_tables <- function(n_areas, n_row,  n_col,
   }
 
 
-  mu_raw <- mk_mu_raw(n_row, n_col, mu_sigma = mu_sigma)
+  mu_raw <- rnorm(K, mu_sigma, sd_sigma)
+
+  E_j_all <- mk_E_j_all()
 
   eta <- mk_eta(n_areas = n_areas, mu_raw = mu_raw, n_row = n_row, n_col = n_col, Sigma = Sigma)
 
@@ -159,6 +225,97 @@ mk_sim_tables <- function(n_areas, n_row,  n_col,
   sim_tables
 }
 
+#' Generate Crosstables from a number of different areas with related structures.
+#'
+#' @param n_areas Number of areas to generate.
+#' @param R Number of rows in each area.
+#' @param C Number of columns in each area.
+#' @param loc_jr location (mean) of row effects (in EI this is often large relative to column and cell reffects)
+#' @param loc_jc location (mean) of col effects (in EI this is often large relative to cell effects, but small relative to row effects)
+#' @param loc_jrc location (mean) of cell effects (in EI these are often small relative to row and col effects)
+#' @param contextual_effects Are there within and between row correlations in
+#' @param lkj_eta Concentration parameter of matrix. Must be >0. `eta = 1` then the density is uniform over correlation matricies. `eta >1` the identify matrix is the modal correlation matrix (favours lower correlations). `0 < eta , 1` the density has a trough at the identity matrix (favours higher correlations).
+#' @param mu_sigma
+#'
+#' @return
+#' @export
+#'
+#' @examples
+mk_sim_tables <- function(n_areas, R,  C,
+                          loc_jr = 0,
+                          loc_jc = -1,
+                          loc_jrc = -1,
+                          loc_jr_sd = 0,
+                          loc_jc_sd = -1,
+                          loc_jrc_sd = -1,
+                          jr_sd_sd = 1,
+                          jc_sd_sd = 1,
+                          jrc_sd_sd = 1,
+                          av_area_pop = 1000,
+                          contextual_effects = TRUE,
+                          lkj_eta = 1,
+                          mu_sigma = 1){
+  K <- R * C -1
+
+  E_jr_sd_raw <- rnorm(R -1, loc_jr_sd, jr_sd_sd)
+  E_jc_sd_raw <- rnorm(C - 1, loc_jc_sd, jc_sd_sd)
+  E_jrc_sd_raw <- rnorm((R - 1)* (C - 1), loc_jrc_sd, jrc_sd_sd)
+
+  sd_diag <- exp(c(E_jr_sd_raw, E_jc_sd_raw, E_jrc_sd_raw))
+
+
+  if(contextual_effects){
+    Omega <- rlkjcorr(1, K, lkj_eta)
+    Sigma <- diag(sd_diag) %*% Omega %*% diag(sd_diag)
+  } else {
+    Sigma <- diag(sd_diag^2)
+  }
+  E_mu_jr <- rnorm(R - 1, loc_jr, mu_sigma)
+  E_mu_jc <- rnorm(C - 1, loc_jc, mu_sigma)
+  E_mu_jrc <- rnorm((R - 1)*(C - 1), loc_jrc, mu_sigma)
+  E_mu <- c(E_mu_jr, E_mu_jc, E_mu_jrc)
+  E_j_all <- mk_E_j_all(n_areas, E_mu, Sigma)
+
+  cell_values <- array(rep(0, n_areas*R*C), dim=c(n_areas, R, C))
+  log_r_cell_value <- array(rep(0, n_areas*R*C), dim=c(n_areas, R, C))
+  log_e_cell_value <- array(rep(0, n_areas*R*C), dim=c(n_areas, R, C))
+  E_j_adj <- log(rpois(n_areas, av_area_pop) + .01)
+  E_jr <- matrix(rep(rep(0, R), n_areas), nrow = n_areas, ncol=R)
+  E_jc <- matrix(rep(rep(0, C), n_areas), nrow = n_areas, ncol=C)
+  E_jrc <- array(rep(0, n_areas*R*C), dim=c(n_areas, R, C))
+  E_j <- rnorm(n_areas, 3, 1)
+
+  jrc_rstart <- vector(length = R)
+  for(r in 1:R - 1){
+    jrc_rstart[r] <- R + C- 2 + ((r - 1) *(C - 1))
+  }
+  for(j in 1:n_areas){
+    E_jr[j, 1:R - 1] <- E_j_all[j, 1:R - 1]
+    E_jc[j, 1:C - 1] <- E_j_all[j, R:(R + C - 2)]
+    for(r in 1:(R - 1)){
+      E_jrc[j, r, 1:C - 1] <- E_j_all[j, jrc_rstart[r]:(jrc_rstart[r] + C - 2)]
+    }
+    for(r in 1:R){
+      for(c in 1:C){
+        log_r_cell_value[j, r, c] <- E_jr[j, r] + E_jc[j, c] + E_jrc[j, r, c]
+      }
+    }
+    E_j[j] <- E_j_adj[j] - matrixStats::logSumExp(c(log_r_cell_value[j, 1:R, 1:C]))
+
+    for(r in 1:R){
+      for(c in 1:C){
+        log_e_cell_value[j, r, c] <- log_r_cell_value[j, r, c] + E_j[j]
+        cell_values[j, r, c] <- rpois(1, exp(log_e_cell_value[j, r, c]))
+      }
+    }
+  }
+
+
+  sim_tables <- sim_tables_from_llmod(log_e_cell_value)
+  sim_tables$Sigma <- Sigma
+
+  sim_tables
+}
 
 
 
