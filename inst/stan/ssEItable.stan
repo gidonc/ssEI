@@ -71,7 +71,7 @@ transformed data{
   int n_poss_rows=0;
   int structural_zero_cols[n_areas, C];
   int n_poss_cols=0;
-  int has_phi;
+  int has_theta;
   int has_area_re;
   int has_free_E_j;
   int has_area_col_effects;
@@ -97,9 +97,9 @@ transformed data{
   prior_phi_scale =3;
 
   if(lflag_dist==2){
-    has_phi = 1;
+    has_theta = 1;
   } else{
-    has_phi = 0;
+    has_theta = 0;
   }
 
   if(lflag_area_re == 0){
@@ -257,6 +257,7 @@ transformed data{
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[K_j] E_j_all_raw;
+  vector<lower=0, upper= 1> [n_areas*has_theta] theta;
   vector[has_free_E_j*n_areas] E_j_raw;
   array[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] vector[R - 1] E_jr_raw;
   vector[K_j] E_mu_all_raw;
@@ -351,7 +352,6 @@ transformed parameters{
         }
         E_mu_all_j[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
         E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] - add_mu;
-
       }
      }
      for(r in 1:R){
@@ -382,8 +382,8 @@ transformed parameters{
 }
 model{
   vector[n_poss_cells] e_cell;
-  vector[n_poss_cells] e_sigma;
   row_vector[n_poss_cells] cell_values_row_vector;
+  vector[n_poss_cells*has_theta] e_theta;
   int counter_cell = 0;
 
   for (j in 1:n_areas){
@@ -391,33 +391,57 @@ model{
       for(c in 1:C){
         if(structural_zeros[j,r,c]==0){
           counter_cell += 1;
-          if(r == R){
-              // e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, 1:R, c]));
-              // cell_values_row_vector[counter_cell] = col_margins[j, c];
-              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) + sum(cell_values[j, 1:R - 1, c]);
-              cell_values_row_vector[counter_cell] = col_margins[j, c];
-              e_sigma[counter_cell] = sqrt(exp(log_e_cell_values[j, r, c]));
-          } else if(c == C){
-              // e_cell[counter_cell]  = exp(log_sum_exp(log_e_cell_values[j, r, 1:C]));
-              // cell_values_row_vector[counter_cell] = row_margins[j, r];
-              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) + sum(cell_values[j, r, 1:C - 1]);
-              cell_values_row_vector[counter_cell] = row_margins[j, r];
-              e_sigma[counter_cell] = sqrt(exp(log_e_cell_values[j, r, c]));
-          } else if (c < C && r < R){
-            e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
-            cell_values_row_vector[counter_cell] = cell_values[j,r,c];
-            e_sigma[counter_cell] = sqrt(exp(log_e_cell_values[j, r, c]));
+          if(r<R && c<C){
+            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+            if(lflag_dist ==0){
+                e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]);
+            } else if(lflag_dist==2){
+              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) *(1 - theta[j])/theta[j];
+              e_theta[counter_cell] = theta[j];
+            }
+          } else if (r==R && c ==C){
+            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+            if(lflag_dist==0){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
+            } else if(lflag_dist==2){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c])*(1 - theta[j])/theta[j];
+              e_theta[counter_cell] = theta[j];
+            }
+
+          } else if(r == R && c < C){
+            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+            if(lflag_dist==0){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
+            } else if(lflag_dist==2){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c])*(1 - theta[j])/theta[j];
+              e_theta[counter_cell] = theta[j];
+            }
+          } else if(c == C && r < R){
+            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+            if(lflag_dist==0){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
+            } else if(lflag_dist==2){
+              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c])*(1 - theta[j])/theta[j];
+              e_theta[counter_cell] = theta[j];
+            }
           }
         }
       }
     }
-  }
+   }
+
+   if(lflag_dist==0){
+     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+   } else if (lflag_dist ==2){
+     target +=realnegbinom3_lpdf(cell_values_row_vector| e_cell, e_theta);
+   }
 
 
-  target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
   // cell_values_row_vector ~ normal(e_cell, e_sigma);
 
   for(j in 1:n_areas){
+
+
     if(lflag_centred_jrc==1){
       E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all_j[j], diag_pre_multiply(sigma_j_all, L_Omega));
     } else{
@@ -425,13 +449,13 @@ model{
     }
   }
 
-
-  if(lflag_centred_m==1){
-      E_mu_all ~ normal(E_mu_mu, E_mu_sigma);
-  } else{
-     E_mu_all_raw ~ std_normal();
-  }
-
+  E_mu_all_raw ~ normal(0, prior_cell_effect_scale);
+  // if(lflag_centred_m==1){
+  //     E_mu_all ~ normal(E_mu_mu, E_mu_sigma);
+  // } else{
+  //    E_mu_all_raw ~ std_normal();
+  // }
+//
   E_mu_mu ~ normal(0, prior_cell_effect_scale);
   E_mu_sigma ~ normal(0, prior_cell_effect_scale);
 
@@ -447,6 +471,7 @@ model{
   if(has_free_E_j == 1){
     E_j_raw ~ normal(0, 10);
   }
+
   if(lflag_predictors_cm == 0){
     for(j in 1:n_areas){
       E_jr_raw[j] ~ normal(0, 10);
