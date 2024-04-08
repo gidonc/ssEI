@@ -143,7 +143,7 @@ transformed data{
     has_area_row_effects = 1;
   }
 
-  K_j = lflag_predictors_cm ==1 ? R - 1 + C - 1 + (R - 1)*(C - 1) : C - 1 + (R - 1)*(C - 1) ;
+  K_j = lflag_predictors_cm ==1 ? R*C : C - 1 + (R - 1)*(C - 1) ;
   K_jr_start = 0;
   K_jc_start = lflag_predictors_cm == 1? R - 1: 0;
   K_jrc_start = K_jc_start + C - 1;
@@ -258,7 +258,7 @@ parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
   array[n_areas] vector[K_j] E_j_all_raw;
   vector<lower=0, upper= 1> [n_areas*has_theta] theta;
-  vector[has_free_E_j*n_areas] E_j_raw;
+  // vector[has_free_E_j*n_areas] E_j_raw;
   array[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] vector[R - 1] E_jr_raw;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
@@ -321,11 +321,14 @@ transformed parameters{
         E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
       }
 
+      E_j[j] = rm_log[j, R]- E_j_all[j, R * C];
+      E_mu_all_j[j, R* C] = E_mu_all[R * C];
+
       for(r in 1:R - 1){
         if(lflag_predictors_cm == 0){
           E_jr[j, r] = E_jr_raw[j, r];
         } else if(lflag_predictors_cm == 1){
-          E_jr[j, K_jr_start + r] = E_j_all[j, K_jr_start + r];
+          E_jr[j, K_jr_start + r] = rm_log[j, r] - E_j[j] + E_j_all[j, K_jr_start + r];
           E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
         }
       }
@@ -363,11 +366,11 @@ transformed parameters{
          }
        }
      }
-     if(has_free_E_j == 1){
-       E_j[j] = E_j_raw[j];
-     } else {
-       E_j[j] = tot_log[j] -log_sum_exp(to_vector(log_r_cell_values[j]));
-     }
+     // if(has_free_E_j == 1){
+     //   E_j[j] = E_j_raw[j];
+     // } else {
+     //   E_j[j] = tot_log[j] -log_sum_exp(to_vector(log_r_cell_values[j]));
+     // }
      for(r in 1:R){
        for (c in 1:C){
          log_e_cell_values[j, r, c] = log_r_cell_values[j, r, c] + E_j[j];
@@ -468,9 +471,9 @@ model{
     l ~ std_normal();
     R2 ~ beta(shapes[1], shapes[2]);
   }
-  if(has_free_E_j == 1){
-    E_j_raw ~ normal(0, 10);
-  }
+  // if(has_free_E_j == 1){
+  //   E_j_raw ~ normal(0, 10);
+  // }
 
   if(lflag_predictors_cm == 0){
     for(j in 1:n_areas){
