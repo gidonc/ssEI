@@ -21,6 +21,7 @@ data{
  int<lower=0> C;  // number of columns
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
+ matrix<lower=0>[R, C] overall_tots; // the overall total target distribution (if known - used only if lflag_has_target==1)
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
@@ -40,6 +41,7 @@ data{
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
 
  int<lower = 0, upper =3> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect) [replaced by other flags]
+ int<lower = 0, upper =1> lflag_has_overall_tots; // flag indicating whether the overall target distribution is known;
  real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
@@ -301,8 +303,7 @@ transformed parameters{
     L_Omega = identity_matrix(K_j);
   }
 
-
-
+  #include include/generateratesandsummaries.stan
 
 }
 model{
@@ -318,6 +319,9 @@ model{
   vector[K_j] E_mu_all;
 
   vector[n_poss_cells] e_cell;
+  vector[R*C] e_overall_tots = rep_vector(0, R*C);
+  row_vector[R*C] overall_tots_row_vector = rep_row_vector(0, R*C);
+
   row_vector[n_poss_cells] cell_values_row_vector;
   vector[n_poss_cells*has_theta] e_theta;
   int counter_cell = 0;
@@ -450,6 +454,16 @@ model{
      target +=realnegbinom3_lpdf(cell_values_row_vector| e_cell, e_theta);
    }
 
+   if(lflag_has_overall_tots==1){
+     for(r in 1:R){
+       for(c in 1:C){
+         e_overall_tots[c + (r -1)* C] = sum(exp(log_e_cell_values[1:n_areas, r, c]));
+         overall_tots_row_vector[c + (r - 1)*C] = overall_tots[r, c];
+       }
+     }
+     target +=realpoisson_lpdf(overall_tots_row_vector| e_overall_tots);
+   }
+
 
   // cell_values_row_vector ~ normal(e_cell, e_sigma);
 
@@ -515,6 +529,6 @@ model{
 
 }
 generated quantities{
-    #include include/generateratesandsummaries.stan
+
 
 }
