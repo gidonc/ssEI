@@ -260,30 +260,24 @@ parameters{
   vector<lower=0, upper= 1> [n_areas*has_theta] theta;
   // vector[has_free_E_j*n_areas] E_j_raw;
   array[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] vector[R - 1] E_jr_raw;
+  vector[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] E_j_raw;
   vector[K_j] E_mu_all_raw;
   vector<lower=0>[K_j] sigma_j_all;
+  real<lower=0> scale_sigma_j_all;
+  real sigma_j_all_mu;
   cholesky_factor_corr[has_L * K_j] L_Omega_raw;
   row_vector[has_onion * (choose(K_j, 2) - 1)] l; // do NOT init with 0 for all elements
   vector<lower = 0, upper = 1>[has_onion * (K_j - 1)] R2; // first element is not really a R^2 but is on (0,1)
   real<lower=0, upper = .001> hinge_delta_floor;
   real<lower=0, upper = .001> hinge_delta_min;
-  real E_mu_mu;
-  real<lower=0> E_mu_sigma;
+  // real E_mu_mu;
+  // real<lower=0> E_mu_sigma;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
-  array[n_areas] vector[K_j] E_j_all;
-  array[n_areas] vector[K_j] E_mu_all_j;
-  array[n_areas] vector[C] E_jr = rep_array(rep_vector(0, R), n_areas);
-  array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
-  vector[n_areas] E_j;
-  array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
-  array[n_areas] matrix[R, C] log_e_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  real add_mu;
   matrix[K_j, K_j] L_Omega;
-  vector[K_j] E_mu_all;
+
 
 
   for (j in 1:n_areas){
@@ -307,11 +301,28 @@ transformed parameters{
     L_Omega = identity_matrix(K_j);
   }
 
-  if(lflag_centred_m==1){
-    E_mu_all = E_mu_all_raw;
-  } else {
-    E_mu_all = E_mu_mu + E_mu_sigma * E_mu_all_raw;
-  }
+
+
+
+}
+model{
+  array[n_areas] vector[K_j] E_j_all;
+  array[n_areas] vector[K_j] E_mu_all_j;
+  array[n_areas] vector[C] E_jr = rep_array(rep_vector(0, R), n_areas);
+  array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
+  vector[n_areas] E_j;
+  array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
+  array[n_areas] matrix[R, C] log_e_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
+  array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
+  real add_mu;
+  vector[K_j] E_mu_all;
+
+  vector[n_poss_cells] e_cell;
+  row_vector[n_poss_cells] cell_values_row_vector;
+  vector[n_poss_cells*has_theta] e_theta;
+  int counter_cell = 0;
+
+  E_mu_all = E_mu_all_raw;
 
   for(j in 1:n_areas){
 
@@ -321,42 +332,50 @@ transformed parameters{
         E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
       }
 
-      E_j[j] = rm_log[j, R]- E_j_all[j, R * C];
-      E_mu_all_j[j, R* C] = E_mu_all[R * C];
-
-      for(r in 1:R - 1){
-        if(lflag_predictors_cm == 0){
-          E_jr[j, r] = E_jr_raw[j, r];
-        } else if(lflag_predictors_cm == 1){
-          E_jr[j, K_jr_start + r] = rm_log[j, r] - E_j[j] + E_j_all[j, K_jr_start + r];
-          E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
-        }
-      }
-
       for(c in 1:C - 1){
         E_jc[j, c] = E_j_all[j, K_jc_start + c];
         E_mu_all_j[j, K_jc_start + c] = E_mu_all[K_jc_start + c];
       }
-
-
       for(r in 1:R - 1){
         for(c in 1:C - 1){
-        if(lflag_llmod_structure == 0){
-          add_mu = 0;
-        } else if(lflag_llmod_structure ==1){
-          add_mu = E_jc[j, c];
-        } else if(lflag_llmod_structure ==2){
-          add_mu = E_jc[j, c] + E_jr[j, r];
-        } else if(lflag_llmod_structure ==3){
-          add_mu = E_jr[j, r];
+          if(lflag_llmod_structure == 0){
+            add_mu = 0;
+          } else if(lflag_llmod_structure ==1){
+            add_mu = E_jc[j, c];
+          } else if(lflag_llmod_structure ==2){
+            add_mu = E_jc[j, c] + E_jr[j, r];
+          } else if(lflag_llmod_structure ==3){
+            add_mu = E_jr[j, r];
+          }
+          if(lflag_centred_jrc==0) {
+            E_j_all[j, K_jrc_rstart[r] + c] += 0;
+          }
+          E_mu_all_j[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
+          E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] - add_mu;
         }
-        if(lflag_centred_jrc==0) {
-          E_j_all[j, K_jrc_rstart[r] + c] += 0;
-        }
-        E_mu_all_j[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
-        E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] - add_mu;
       }
-     }
+
+
+
+      if(lflag_predictors_cm == 1){
+        E_j[j] = E_j_all[j, K_j];
+        E_mu_all_j[j, R* C] = E_mu_all[K_j];
+      } else{
+        E_j[j] = E_j_raw[j];
+      }
+
+      for(r in 1:R - 1){
+        vector[C] this_rratios = rep_vector(0, C);
+        if(lflag_predictors_cm == 0){
+          E_jr[j, r] = E_jr_raw[j, r];
+        } else if(lflag_predictors_cm == 1){
+          E_jr[j, K_jr_start + r] = E_j_all[j, K_jr_start + r];
+          E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
+        }
+      }
+
+
+
      for(r in 1:R){
        for(c in 1:C){
          if(structural_zeros[j,r, c] == 0){
@@ -380,14 +399,6 @@ transformed parameters{
 
   }
 
-
-
-}
-model{
-  vector[n_poss_cells] e_cell;
-  row_vector[n_poss_cells] cell_values_row_vector;
-  vector[n_poss_cells*has_theta] e_theta;
-  int counter_cell = 0;
 
   for (j in 1:n_areas){
     for(r in 1:R){
@@ -452,17 +463,34 @@ model{
     }
   }
 
-  E_mu_all_raw ~ normal(0, prior_cell_effect_scale);
+  E_mu_all_raw ~ cauchy(0, prior_sigma_c_scale);
+  // E_mu_all_raw ~ cauchy(E_mu_mu, E_mu_sigma);
   // if(lflag_centred_m==1){
-  //     E_mu_all ~ normal(E_mu_mu, E_mu_sigma);
+  //     E_mu_all_raw ~ normal(E_mu_mu, E_mu_sigma);
   // } else{
   //    E_mu_all_raw ~ std_normal();
   // }
 //
-  E_mu_mu ~ normal(0, prior_cell_effect_scale);
-  E_mu_sigma ~ normal(0, prior_cell_effect_scale);
+  // E_mu_mu ~ cauchy(0, prior_sigma_c_scale);
+  // E_mu_sigma ~ cauchy(0, prior_cell_effect_scale);
 
-  sigma_j_all ~ normal(0, prior_cell_effect_scale);
+  sigma_j_all ~ lognormal(sigma_j_all_mu, scale_sigma_j_all);
+  // sigma_j_all ~ cauchy(0, 2);
+  // for(k in 1:K_j){
+  //
+    // if(k < K_jc_start + 1){
+    //   sigma_j_all[k] ~ normal(0, prior_cell_effect_scale);
+    // } else if(k<K_jrc_start){
+    //   sigma_j_all[k] ~ normal(0, prior_cell_effect_scale);
+    // } else if(k< R *C){
+    //   sigma_j_all[k] ~ lognormal(sigma_j_all_mu, scale_sigma_j_all);
+    // } else{
+    //   sigma_j_all[k] ~ normal(0, prior_cell_effect_scale);
+    // }
+  // }
+  sigma_j_all_mu ~ normal(0, prior_cell_effect_scale);
+  scale_sigma_j_all ~ normal(0, prior_cell_effect_scale);
+
 
   if(has_L == 1){
     L_Omega_raw ~ lkj_corr_cholesky(prior_lkj); // implies L*L'~ lkj_corr(prior_lkj);
@@ -476,6 +504,7 @@ model{
   // }
 
   if(lflag_predictors_cm == 0){
+    E_j_raw ~ normal(0, 10);
     for(j in 1:n_areas){
       E_jr_raw[j] ~ normal(0, 10);
     }
