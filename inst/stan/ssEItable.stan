@@ -272,8 +272,8 @@ parameters{
   vector<lower = 0, upper = 1>[has_onion * (K_j - 1)] R2; // first element is not really a R^2 but is on (0,1)
   real<lower=0, upper = .001> hinge_delta_floor;
   real<lower=0, upper = .001> hinge_delta_min;
-  // real E_mu_mu;
-  // real<lower=0> E_mu_sigma;
+  real E_mu_mu;
+  real<lower=0> E_mu_sigma;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -309,7 +309,7 @@ transformed parameters{
 model{
   array[n_areas] vector[K_j] E_j_all;
   array[n_areas] vector[K_j] E_mu_all_j;
-  array[n_areas] vector[C] E_jr = rep_array(rep_vector(0, R), n_areas);
+  array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
   array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   vector[n_areas] E_j;
   array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
@@ -340,6 +340,7 @@ model{
         E_jc[j, c] = E_j_all[j, K_jc_start + c];
         E_mu_all_j[j, K_jc_start + c] = E_mu_all[K_jc_start + c];
       }
+      E_jc[j, C] = - sum(E_jc[j, 1:C - 1]);
       for(r in 1:R - 1){
         for(c in 1:C - 1){
           if(lflag_llmod_structure == 0){
@@ -357,6 +358,10 @@ model{
           E_mu_all_j[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
           E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] - add_mu;
         }
+        E_jrc[j, r, C] = -sum(E_jrc[j, r, 1:C - 1]);
+      }
+      for(c in 1:C){
+        E_jrc[j, R, c] = -sum(E_jrc[j, 1:R-1, c]);
       }
 
 
@@ -377,6 +382,7 @@ model{
           E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
         }
       }
+      E_jr[j, R] = -sum(E_jr[j, 1:R - 1]);
 
 
 
@@ -477,16 +483,16 @@ model{
     }
   }
 
-  E_mu_all_raw ~ cauchy(0, prior_sigma_c_scale);
-  // E_mu_all_raw ~ cauchy(E_mu_mu, E_mu_sigma);
-  // if(lflag_centred_m==1){
-  //     E_mu_all_raw ~ normal(E_mu_mu, E_mu_sigma);
-  // } else{
-  //    E_mu_all_raw ~ std_normal();
-  // }
-//
-  // E_mu_mu ~ cauchy(0, prior_sigma_c_scale);
-  // E_mu_sigma ~ cauchy(0, prior_cell_effect_scale);
+  // E_mu_all_raw ~ cauchy(0, prior_sigma_c_scale);
+E_mu_all_raw ~ cauchy(E_mu_mu, E_mu_sigma);
+if(lflag_centred_m==1){
+    E_mu_all_raw ~ normal(E_mu_mu, E_mu_sigma);
+} else{
+   E_mu_all_raw ~ std_normal();
+}
+
+E_mu_mu ~ cauchy(0, prior_sigma_c_scale);
+E_mu_sigma ~ cauchy(0, prior_cell_effect_scale);
 
   sigma_j_all ~ lognormal(sigma_j_all_mu, scale_sigma_j_all);
   // sigma_j_all ~ cauchy(0, 2);
