@@ -326,7 +326,12 @@ model{
   vector[n_poss_cells*has_theta] e_theta;
   int counter_cell = 0;
 
-  E_mu_all = E_mu_all_raw;
+  if(lflag_centred_m==1){
+    E_mu_all = E_mu_all_raw;
+  } else {
+    E_mu_all = E_mu_mu + E_mu_sigma*E_mu_all_raw;
+  }
+
 
   for(j in 1:n_areas){
 
@@ -483,8 +488,7 @@ model{
     }
   }
 
-  // E_mu_all_raw ~ cauchy(0, prior_sigma_c_scale);
-E_mu_all_raw ~ cauchy(E_mu_mu, E_mu_sigma);
+
 if(lflag_centred_m==1){
     E_mu_all_raw ~ normal(E_mu_mu, E_mu_sigma);
 } else{
