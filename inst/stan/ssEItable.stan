@@ -328,7 +328,7 @@ model{
 
   if(lflag_centred_m==1){
     E_mu_all = E_mu_all_raw;
-  } else {
+  } else if(lflag_centred_m==0) {
     E_mu_all = E_mu_mu + E_mu_sigma*E_mu_all_raw;
   }
 
@@ -341,53 +341,21 @@ model{
         E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
       }
 
+
+      for(r in 1:R-1){
+        for(c in 1:C){
+          E_jrc[j, r, c] = E_j_all[j, R * (r - 1) + c];
+        }
+      }
       for(c in 1:C - 1){
-        E_jc[j, c] = E_j_all[j, K_jc_start + c];
-        E_mu_all_j[j, K_jc_start + c] = E_mu_all[K_jc_start + c];
+        E_jrc[j, R, c] = E_j_all[j, R*(R - 1) + c];
       }
-      E_jc[j, C] = - sum(E_jc[j, 1:C - 1]);
-      for(r in 1:R - 1){
-        for(c in 1:C - 1){
-          if(lflag_llmod_structure == 0){
-            add_mu = 0;
-          } else if(lflag_llmod_structure ==1){
-            add_mu = E_jc[j, c];
-          } else if(lflag_llmod_structure ==2){
-            add_mu = E_jc[j, c] + E_jr[j, r];
-          } else if(lflag_llmod_structure ==3){
-            add_mu = E_jr[j, r];
-          }
-          if(lflag_centred_jrc==0) {
-            E_j_all[j, K_jrc_rstart[r] + c] += 0;
-          }
-          E_mu_all_j[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
-          E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] - add_mu;
-        }
-        E_jrc[j, r, C] = -sum(E_jrc[j, r, 1:C - 1]);
-      }
-      for(c in 1:C){
-        E_jrc[j, R, c] = -sum(E_jrc[j, 1:R-1, c]);
-      }
+      E_jrc[j, R, C] = -sum(E_jrc[j, 1:(R - 1), 1:C]) - sum(E_jrc[j, R, 1:C - 1]);
 
+      E_j[j] = E_j_all[j, R*C];
 
+      E_mu_all_j[j] = E_mu_all;
 
-      if(lflag_predictors_cm == 1){
-        E_j[j] = E_j_all[j, K_j];
-        E_mu_all_j[j, R* C] = E_mu_all[K_j];
-      } else{
-        E_j[j] = E_j_raw[j];
-      }
-
-      for(r in 1:R - 1){
-        vector[C] this_rratios = rep_vector(0, C);
-        if(lflag_predictors_cm == 0){
-          E_jr[j, r] = E_jr_raw[j, r];
-        } else if(lflag_predictors_cm == 1){
-          E_jr[j, K_jr_start + r] = E_j_all[j, K_jr_start + r];
-          E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
-        }
-      }
-      E_jr[j, R] = -sum(E_jr[j, 1:R - 1]);
 
 
 
