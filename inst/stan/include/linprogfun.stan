@@ -136,8 +136,8 @@ vector get_var_lims(matrix m, int cm){
   int not_zero;
   int use_row;
   vector[2] var_lims;
-  matrix[1,1] mat_min;
-  matrix[1,1] mat_max;
+  matrix[rows(m) + 1, cols(m)] mat_min;
+  matrix[rows(m) + 1, cols(m)] mat_max;
   row_vector[nvars + 1] obj_max = rep_row_vector(0, nvars + 1);
   row_vector[nvars + 1] obj_min = rep_row_vector(0, nvars + 1);
 
@@ -163,7 +163,7 @@ vector get_var_lims(matrix m, int cm){
   if(use_row >0){
     var_lims[2] = mat_max[use_row, cols(mat_max)]/mat_max[use_row, cm];
   } else{
-    var_lims[1] = 0;
+    var_lims[2] = 0;
   }
 
   return(var_lims);

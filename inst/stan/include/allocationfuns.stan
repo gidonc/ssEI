@@ -7,6 +7,35 @@
         return(delta*log1p_exp(x/delta));
       }
 
+      real[,,] ss_asign_from_bfs (matrix bfs, int[] bfs_basis, vector weight, int[,] cellmap, int J, int R, int C){
+        real cell_values[J, R, C];
+        int ncells = num_elements(bfs_basis);
+        matrix[rows(bfs), cols(bfs)] cur_sol = bfs;
+        vector[2] curlim;
+        int w_idx = 0;
+        real log_det_J = 0;
+        real this_inv_logit;
+
+        for (i in 1:ncells){
+          if(bfs_basis[i]==0){
+            curlim = get_var_lims(cur_sol, i);
+            w_idx += 1;
+            this_inv_logit = inv_logit(weight[w_idx]);
+            cell_values[cellmap[1, i], cellmap[2, i], cellmap[3, i]] = curlim[1] + (curlim[2] - curlim[1])*this_inv_logit;
+            for(r in 1:rows(cur_sol)){
+              cur_sol[r, cols(cur_sol)] = cur_sol[r, cols(cur_sol)] - cur_sol[r, i] * cell_values[cellmap[1, i], cellmap[2, i], cellmap[3, i]];
+              cur_sol[r, i] = 0;
+            }
+          }
+        }
+        for (i in 1:ncells){
+          if(bfs_basis[i]!=0){
+            cell_values[cellmap[1, i], cellmap[2, i], cellmap[3, i]] = cur_sol[bfs_basis[i], cols(cur_sol)];
+          }
+        }
+        return(cell_values);
+      }
+
 
 
 
