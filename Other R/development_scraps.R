@@ -62,21 +62,68 @@ senc_long <- senc2 |>
 
 
 ssei.path <- "C:/Users/gidon/OneDrive/Documents/ssEI"
+ssei.path <- here::here()
 smod.path <- paste0(ssei.path, "/inst/stan/")
 mnb.path <- paste0(smod.path, "ssMNB.stan")
 mnb2.path <- paste0(smod.path, "ssMNB2.stan")
 co.new.path <- paste0(smod.path, "ssContextual2.stan")
 flexmod.path <- paste0(smod.path, "ssEIdev.stan")
+tablemod.path <- paste0(smod.path, "ssEItable.stan")
 
-senc_for_stan <- list(
-  n_areas = nrow(senc_rm),
-  R = ncol(senc_rm),
-  C = ncol(senc_cm),
-  row_margins = senc_rm,
-  col_margins = senc_cm,
-  lkj_param = 2,
-  lflag_mn = 1
+s_rm_0 <- senc_rm
+s_rm_0[s_rm_0 == 0] <- 1
+s_cm_0 <- senc_cm
+s_cm_0[s_cm_0 == 0] <- 1
+
+senc_for_stan <- c(
+  prep_data_stan(senc_rm, senc_cm),
+  prep_zeros(struc_zero_rm = s_rm_0,
+                                struc_zero_cm = s_cm_0),
+  prep_options_stan(
+    use_dist = "pois",
+    area_re = "normal",
+    inc_rm = TRUE,
+    predictors_rm = FALSE,
+    vary_sd = "partial",
+    llmod_const = "none",
+    llmod_omit_jr = FALSE,
+    llmod_omit_jc = FALSE,
+    llmod_omit_jrc = FALSE,
+    centred_j = FALSE,
+    centred_r = FALSE,
+    centred_c = FALSE,
+    centred_rc = FALSE,
+    centred_jr = FALSE,
+    centred_jc = FALSE,
+    centred_jrc = FALSE,
+    centred_m = FALSE,
+    llmod_structure_omit = "none"
+  ),
+  lflag_predictors_cm = 0,
+  prior_mu_re_scale = 1,
+  prior_mu_ce_scale = 1,
+  prior_sigma_c_scale = 1,
+  prior_sigma_c_mu_scale = 1,
+  prior_sigma_ce_scale = 1,
+  prior_sigma_re_scale = 1,
+  prior_cell_effect_scale = 1
 )
+
+sencr <- rstan::stan(file = tablemod.path,
+                     data = senc_for_stan,
+                     cores = 4,
+                     chains = 4,
+                     iter = 2000
+)
+
+st1 <- mods_summary(list("generic" = sencr), senc2_flat |>
+                      rename(col_no=col, row_no=row,
+                             actual_cell_value = actual_value,
+                             actual_row_rate = actual_row_prop))
+
+st1$eval_plots
+st1$cv_eval
+st1$rr_eval
 senc_for_stanp <- list(
   n_areas = nrow(senc_rm),
   R = ncol(senc_rm),
@@ -86,6 +133,18 @@ senc_for_stanp <- list(
   lkj_param = 2,
   lflag_mn = 0
 )
+
+senc_for_stan <- list(
+  n_areas = nrow(senc_rm),
+  R = ncol(senc_rm),
+  C = ncol(senc_cm),
+  row_margins = senc_rm,
+  col_margins = senc_cm,
+  lkj_param = 2,
+  lflag_mn = 2
+)
+
+
 senc_for_stannb <- list(
   n_areas = nrow(senc_rm),
   R = ncol(senc_rm),
@@ -243,6 +302,7 @@ sencr[[5]] <- rstan::stan(file = flexmod.path,
 )
 
 sencr[[9]] <- ei_estimate(senc_rm, senc_cm, iter=10)
+
 
 st1 <- mods_summary(list("cont_nb" = sencr[[1]],
                          "contnb_rm" =sencr[[6]],
