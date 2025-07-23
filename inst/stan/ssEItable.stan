@@ -6,12 +6,36 @@
 functions{
   #include include/allocationfuns.stan
   #include include/realpdf.stan
-  #include include/lkjonionfun.stan
+
 
   vector simplex_constrain_softmax_lp(vector v) {
      int K = size(v) + 1;
      vector[K] v0 = append_row(0, v);
      return softmax(v0);
+  }
+
+  vector sum_to_zero(vector y){
+    int N = size(y);
+    int n;
+    vector[N] omega;
+    vector[N] S;
+    vector[N + 1] x;
+
+    for(n_rev in 1:(N - 1)){
+      n = N - n_rev;
+      omega[n + 1] = y[n + 1]/sqrt((n + 1)*(n + 2));
+    }
+  S[N] = 0;
+  for(n_rev in 1:(N - 1)){
+    n = N - n_rev;
+    S[n] = S[n + 1] + omega[n + 1];
+  }
+  for(n_rev in 1:N){
+    n = N + 1 - n_rev;
+    x[n + 1] = S[n] - (n * y[n]/sqrt(n * (n + 1)));
+  }
+  x[1] = S[1] + y[1]/sqrt(2);
+  return(x);
   }
 
 }
@@ -25,22 +49,10 @@ data{
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
- int<lower = 0, upper = 1> lflag_llmod_const; // flag indicating whether log-linear model should be (0) unconstrained (1) constrained to generate correct area totals
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
-  int<lower = 0, upper =1> lflag_centred_j; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_r; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_c; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_rc; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_jr; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_jc; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_jrc; // flag indicating whether to use (1) centred or (0) decentred parameterization
-  int<lower = 0, upper =1> lflag_centred_m; // flag indicating whether to use (1) centred or (0) decentred parameterization
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
-
- int<lower = 0, upper =3> lflag_llmod_structure; // flag indicating whether log-linear model should be (0) saturated (1) omit area cell effect  (areaxrowxcolumn interaction) (2) omit area*column interaction (but include areaxrowXcolumn effect) [replaced by other flags]
- real<lower=0> prior_lkj; // lkj param
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
@@ -73,7 +85,6 @@ transformed data{
   int n_poss_cols=0;
   int has_theta;
   int has_area_re;
-  int has_free_E_j;
   int has_area_col_effects;
   int has_area_row_effects;
   int has_L;
@@ -118,12 +129,6 @@ transformed data{
     has_onion = 1;
   } else {
     has_onion = 0;
-  }
-
-  if(lflag_llmod_const == 0){
-    has_free_E_j = 1;
-  } else {
-    has_free_E_j = 0;
   }
 
   if(lflag_llmod_omit_jrc ==1){
@@ -251,39 +256,39 @@ transformed data{
   n_jrc_sigmas = has_area_cell_effects * ((lflag_vary_sd ==0) ? 1 : (R - 1) * (C - 1));
   n_table_sigmas = n_margin_sigmas + n_jrc_sigmas;
   int K_all = n_table_sigmas;
-  array[2] vector[K_j - 1] shapes = create_shapes(K_j, prior_lkj);
-
 }
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
-  array[n_areas] vector[K_j] E_j_all_raw;
+  array[n_areas] vector[R*C - 1] E_jrc_raw;
+  // array[n_areas] vector[R - 1] E_jr_raw;
+  // array[n_areas] vector[C - 1] E_jc_raw;
+  vector[n_areas - 1] E_j_raw;
+  // vector[C - 1] E_c_raw;
+  // vector[R - 1] E_r_raw;
+  vector[R * C - 1] E_rc_raw;
+
   vector<lower=0, upper= 1> [n_areas*has_theta] theta;
-  vector[has_free_E_j*n_areas] E_j_raw;
-  array[(lflag_predictors_cm == 0 ? 1: 0) * n_areas] vector[R - 1] E_jr_raw;
-  vector[K_j] E_mu_all_raw;
-  vector<lower=0>[K_j] sigma_j_all;
-  cholesky_factor_corr[has_L * K_j] L_Omega_raw;
-  row_vector[has_onion * (choose(K_j, 2) - 1)] l; // do NOT init with 0 for all elements
-  vector<lower = 0, upper = 1>[has_onion * (K_j - 1)] R2; // first element is not really a R^2 but is on (0,1)
+  real<lower=0> sigma_j;
+  vector<lower=0>[R * C] sigma_jrc;
+  // vector<lower=0>[R] sigma_r;
+  // vector<lower=0>[C] sigma_c;
+
+  // vector<lower=0>[K_j] sigma_j_all;
   real<lower=0, upper = .001> hinge_delta_floor;
   real<lower=0, upper = .001> hinge_delta_min;
-  real E_mu_mu;
-  real<lower=0> E_mu_sigma;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
-  array[n_areas] vector[K_j] E_j_all;
-  array[n_areas] vector[K_j] E_mu_all_j;
-  array[n_areas] vector[C] E_jr = rep_array(rep_vector(0, R), n_areas);
-  array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   vector[n_areas] E_j;
+  // array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
+  // array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] matrix[R, C] log_e_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  real add_mu;
-  matrix[K_j, K_j] L_Omega;
-  vector[K_j] E_mu_all;
+  // array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
+  vector[R * C] E_rc;
+  // vector[R] E_r;
+  // vector[C] E_c;
 
 
   for (j in 1:n_areas){
@@ -299,82 +304,31 @@ transformed parameters{
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
 
 
-  if(has_onion == 1){
-    L_Omega = lkj_onion(K_j, l, R2, shapes); // cholesky_factor corr matrix
-  } else if(has_L == 1){
-    L_Omega = L_Omega_raw; // cholesky_factor corr matrix
-  } else {
-    L_Omega = identity_matrix(K_j);
-  }
-
-  if(lflag_centred_m==1){
-    E_mu_all = E_mu_all_raw;
-  } else {
-    E_mu_all = E_mu_mu + E_mu_sigma * E_mu_all_raw;
-  }
+  // E_j = sum_to_zero(E_j_raw);
+  E_j[1:n_areas - 1] = E_j_raw;
+  E_j[n_areas] = 0;
+  // E_r = sum_to_zero(E_r_raw);
+  // E_c = sum_to_zero(E_c_raw);
+  E_rc = sum_to_zero(E_rc_raw);
 
   for(j in 1:n_areas){
+    vector[R * C] E_jrc_vector;
+    // E_jr[j, 1:R] = sum_to_zero(E_jr_raw[j, 1:R - 1]);
+    // E_jc[j, 1:C] = sum_to_zero(E_jc_raw[j, 1:C - 1]);
+    E_jrc_vector[1:R * C] = sum_to_zero(E_jrc_raw[j, 1: R * C - 1]);
+    for(c in 1:C){
+      E_jrc[j, 1:R, c] = E_jrc_vector[C * (c - 1) + 1:(C *c)];
+    }
 
-      if(lflag_centred_jrc == 1){
-        E_j_all[j] = E_j_all_raw[j];
-      } else if(lflag_centred_jrc == 0) {
-        E_j_all[j] = E_mu_all + diag_pre_multiply(sigma_j_all, L_Omega) * E_j_all_raw[j];
-      }
-
-      for(r in 1:R - 1){
-        if(lflag_predictors_cm == 0){
-          E_jr[j, r] = E_jr_raw[j, r];
-        } else if(lflag_predictors_cm == 1){
-          E_jr[j, K_jr_start + r] = E_j_all[j, K_jr_start + r];
-          E_mu_all_j[j, K_jr_start + r] = E_mu_all[K_jr_start + r];
-        }
-      }
-
-      for(c in 1:C - 1){
-        E_jc[j, c] = E_j_all[j, K_jc_start + c];
-        E_mu_all_j[j, K_jc_start + c] = E_mu_all[K_jc_start + c];
-      }
-
-
-      for(r in 1:R - 1){
-        for(c in 1:C - 1){
-        if(lflag_llmod_structure == 0){
-          add_mu = 0;
-        } else if(lflag_llmod_structure ==1){
-          add_mu = E_jc[j, c];
-        } else if(lflag_llmod_structure ==2){
-          add_mu = E_jc[j, c] + E_jr[j, r];
-        } else if(lflag_llmod_structure ==3){
-          add_mu = E_jr[j, r];
-        }
-        if(lflag_centred_jrc==0) {
-          E_j_all[j, K_jrc_rstart[r] + c] += 0;
-        }
-        E_mu_all_j[j, K_jrc_rstart[r] + c] = E_mu_all[K_jrc_rstart[r] + c];
-        E_jrc[j, r, c] = E_j_all[j, K_jrc_rstart[r] + c] - add_mu;
-      }
-     }
      for(r in 1:R){
        for(c in 1:C){
          if(structural_zeros[j,r, c] == 0){
-           log_r_cell_values[j, r, c] = E_jrc[j, r, c] + E_jc[j, c] + E_jr[j, r];
+           log_e_cell_values[j, r, c] = E_jrc[j, r, c] + E_j[j];
          } else{
-           log_r_cell_values[j, r, c] = -200;
+           log_e_cell_values[j, r, c] = -200;
          }
        }
      }
-     if(has_free_E_j == 1){
-       E_j[j] = E_j_raw[j];
-     } else {
-       E_j[j] = tot_log[j] -log_sum_exp(to_vector(log_r_cell_values[j]));
-     }
-     for(r in 1:R){
-       for (c in 1:C){
-         log_e_cell_values[j, r, c] = log_r_cell_values[j, r, c] + E_j[j];
-       }
-     }
-
-
   }
 
 
@@ -391,44 +345,17 @@ model{
       for(c in 1:C){
         if(structural_zeros[j,r,c]==0){
           counter_cell += 1;
-          if(r<R && c<C){
-            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
-            if(lflag_dist ==0){
-                e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]);
-            } else if(lflag_dist==2){
-              e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) *(1 - theta[j])/theta[j];
-              e_theta[counter_cell] = theta[j];
-            }
-          } else if (r==R && c ==C){
-            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
-            if(lflag_dist==0){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
-            } else if(lflag_dist==2){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c])*(1 - theta[j])/theta[j];
-              e_theta[counter_cell] = theta[j];
-            }
-
-          } else if(r == R && c < C){
-            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
-            if(lflag_dist==0){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
-            } else if(lflag_dist==2){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c])*(1 - theta[j])/theta[j];
-              e_theta[counter_cell] = theta[j];
-            }
-          } else if(c == C && r < R){
-            cell_values_row_vector[counter_cell] = cell_values[j, r, c];
-            if(lflag_dist==0){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c]);
-            } else if(lflag_dist==2){
-              e_cell[counter_cell] = exp(log_e_cell_values[j, r, c])*(1 - theta[j])/theta[j];
-              e_theta[counter_cell] = theta[j];
-            }
+          cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+          if(lflag_dist ==0){
+            e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]);
+          } else if(lflag_dist==2){
+            e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) *(1 - theta[j])/theta[j];
+            e_theta[counter_cell] = theta[j];
           }
         }
       }
     }
-   }
+  }
 
    if(lflag_dist==0){
      target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
@@ -440,43 +367,20 @@ model{
   // cell_values_row_vector ~ normal(e_cell, e_sigma);
 
   for(j in 1:n_areas){
-
-
-    if(lflag_centred_jrc==1){
-      E_j_all_raw[j] ~ multi_normal_cholesky(E_mu_all_j[j], diag_pre_multiply(sigma_j_all, L_Omega));
-    } else{
-      E_j_all_raw[j] ~ std_normal();
-    }
+    to_vector(E_jrc[j]) ~ normal(E_rc, sigma_jrc);
+    // E_jr[j] ~ normal(E_r, sigma_r);
+    // E_jc[j] ~ normal(E_c, sigma_c);
   }
+  E_j_raw ~ normal(0, sigma_j);
 
-  E_mu_all_raw ~ normal(0, prior_cell_effect_scale);
-  // if(lflag_centred_m==1){
-  //     E_mu_all ~ normal(E_mu_mu, E_mu_sigma);
-  // } else{
-  //    E_mu_all_raw ~ std_normal();
-  // }
-//
-  E_mu_mu ~ normal(0, prior_cell_effect_scale);
-  E_mu_sigma ~ normal(0, prior_cell_effect_scale);
+  E_rc ~ normal(0, prior_cell_effect_scale);
+  // E_r ~ normal(0, prior_cell_effect_scale);
+  // E_c ~ normal(0, prior_cell_effect_scale);
 
-  sigma_j_all ~ normal(0, prior_cell_effect_scale);
+  sigma_jrc ~ normal(0, prior_cell_effect_scale);
+  // sigma_r ~ normal(0, prior_cell_effect_scale);
+  // sigma_c ~ normal(0, prior_cell_effect_scale);
 
-  if(has_L == 1){
-    L_Omega_raw ~ lkj_corr_cholesky(prior_lkj); // implies L*L'~ lkj_corr(prior_lkj);
-  }
-  if(has_onion == 1){
-    l ~ std_normal();
-    R2 ~ beta(shapes[1], shapes[2]);
-  }
-  if(has_free_E_j == 1){
-    E_j_raw ~ normal(0, 10);
-  }
-
-  if(lflag_predictors_cm == 0){
-    for(j in 1:n_areas){
-      E_jr_raw[j] ~ normal(0, 10);
-    }
-  }
 
     hinge_delta_floor ~ normal(0, .001);
     hinge_delta_min ~ normal(0, .001);
