@@ -268,9 +268,10 @@ parameters{
   vector[R - 1] E_r_raw;
   matrix[R, C - 1] E_rc_raw;
 
-  vector<lower=0, upper= 1> [n_areas*has_theta] theta;
+  // vector<lower=0, upper= 1> [n_areas*has_theta] theta;
+  vector<lower=0> [has_theta] phi;
   real<lower=0> sigma_j;
-  array[R] vector<lower=0>[C] sigma_jrc;
+  matrix<lower=0>[R, C] sigma_jrc;
   vector<lower=0>[R] sigma_r;
   // vector<lower=0>[C] sigma_c;
 
@@ -339,7 +340,7 @@ transformed parameters{
 
 }
 model{
-  vector[n_poss_cells] e_cell;
+  vector[n_poss_cells] e_mu;
   row_vector[n_poss_cells] cell_values_row_vector;
   vector[n_poss_cells*has_theta] e_theta;
   int counter_cell = 0;
@@ -350,11 +351,13 @@ model{
         if(structural_zeros[j,r,c]==0){
           counter_cell += 1;
           cell_values_row_vector[counter_cell] = cell_values[j, r, c];
+
           if(lflag_dist ==0){
-            e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]);
+            e_mu[counter_cell]  = exp(log_e_cell_values[j, r, c]);
           } else if(lflag_dist==2){
-            e_cell[counter_cell]  = exp(log_e_cell_values[j, r, c]) *(1 - theta[j])/theta[j];
-            e_theta[counter_cell] = theta[j];
+            real mu_cell = exp(log_e_cell_values[j, r, c]);
+            e_mu[counter_cell]  = mu_cell;
+            e_theta[counter_cell] = mu_cell / (mu_cell + phi[1]);
           }
         }
       }
@@ -362,9 +365,10 @@ model{
   }
 
    if(lflag_dist==0){
-     target +=realpoisson_lpdf(cell_values_row_vector| e_cell);
+     target +=realpoisson_lpdf(cell_values_row_vector| e_mu);
    } else if (lflag_dist ==2){
-     target +=realnegbinom3_lpdf(cell_values_row_vector| e_cell, e_theta);
+     target +=realnegbinom3_lpdf(cell_values_row_vector| phi[1], e_theta);
+     phi ~ normal(0, prior_phi_scale);
    }
 
 
@@ -372,7 +376,7 @@ model{
 
   for(j in 1:n_areas){
     for(r in 1:R){
-      to_vector(E_jrc[j, r, 1:C]) ~ normal(to_vector(E_rc[r, 1:C]), sigma_jrc[r]);
+      to_vector(E_jrc[j, r, 1:C]) ~ normal(to_vector(E_rc[r, 1:C]), sigma_jrc[r, 1:C]');
     }
     E_jr[j] ~ normal(E_r, sigma_r);
     // E_jc[j] ~ normal(E_c, sigma_c);
@@ -389,6 +393,7 @@ model{
 
 
   sigma_r ~ normal(0, prior_cell_effect_scale);
+
   // sigma_c ~ normal(0, prior_cell_effect_scale);
 
 

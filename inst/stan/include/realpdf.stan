@@ -22,10 +22,10 @@
 //       return sum(lpdf);
 //   }
 
-  real realnegbinom3_lpdf(row_vector x, vector alpha, vector theta){
+  real realnegbinom3_lpdf(row_vector x, real alpha, vector theta){
       vector[num_elements(x)] lpdf;
       for (n in 1:num_elements(x)){
-        lpdf[n] = lgamma(x[n] + alpha[n]) - lgamma(alpha[n]) - lgamma(x[n] + 1) + x[n]*log(theta[n]) + alpha[n]*log(1 - theta[n]);
+        lpdf[n] = lgamma(x[n] + alpha) - lgamma(alpha) - lgamma(x[n] + 1) + x[n]*log(theta[n]) + alpha*log(1 - theta[n]);
 
       }
 
