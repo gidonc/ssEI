@@ -27,9 +27,11 @@ ei_estimate <- function(row_margins, col_margins,
                         area_re = "normal",
                         inc_rm = FALSE,
                         vary_sd = FALSE,
-                        mod_cols = FALSE,
-                        llmod_structure_omit="area*c",
-                        predictors_rm = FALSE,
+                        mod_cols = TRUE,
+                        llmod_omit_jr = FALSE,
+                        llmod_omit_jc = FALSE,
+                        llmod_omit_jrc = FALSE,
+                        predictors_cm = FALSE,
                         prior_lkj = 2,
                         prior_mu_ce_scale = 2,
                         prior_mu_re_scale = 2,
@@ -49,9 +51,12 @@ ei_estimate <- function(row_margins, col_margins,
                            area_re = area_re,
                            inc_rm = inc_rm,
                            vary_sd = vary_sd,
-                           predictors_rm = predictors_rm
+                           llmod_omit_jr = llmod_omit_jr,
+                           llmod_omit_jc = llmod_omit_jc,
+                           llmod_omit_jrc = llmod_omit_jrc,
+                           predictors_cm = predictors_cm
                          ))
-  standat <- modifyList(standata,
+  standata <- modifyList(standata,
                         prep_priors_stan(
                           prior_lkj = prior_lkj,
                           prior_mu_ce_scale = prior_mu_ce_scale,
@@ -62,6 +67,8 @@ ei_estimate <- function(row_margins, col_margins,
                           prior_sigma_re_scale = prior_sigma_re_scale,
                           prior_cell_effect_scale = prior_cell_effect_scale
                         ))
+  standata <- modifyList(standata,
+                         prep_zeros(row_margins, col_margins))
 
   if(verbose){
     print(standata$R)
