@@ -259,18 +259,19 @@ transformed data{
 }
 parameters{
   real lambda_unpadded[n_param]; // sequential cell weights
-  array[n_areas] vector[R*C - 1] E_jrc_raw;
-  // array[n_areas] vector[R - 1] E_jr_raw;
+  // array[n_areas] vector[R*C - 1] E_jrc_raw;
+  array[n_areas] matrix[R, C - 1] E_jrc_raw;
+  array[n_areas] vector[R - 1] E_jr_raw;
   // array[n_areas] vector[C - 1] E_jc_raw;
   vector[n_areas - 1] E_j_raw;
   // vector[C - 1] E_c_raw;
-  // vector[R - 1] E_r_raw;
-  vector[R * C - 1] E_rc_raw;
+  vector[R - 1] E_r_raw;
+  matrix[R, C - 1] E_rc_raw;
 
   vector<lower=0, upper= 1> [n_areas*has_theta] theta;
   real<lower=0> sigma_j;
-  vector<lower=0>[R * C] sigma_jrc;
-  // vector<lower=0>[R] sigma_r;
+  array[R] vector<lower=0>[C] sigma_jrc;
+  vector<lower=0>[R] sigma_r;
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
@@ -281,13 +282,13 @@ transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real<lower=0> cell_values[n_areas, R, C];
   vector[n_areas] E_j;
-  // array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
+  array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
   // array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
   array[n_areas] matrix[R, C] E_jrc = rep_array(rep_matrix(0, R, C), n_areas);
   array[n_areas] matrix[R, C] log_e_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
   // array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  vector[R * C] E_rc;
-  // vector[R] E_r;
+  matrix[R, C] E_rc;
+  vector[R] E_r;
   // vector[C] E_c;
 
 
@@ -304,26 +305,29 @@ transformed parameters{
   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
 
 
-  // E_j = sum_to_zero(E_j_raw);
-  E_j[1:n_areas - 1] = E_j_raw;
-  E_j[n_areas] = 0;
-  // E_r = sum_to_zero(E_r_raw);
+  E_j = sum_to_zero(E_j_raw);
+  // E_j[1:n_areas - 1] = E_j_raw;
+  // E_j[n_areas] = 0;
+  E_r = sum_to_zero(E_r_raw);
   // E_c = sum_to_zero(E_c_raw);
-  E_rc = sum_to_zero(E_rc_raw);
+
+  for(r in 1:R){
+      E_rc[r, 1:C] = to_row_vector(sum_to_zero(to_vector(E_rc_raw[r, 1:(C - 1)])));
+  }
 
   for(j in 1:n_areas){
-    vector[R * C] E_jrc_vector;
-    // E_jr[j, 1:R] = sum_to_zero(E_jr_raw[j, 1:R - 1]);
+    // vector[R * C] E_jrc_vector;
+    E_jr[j, 1:R] = sum_to_zero(E_jr_raw[j, 1:R - 1]);
     // E_jc[j, 1:C] = sum_to_zero(E_jc_raw[j, 1:C - 1]);
-    E_jrc_vector[1:R * C] = sum_to_zero(E_jrc_raw[j, 1: R * C - 1]);
-    for(c in 1:C){
-      E_jrc[j, 1:R, c] = E_jrc_vector[C * (c - 1) + 1:(C *c)];
+    // E_jrc_vector[1:R * C] = sum_to_zero(E_jrc_raw[j, 1: R * C - 1]);
+    for(r in 1:R){
+      E_jrc[j, r, 1:C] = to_row_vector(sum_to_zero(to_vector(E_jrc_raw[j, r, 1:(C - 1)])));
     }
 
      for(r in 1:R){
        for(c in 1:C){
          if(structural_zeros[j,r, c] == 0){
-           log_e_cell_values[j, r, c] = E_jrc[j, r, c] + E_j[j];
+           log_e_cell_values[j, r, c] = E_jr[j, r] + E_jrc[j, r, c] + E_j[j];
          } else{
            log_e_cell_values[j, r, c] = -200;
          }
@@ -367,18 +371,24 @@ model{
   // cell_values_row_vector ~ normal(e_cell, e_sigma);
 
   for(j in 1:n_areas){
-    to_vector(E_jrc[j]) ~ normal(E_rc, sigma_jrc);
-    // E_jr[j] ~ normal(E_r, sigma_r);
+    for(r in 1:R){
+      to_vector(E_jrc[j, r, 1:C]) ~ normal(to_vector(E_rc[r, 1:C]), sigma_jrc[r]);
+    }
+    E_jr[j] ~ normal(E_r, sigma_r);
     // E_jc[j] ~ normal(E_c, sigma_c);
   }
   E_j_raw ~ normal(0, sigma_j);
 
-  E_rc ~ normal(0, prior_cell_effect_scale);
+  for(r in 1:R){
+      E_rc[r, 1:C] ~ normal(0, prior_cell_effect_scale);
+      sigma_jrc[r] ~ normal(0, prior_cell_effect_scale);
+  }
+
   // E_r ~ normal(0, prior_cell_effect_scale);
   // E_c ~ normal(0, prior_cell_effect_scale);
 
-  sigma_jrc ~ normal(0, prior_cell_effect_scale);
-  // sigma_r ~ normal(0, prior_cell_effect_scale);
+
+  sigma_r ~ normal(0, prior_cell_effect_scale);
   // sigma_c ~ normal(0, prior_cell_effect_scale);
 
 
