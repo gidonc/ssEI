@@ -7,7 +7,111 @@
         return(delta*log1p_exp(x/delta));
       }
 
-
+real[,,] ss_assign_log_row_rates_wzeros_hinge_lp (int n_areas, int R, int C, matrix row_margins, matrix col_margins, real[,,] lambda, real delta_floor, real delta_min){
+    // constrains using sequential sampling approach described in Chen et. al 2005
+    // rather than using sharp bounds, to assist the sampler logistic hinge functions are used to approximate min and floor zero functions
+    // function to transform unconstrained (R-1)*(C-1) unconstrained parameters (lambda) into an RxC matrix with fixed row and column margins. The function completes the internal structure  across matrices from n_areas regions
+    // The function completes cell_value (which is n_area R*C matricies) because indexing errors are easier to spot with this structure.
+    // The function then converts the cell_values to log_row_rates
+    // It also adjust the Jacobian to account for the full-transformation from the lambda parameters to the log row rates (which are part of the full log-linear model of the tables).
+    // n_areas is the number of matrices which need the internal structure completing
+    // R is the number of rows
+    // C is the number of columns
+    // row_margins is a matrix of the row margins in each area
+    // col_margins is the matrix of the column margins in each area
+     // matrix[n_areas, R] slack_row;
+     // matrix[n_areas, C] slack_col;
+     real log_row_rates[n_areas, R, C];
+     vector[2] lower_pos;
+     vector[2] upper_pos;
+     real lower_bound;
+     real upper_bound;
+     real rt;
+     int free_R;
+     int free_C;
+     real this_inv_logit;
+     real log_det_J;
+     lower_pos[1]=0.0;
+     log_det_J = 0;
+     for (j in 1:n_areas){
+       row_vector[R] slack_row_raw = rep_row_vector(0, R);
+       row_vector[C] slack_col_raw = rep_row_vector(0, C);
+       free_R = 0;
+       free_C = 0;
+       for (r in 1:R){
+         if(row_margins[j, r]>0){
+           free_R += 1;
+           slack_row_raw[free_R] = row_margins[j, r];
+         }
+       }
+       for (c in 1:C){
+         if(col_margins[j, c]>0){
+           free_C += 1;
+           slack_col_raw[free_C] = col_margins[j, c];
+         }
+       }
+       row_vector[free_R] slack_row = slack_row_raw[1:free_R];
+       row_vector[free_C] slack_col = slack_col_raw[1:free_C];
+       rt=sum(slack_row);
+       matrix[free_R, free_C] tmp_cell_value;
+       for (r in 1:(free_R - 1)){
+         for (c in 1:(free_C - 1)){
+           lower_pos[2]=slack_row[r]-sum(tail(slack_col, free_C-c));
+           lower_bound=robust_hinge_floor_zero(lower_pos[2], delta_floor);
+           upper_pos[1]=slack_col[c];
+           upper_pos[2]=slack_row[r];
+           upper_bound=robust_hinge_min(upper_pos, delta_min);
+           this_inv_logit = inv_logit(lambda[j,r,c]);
+           tmp_cell_value[r,c]= lower_bound + this_inv_logit*(upper_bound-lower_bound);
+           slack_col[c]=slack_col[c] - tmp_cell_value[r,c];
+           slack_row[r]=slack_row[r] - tmp_cell_value[r,c];
+           rt = rt - tmp_cell_value[r, c];
+           // Part 1: Jacobian from lambda to cell_values
+           log_det_J += log((upper_bound - lower_bound)*this_inv_logit*(1-this_inv_logit));
+           // Part 2: Jacobian from cell_values to log row rates
+           log_det_J += -log(fmax(tmp_cell_value[r,c], 1e-10));
+         }
+         tmp_cell_value[r, free_C]=slack_row[r];
+         rt = rt - tmp_cell_value[r, free_C];
+         slack_col[free_C] = slack_col[free_C] - tmp_cell_value[r, free_C];
+         slack_row[r] = slack_row[r] - tmp_cell_value[r, free_C];
+       }
+       for (c in 1:(free_C-1)){
+         tmp_cell_value[free_R, c] = slack_col[c];
+         rt = rt - tmp_cell_value[free_R, c];
+         slack_col[c] = slack_col[c] - tmp_cell_value[free_R, c];
+         slack_row[free_R] = slack_row[free_R] - tmp_cell_value[free_R, c];
+       }
+       tmp_cell_value[free_R, free_C]=rt;
+       // compute log row rates for all cells
+       int fr = 0;
+       for (r in 1:R){
+         if(row_margins[j, r]>0){
+           fr += 1;
+           int fc = 0;
+           for (c in 1:C){
+             if(col_margins[j, c]>0){
+               fc += 1;
+               log_row_rates[j, r, c] = fmax(
+                   log(fmax(tmp_cell_value[fr, fc], 1e-10)) - log(row_margins[j, r]),
+                   log(1.0/C) - 2);
+             } else {
+               log_row_rates[j, r, c] = fmax(
+                   log(1e-10) - log(row_margins[j, r]),
+                   log(1.0/C) - 2);
+             }
+           }
+         } else {
+           // row margin is zero - row rate undefined
+           for (c in 1:C){
+             log_row_rates[j, r, c] = -200;
+           }
+         }
+       }
+     }
+    target += log_det_J;
+    return log_row_rates;
+  }
 
 
       real[,,] ss_assign_cvals_wzeros_lp (int n_areas, int R, int C, matrix row_margins, matrix col_margins, real[,,] lambda){
