@@ -14,6 +14,7 @@
 #' @param prior_mu_ce_sigma Prior of the scale for the mean column effects parameter
 #' @param prior_mu_re_sigma Prior of the scale for the mean row effects parameter
 #' @param verbose Print some information about the data and model before running
+#' @param method Either 'sampling' for NUTS or 'optimizing'
 #' @param cores To be passed to rstan::sampling
 #' @param chains To be passed to rstan::sampling
 #' @param ... other arguments to be passed to rstan::sampling
@@ -22,7 +23,8 @@
 #' @export
 #'
 #' @examples
-ei_estimate <- function(row_margins, col_margins,
+ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
+                        use_known_cells = 0,
                         use_dist = "pois",
                         area_re = "normal",
                         inc_rm = FALSE,
@@ -40,6 +42,7 @@ ei_estimate <- function(row_margins, col_margins,
                         prior_sigma_ce_scale = 1,
                         prior_sigma_re_scale = 1,
                         prior_cell_effect_scale = 1,
+                        method = "sampling",
                         cores = 4,
                         chains = 4,
                         verbose = TRUE, ...){
@@ -69,6 +72,10 @@ ei_estimate <- function(row_margins, col_margins,
                         ))
   standata <- modifyList(standata,
                          prep_zeros(row_margins, col_margins))
+  standata <- modifyList(standata,
+                         list(E_rc_prior = E_rc_prior,
+                              known_cell_values = known_cell_values,
+                              use_known_cells = use_known_cells))
 
   if(verbose){
     print(standata$R)
@@ -86,9 +93,11 @@ ei_estimate <- function(row_margins, col_margins,
     print(paste("now running model", mod@model_name))
   }
 
-  out <- rstan::sampling(mod,
-                         data = standata,
-                         cores = cores,
-                         chains = chains,
-                         ...)
+  if(method == "optimizing"){
+    out <- rstan::optimizing(mod, data = standata, ...)
+    class(out) <- c("ei_optim", "list")
+  } else {
+    out <- rstan::sampling(mod, data = standata, cores = cores, chains = chains, ...)
+  }
+  out
 }

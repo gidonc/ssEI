@@ -178,3 +178,36 @@ ei_modval_summary <- function(ei_stanfit, pars = "log_e_cell_value", probs = c(0
   }
   modval_summary
 }
+
+
+ei_row_rate_summary_optim <- function(ei_optim){
+  par <- ei_optim$par
+  rr_pars <- par[grep("^row_rate", names(par))]
+
+  tibble::tibble(param = names(rr_pars),
+                 mean = rr_pars) |>
+    tidyr::separate("param",
+                    into = c("param_name", "area_no", "row_no", "col_no", NA),
+                    sep = "[\\[,\\]]",
+                    remove = FALSE) |>
+    dplyr::mutate(dplyr::across(c(area_no, row_no, col_no), as.numeric),
+                  sd = NA, `2.5%` = NA, `25%` = NA,
+                  `50%` = mean, `75%` = NA, `97.5%` = NA,
+                  n_eff = NA, Rhat = NA)
+}
+
+ei_cv_summary_optim <- function(ei_optim){
+  par <- ei_optim$par
+  cv_pars <- par[grep("^cell_values", names(par))]
+
+  tibble::tibble(param = names(cv_pars),
+                 mean = cv_pars) |>
+    tidyr::separate("param",
+                    into = c("param_name", "area_no", "row_no", "col_no", NA),
+                    sep = "[\\[,\\]]",
+                    remove = FALSE) |>
+    dplyr::mutate(dplyr::across(c(area_no, row_no, col_no), as.numeric),
+                  sd = NA, `2.5%` = NA, `25%` = NA,
+                  `50%` = mean, `75%` = NA, `97.5%` = NA,
+                  n_eff = NA, Rhat = NA)
+}

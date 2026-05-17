@@ -161,6 +161,9 @@ mods_summary <- function(mod_list, actual_long){
     } else if(this_class[[1]]=="stanfit"){
       cv_res[[n]] <- ei_cv_summary(mod_list[[n]])
       rr_res[[n]] <- ei_row_rate_summary(mod_list[[n]])
+    } else if(this_class[[1]] == "ei_optim"){
+      cv_res[[n]] <- ei_cv_summary_optim(mod_list[[n]])
+      rr_res[[n]] <- ei_row_rate_summary_optim(mod_list[[n]])
     } else if(this_class=="mcmc.list"){
       tmp_res <- link.gq.res(mod_list[[n]], actual_long)
       rr_res[[n]] <- tmp_res
