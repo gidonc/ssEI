@@ -67,6 +67,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
+  int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
@@ -100,6 +101,9 @@ transformed data{
   int n_poss_rows=0;
   int structural_zero_cols[n_areas, C];
   int n_poss_cols=0;
+  int n_zero_cells;
+  int zero_cell_map[n_areas, R, C];
+  int n_free_alr_cells = 0; // free cells in (R-1)*(C-1) submatrix
   int has_theta;
   int has_area_re;
   int has_area_col_effects;
@@ -206,6 +210,31 @@ transformed data{
   }
   n_poss_cells = n_areas*R*C - n_structural_zeros;
 
+  n_zero_cells = 0;
+for(j in 1:n_areas){
+    for(r in 1:R){
+        for(c in 1:C){
+            if(structural_zeros[j,r,c] == 0 &&
+               (row_margins[j,r] == 0 || col_margins[j,c] == 0)){
+                n_zero_cells += 1;
+                zero_cell_map[j,r,c] = n_zero_cells;
+            } else {
+                zero_cell_map[j,r,c] = 0;
+            }
+        }
+    }
+}
+
+for(j in 1:n_areas){
+    for(r in 1:(R-1)){
+        for(c in 1:(C-1)){
+            if(structural_zeros[j,r,c] == 0){
+                n_free_alr_cells += 1;
+            }
+        }
+    }
+}
+
 
   // to deal with zeros in the sequential sampling: calculate the number of free parameters (zero row and columns do not need a parameter to allocated cell value of 0)
 
@@ -289,9 +318,13 @@ parameters{
   // vector<lower=0, upper= 1> [n_areas*has_theta] theta;
   // vector<lower=0> [has_theta] phi;
   // real<lower=0> sigma_j;
-  matrix<lower=0>[R - 1, C - 1] sigma_jrc;
+  // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
+  real<lower=0> sigma_jrc_raw[(lflag_vary_sd == 0) ? 1 : (R-1)*(C-1)];
+  real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
+  vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   // vector<lower=0>[R] sigma_r;
   matrix[R - 1, C - 1] E_rc;
+  real lambda_zero[n_zero_cells];
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
@@ -303,6 +336,7 @@ transformed parameters{
   real ALR_jrc[n_areas, R, C];
   real<lower=0> cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
+  matrix<lower=0>[R-1, C-1] sigma_jrc;
 
   // vector[n_areas] E_j;
   // array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
@@ -325,7 +359,7 @@ transformed parameters{
 
 
   // cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
-  ALR_jrc = ss_assign_alr_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
+  ALR_jrc = ss_assign_alr_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, lambda_zero, zero_cell_map, structural_zeros, hinge_delta_floor, hinge_delta_min);
   for(j in 1:n_areas){
     for(r in 1:R){
         if(row_margins[j, r] > 0){
@@ -344,6 +378,19 @@ transformed parameters{
 
     }
 }
+
+if(lflag_vary_sd == 0){
+    sigma_jrc = rep_matrix(sigma_jrc_raw[1], R-1, C-1);
+} else {
+    int s = 0;
+    for(r in 1:(R-1)){
+        for(c in 1:(C-1)){
+            s += 1;
+            sigma_jrc[r,c] = sigma_jrc_raw[s];
+        }
+    }
+}
+
 
     // E_mu_j - area mean of log cell values
 //     int n_free = 0;
@@ -418,18 +465,46 @@ for(j in 1:n_areas){
 }
 
 
-for(j in 1:n_areas){
-    for(r in 1:(R-1)){
-        ALR_jrc[j, r, 1:(C-1)] ~ normal(E_rc[r, 1:(C-1)], sigma_jrc[r, 1:(C-1)]);
+// for(j in 1:n_areas){
+//     for(r in 1:(R-1)){
+//         ALR_jrc[j, r, 1:(C-1)] ~ normal(E_rc[r, 1:(C-1)], sigma_jrc[r, 1:(C-1)]);
+//     }
+// }
+    int counter = 0;
+    vector[n_free_alr_cells] alr_vec;
+    vector[n_free_alr_cells] e_rc_vec;
+    vector[n_free_alr_cells] sigma_vec;
+    for(j in 1:n_areas){
+        for(r in 1:(R-1)){
+            for(c in 1:(C-1)){
+                if(structural_zeros[j,r,c] == 0){
+                    counter += 1;
+                    alr_vec[counter] = ALR_jrc[j,r,c];
+                    e_rc_vec[counter] = E_rc[r,c];
+                    sigma_vec[counter] = sigma_jrc[r,c];
+                }
+            }
+        }
     }
-}
+    alr_vec ~ normal(e_rc_vec, sigma_vec);
 
   for(r in 1:(R - 1)){
-      // E_rc[r, 1:C] ~ normal(0, prior_cell_effect_scale);
-      E_rc[r, 1:(C - 1)] ~ normal(to_row_vector(E_rc_prior[r, 1:(C - 1)]), .8);
+      E_rc[r, 1:(C - 1)] ~ normal(0, prior_mu_re_scale);
+      // E_rc[r, 1:(C - 1)] ~ normal(to_row_vector(E_rc_prior[r, 1:(C - 1)]), 3);
       // sigma_jrc[r] ~ normal(0, prior_cell_effect_scale);
-      sigma_jrc[r] ~ normal(0, 1);
+      // sigma_jrc[r] ~ normal(0, prior_cell_effect_scale);
   }
+
+if(lflag_vary_sd == 2){
+    sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
+    sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
+    for(s in 1:(R-1)*(C-1)){
+        sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
+    }
+} else {
+    sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
+}
+
 
   // sigma_r ~ normal(1, .2);
   // sigma_j ~ normal(0.73, 0.1);
