@@ -70,7 +70,8 @@ prep_options_stan <- function(use_dist,
                               llmod_omit_jr,
                               llmod_omit_jc,
                               llmod_omit_jrc,
-                              predictors_cm
+                              predictors_cm,
+                              noncentred
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -99,6 +100,9 @@ prep_options_stan <- function(use_dist,
   if(!predictors_cm %in% c(TRUE, FALSE)){
     stop("predictors_cm must be one of: TRUE, FALSE")
   }
+  if(!noncentred %in% c(TRUE, FALSE)){
+    stop("noncentred must be one of: TRUE, FALSE")
+  }
 
   list(
     lflag_dist = dplyr::case_when(
@@ -120,6 +124,10 @@ prep_options_stan <- function(use_dist,
     lflag_predictors_cm = dplyr::case_when(
       predictors_cm == FALSE ~ 0,
       predictors_cm == TRUE ~ 1
+    ),
+    lflag_noncentred = dplyr::case_when(
+      noncentred == FALSE ~ 0,
+      noncentred == TRUE ~ 1
     ),
     lflag_vary_sd = dplyr::case_when(
       vary_sd == FALSE ~ 0,
