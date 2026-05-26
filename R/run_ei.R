@@ -43,7 +43,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         prior_sigma_ce_scale = 1,
                         prior_sigma_re_scale = 1,
                         prior_cell_effect_scale = 1,
-                        method = "sampling",
+                        sample_optim = "sampling",
                         cores = 4,
                         chains = 4,
                         verbose = TRUE, ...){
@@ -95,7 +95,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     print(paste("now running model", mod@model_name))
   }
 
-  if(method == "optimizing"){
+  if(sample_optim == "optim"){
     out <- rstan::optimizing(mod, data = standata, ...)
     class(out) <- c("ei_optim", "list")
   } else {
