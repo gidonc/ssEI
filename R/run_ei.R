@@ -25,6 +25,7 @@
 #' @examples
 ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         use_known_cells = 0,
+                        zeros_structural = FALSE,
                         use_dist = "pois",
                         area_re = "normal",
                         inc_rm = FALSE,
@@ -72,8 +73,15 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                           prior_sigma_re_scale = prior_sigma_re_scale,
                           prior_cell_effect_scale = prior_cell_effect_scale
                         ))
+  if(zeros_structural == TRUE){
+    zero_rm <- row_margins
+    zero_cm <- col_margins
+  } else{
+    zero_rm <- row_margins + 1
+    zero_cm <- col_margins + 1
+  }
   standata <- modifyList(standata,
-                         prep_zeros(row_margins, col_margins))
+                         prep_zeros(zero_rm, zero_cm))
   standata <- modifyList(standata,
                          list(E_rc_prior = E_rc_prior,
                               known_cell_values = known_cell_values,
