@@ -68,6 +68,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
+  int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or row, column and table version of sequential cell weights (lamdba coeffients)
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
@@ -272,7 +273,7 @@ for(j in 1:n_areas){
   non0_rm = sum(free_R);
   non0_cm = sum(free_C);
 
-  // New Option 4 Parameter Trackers
+  // Parameter Trackers for cell, row, column and table sequential cell weights
   int n_param_alpha = 0;
   int n_param_beta = 0;
   int n_param_gamma = 0;
@@ -304,12 +305,10 @@ for(j in 1:n_areas){
     int fc = free_C[j] - 1;
 
     // Rows scale needs exactly (fr - 1) unconstrained parameters
-    // if (fr > 1) {
-    //   n_param_alpha += (fr - 1);
-    // }
-    if(fr>0){
-      n_param_alpha += fr;
+    if (fr > 1) {
+      n_param_alpha += (fr - 1);
     }
+
     // Columns scale needs exactly (fc - 1) unconstrained parameters
     if (fc > 1) {
       n_param_beta += (fc - 1);
@@ -347,6 +346,19 @@ for(j in 1:n_areas){
     }
 
   }
+
+if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
+  print("paramater map mismatch");
+  print(n_param);
+  print(n_param_gamma + n_param_alpha + n_param_beta + n_areas);
+  print(n_param_gamma);
+  print(n_param_alpha);
+  print(n_param_beta);
+  print(n_areas);
+
+}
+
+
 
   has_L_ame = 0;
 
@@ -400,7 +412,7 @@ parameters{
   // vector[n_areas] mu_scale; //Global table volatility on the raw scale
   // real alpha_raw[n_param_alpha]; // Total sum of (free_R[j] - 1) // Row-specific volatility
   // real log_beta_raw[n_param_beta];  // Total sum of (free_C[j] - 2) // Column-specific volatility
-  real lambda_raw[n_param];
+  vector[n_param] lambda_raw;
   // array[n_areas] vector[R*C - 1] E_jrc_raw;
   // array[n_areas] matrix[R, C - 1] E_jrc_raw;
   // array[n_areas] vector[R - 1] E_jr_raw;
@@ -450,68 +462,78 @@ transformed parameters{
   // vector[C] E_c;
 
 
-  for (j in 1:n_areas){
+if(lflag_rawscw == 1){
+    for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
         lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
-     }
+        }
+      }
+    }
+   } else {
+   vector[n_areas] mu_scale = lambda_raw[1:n_areas];
+   vector[n_param_gamma] gamma_raw = lambda_raw[(n_areas + 1):(n_areas + n_param_gamma)];
+   vector[n_param_alpha] log_alpha_raw = lambda_raw[(n_areas + n_param_gamma + 1):(n_areas + n_param_gamma + n_param_alpha)];
+   vector[n_param_beta] log_beta_raw = lambda_raw[(n_areas + n_param_gamma + n_param_alpha + 1):(n_areas + n_param_gamma + n_param_alpha + n_param_beta)];
+
+
+   for(j in 1:n_areas){
+     lambda[j] = rep_array(0, R - 1, C - 1);
+
+     int fr = free_R[j] - 1;
+     int fc = free_C[j] - 1;
+
+     if (fr > 0 && fc > 0) {
+       vector[fr] a_scale = rep_vector(1.0, fr);
+       vector[fc] b_scale = rep_vector(1.0, fc);
+       matrix[fr, fc] gamma_mat = rep_matrix(0.0, fr, fc);
+
+       if(fr > 1){
+         vector[fr - 1] raw_a;
+         for (i in 1:(fr - 1)) {
+           raw_a[i] = log_alpha_raw[alpha_start[j] + i - 1];
+        }
+        a_scale = sum_to_zero(raw_a);
+
+       }
+
+      if (fc > 1) {
+        vector[fc - 1] raw_b;
+        for (i in 1:(fc - 1)) {
+          raw_b[i] = log_beta_raw[beta_start[j] + i - 1];
+        }
+        b_scale = sum_to_zero(raw_b);
+      }
+
+      if (fr > 1 && fc > 1) {
+        matrix[fr - 1, fc - 1] raw_gamma;
+        for (r in 1:(fr - 1)) {
+          for (c in 1:(fc - 1)) {
+            raw_gamma[r, c] = gamma_raw[gamma_start[j] + (r - 1) * (fc - 1) + c - 1];
+          }
+        }
+
+        matrix[fr - 1, fc] pass1_gamma;
+        for (r in 1:(fr - 1)) {
+          pass1_gamma[r] = to_row_vector(sum_to_zero(to_vector(raw_gamma[r])));
+        }
+
+        for (c in 1:fc) {
+          gamma_mat[1:fr, c] = sum_to_zero(pass1_gamma[1:(fr - 1), c]);
+        }
+      }
+
+      for (r in 1:fr) {
+        for (c in 1:fc) {
+          lambda[j, r, c] = a_scale[r] + b_scale[c] + gamma_mat[r, c];
+        }
+      }
+    }
    }
+
+
  }
-//
-//     int fr = free_R[j] - 1;
-//     int fc = free_C[j] - 1;
-//
-//     if (fr > 0 && fc > 0) {
-//       vector[fr] a_scale = rep_vector(1.0, fr);
-//       vector[fc] b_scale = rep_vector(1.0, fc);
-//       matrix[fr, fc] gamma_mat = rep_matrix(0.0, fr, fc);
-//
-//       for (i in 1:fr) {
-//         a_scale[i] = alpha_raw[alpha_start[j] + i - 1];
-//         }
-
-      // if (fr > 1) {
-      //   vector[fr - 1] raw_a;
-      //   for (i in 1:(fr - 1)) {
-      //     raw_a[i] = log_alpha_raw[alpha_start[j] + i - 1];
-      //   }
-      //   a_scale = sum_to_zero(raw_a);
-      // }
-
-    //   if (fc > 1) {
-    //     vector[fc - 1] raw_b;
-    //     for (i in 1:(fc - 1)) {
-    //       raw_b[i] = log_beta_raw[beta_start[j] + i - 1];
-    //     }
-    //     b_scale = sum_to_zero(raw_b);
-    //   }
-    //
-    //   if (fr > 1 && fc > 1) {
-    //     matrix[fr - 1, fc - 1] raw_gamma;
-    //     for (r in 1:(fr - 1)) {
-    //       for (c in 1:(fc - 1)) {
-    //         raw_gamma[r, c] = gamma_raw[gamma_start[j] + (r - 1) * (fc - 1) + c - 1];
-    //       }
-    //     }
-    //
-    //     matrix[fr - 1, fc] pass1_gamma;
-    //     for (r in 1:(fr - 1)) {
-    //       pass1_gamma[r] = to_row_vector(sum_to_zero(to_vector(raw_gamma[r])));
-    //     }
-    //
-    //     for (c in 1:fc) {
-    //       gamma_mat[, c] = sum_to_zero(pass1_gamma[, c]);
-    //     }
-    //   }
-    //
-    //   for (r in 1:fr) {
-    //     for (c in 1:fc) {
-    //       lambda[j, r, c] = a_scale[r] + b_scale[c] + gamma_mat[r, c];
-    //     }
-    //   }
-    // }
-  // }
 
   // cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
   // ALR_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);

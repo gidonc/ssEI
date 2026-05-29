@@ -36,6 +36,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         llmod_omit_jrc = FALSE,
                         predictors_cm = FALSE,
                         noncentred = TRUE,
+                        raw_seq_cell_weights = FALSE,
                         prior_lkj = 2,
                         prior_mu_ce_scale = 2,
                         prior_mu_re_scale = 2,
@@ -60,7 +61,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            llmod_omit_jc = llmod_omit_jc,
                            llmod_omit_jrc = llmod_omit_jrc,
                            predictors_cm = predictors_cm,
-                           noncentred = noncentred
+                           noncentred = noncentred,
+                           raw_seq_cell_weights = raw_seq_cell_weights
                          ))
   standata <- modifyList(standata,
                         prep_priors_stan(
