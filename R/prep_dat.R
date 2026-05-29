@@ -67,11 +67,13 @@ prep_options_stan <- function(use_dist,
                               area_re,
                               inc_rm,
                               vary_sd,
+                              ll_rep,
                               llmod_omit_jr,
                               llmod_omit_jc,
                               llmod_omit_jrc,
                               predictors_cm,
-                              noncentred
+                              noncentred,
+                              raw_seq_cell_weights
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -88,6 +90,9 @@ prep_options_stan <- function(use_dist,
   if(!vary_sd %in% c(FALSE, TRUE, "partial")){
     stop("vary_sd must be one of: TRUE, FALSE, partial")
   }
+  if(!ll_rep %in% c("ALR 1", "LOR")){
+    stop("ll_rep must be one of: ALR 1, LOR")
+  }
   if(!llmod_omit_jr %in% c(TRUE, FALSE)){
     stop("llmod_omit_jr must be one of TRUE, FALSE")
   }
@@ -102,6 +107,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!noncentred %in% c(TRUE, FALSE)){
     stop("noncentred must be one of: TRUE, FALSE")
+  }
+  if(!raw_seq_cell_weights %in% c(TRUE, FALSE)){
+    stop("raw_seq_cell_weight must be one of: TRUE, FALSE")
   }
 
   list(
@@ -129,11 +137,19 @@ prep_options_stan <- function(use_dist,
       noncentred == FALSE ~ 0,
       noncentred == TRUE ~ 1
     ),
+    lflag_rawscw = dplyr::case_when(
+      raw_seq_cell_weights == FALSE ~ 0,
+      raw_seq_cell_weights == TRUE ~ 1
+    ),
     lflag_vary_sd = dplyr::case_when(
       vary_sd == FALSE ~ 0,
       vary_sd == TRUE ~ 1,
       vary_sd == "partial" ~ 2
     ),
+    lflag_ll_rep = dplyr::case_when(
+      ll_rep == "ALR 1" ~ 0,
+      ll_rep == "LOR" ~ 3
+     ),
     lflag_llmod_omit_jr = dplyr::case_when(
       llmod_omit_jr == TRUE ~ 1,
       llmod_omit_jr == FALSE ~ 0
@@ -171,7 +187,8 @@ prep_priors_stan <- function(prior_lkj,
                              prior_sigma_c_mu_scale,
                              prior_sigma_ce_scale,
                              prior_sigma_re_scale,
-                             prior_cell_effect_scale){
+                             prior_cell_effect_scale,
+                             prior_lambda_raw_scale){
   list(prior_lkj = prior_lkj,
        prior_mu_ce_scale = prior_mu_ce_scale,
        prior_mu_re_scale = prior_mu_re_scale,
@@ -179,7 +196,8 @@ prep_priors_stan <- function(prior_lkj,
        prior_sigma_c_mu_scale = prior_sigma_c_mu_scale,
        prior_sigma_ce_scale = prior_sigma_ce_scale,
        prior_sigma_re_scale = prior_sigma_re_scale,
-       prior_cell_effect_scale = prior_cell_effect_scale)
+       prior_cell_effect_scale = prior_cell_effect_scale,
+       prior_lambda_raw_scale = prior_lambda_raw_scale)
 }
 
 prep_king <- function(rm, cm){
