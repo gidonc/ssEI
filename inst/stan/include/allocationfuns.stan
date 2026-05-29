@@ -7,6 +7,154 @@
         return(delta*log1p_exp(x/delta));
       }
 
+real[,,] ss_assign_lor_wzeros_hinge_newparam_lp(
+    int n_areas, int R, int C,
+    matrix row_margins, matrix col_margins,
+    real[,,] lambda,
+    array[] real lambda_zero,
+    array[,,] int zero_cell_map,
+    array[,,] int structural_zeros,
+    real delta_floor, real delta_min) {
+
+     // Declare variables
+     real log_cv_out[n_areas, R, C]; // The new return array
+     vector[2] lower_pos;
+     vector[2] upper_pos;
+     real lower_bound;
+     real upper_bound;
+     real rt;
+     int free_R[n_areas];
+     int free_C[n_areas];
+     real this_inv_logit;
+     real log_det_J = 0.0;
+
+     lower_pos[1] = 0.0;
+
+     // =========================================================================
+     // 1. SEQUENTIAL SAMPLING ENGINE
+     // =========================================================================
+     for (j in 1:n_areas){
+       row_vector[R] slack_row_raw = rep_row_vector(0, R);
+       row_vector[C] slack_col_raw = rep_row_vector(0, C);
+       free_R[j] = 0;
+       free_C[j] = 0;
+
+       for (r in 1:R){
+         if(row_margins[j, r] > 0){
+           free_R[j] += 1;
+           slack_row_raw[free_R[j]] = row_margins[j, r];
+         }
+       }
+       for (c in 1:C){
+         if(col_margins[j, c] > 0){
+           free_C[j] += 1;
+           slack_col_raw[free_C[j]] = col_margins[j, c];
+         }
+       }
+       row_vector[free_R[j]] slack_row = slack_row_raw[1:free_R[j]];
+       row_vector[free_C[j]] slack_col = slack_col_raw[1:free_C[j]];
+       rt = sum(slack_row);
+       matrix[free_R[j], free_C[j]] tmp_cell_value;
+
+       for (r in 1:(free_R[j] - 1)){
+         for (c in 1:(free_C[j] - 1)){
+           lower_pos[2] = slack_row[r] - sum(tail(slack_col, free_C[j] - c));
+           lower_bound = robust_hinge_floor_zero(lower_pos[2], delta_floor);
+           upper_pos[1] = slack_col[c];
+           upper_pos[2] = slack_row[r];
+           upper_bound = robust_hinge_min(upper_pos, delta_min);
+
+           int cols_remaining = free_C[j] - c;
+           real neutral_logit = -log(cols_remaining);
+           this_inv_logit = inv_logit(neutral_logit + lambda[j, r, c]);
+
+           tmp_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
+           slack_col[c] = slack_col[c] - tmp_cell_value[r, c];
+           slack_row[r] = slack_row[r] - tmp_cell_value[r, c];
+           rt = rt - tmp_cell_value[r, c];
+           log_det_J += log((upper_bound - lower_bound) * this_inv_logit * (1 - this_inv_logit));
+         }
+         tmp_cell_value[r, free_C[j]] = slack_row[r];
+         rt = rt - tmp_cell_value[r, free_C[j]];
+         slack_col[free_C[j]] = slack_col[free_C[j]] - tmp_cell_value[r, free_C[j]];
+         slack_row[r] = slack_row[r] - tmp_cell_value[r, free_C[j]];
+       }
+       for (c in 1:(free_C[j] - 1)){
+         tmp_cell_value[free_R[j], c] = slack_col[c];
+         rt = rt - tmp_cell_value[free_R[j], c];
+         slack_col[c] = slack_col[c] - tmp_cell_value[free_R[j], c];
+         slack_row[free_R[j]] = slack_row[free_R[j]] - tmp_cell_value[free_R[j], c];
+       }
+       tmp_cell_value[free_R[j], free_C[j]] = rt;
+
+      // =========================================================================
+      // 2. DENSE JACOBIAN & LOG-CELL EXTRACTION
+      // =========================================================================
+      int fr_K = free_R[j] - 1;
+      int fc_K = free_C[j] - 1;
+      int K_free = fr_K * fc_K;
+
+      // Step A: Calculate the Dense LOR Jacobian on the strictly free cells
+      if (K_free > 0) {
+        matrix[K_free, K_free] J_lor = rep_matrix(0.0, K_free, K_free);
+        real inv_corner = 1.0 / fmax(tmp_cell_value[free_R[j], free_C[j]], 1e-10);
+
+        int row_idx = 1;
+        for (r in 1:fr_K) {
+          real inv_row_ref = 1.0 / fmax(tmp_cell_value[r, free_C[j]], 1e-10);
+          for (c in 1:fc_K) {
+            real inv_col_ref = 1.0 / fmax(tmp_cell_value[free_R[j], c], 1e-10);
+            real inv_free = 1.0 / fmax(tmp_cell_value[r, c], 1e-10);
+
+            int col_idx = 1;
+            for (rp in 1:fr_K) {
+              for (cp in 1:fc_K) {
+                real derivative = inv_corner;
+                if (r == rp && c == cp) derivative += inv_free;
+                if (r == rp) derivative += inv_row_ref;
+                if (c == cp) derivative += inv_col_ref;
+                J_lor[row_idx, col_idx] = derivative;
+                col_idx += 1;
+              }
+            }
+            row_idx += 1;
+          }
+        }
+        log_det_J += log_determinant(J_lor);
+      }
+
+      // Step B: Build the Log-Scale Matrix to Return
+      int fr = 0;
+      for(r in 1:R){
+        if(row_margins[j, r] > 0){
+          fr += 1;
+          int fc = 0;
+          for(c in 1:C){
+            if(col_margins[j, c] > 0){
+              fc += 1;
+              log_cv_out[j, r, c] = log(fmax(tmp_cell_value[fr, fc], 1e-10));
+            } else if(structural_zeros[j, r, c] == 0){
+              log_cv_out[j, r, c] = lambda_zero[zero_cell_map[j, r, c]];
+            } else {
+              log_cv_out[j, r, c] = -200.0;
+            }
+          }
+        } else {
+          for(c in 1:C){
+            if(structural_zeros[j, r, c] == 0){
+              log_cv_out[j, r, c] = lambda_zero[zero_cell_map[j, r, c]];
+            } else {
+              log_cv_out[j, r, c] = -200.0;
+            }
+          }
+        }
+      }
+    } // End area loop
+
+    target += log_det_J;
+    return log_cv_out;
+}
+
 real[,,] ss_assign_ilr_wzeros_hinge_newparam_lp(
     int n_areas, int R, int C,
     matrix row_margins, matrix col_margins,

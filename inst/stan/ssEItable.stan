@@ -417,12 +417,12 @@ parameters{
   // vector<lower=0> [has_theta] phi;
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
-  real<lower=0> sigma_jrc_raw[(lflag_vary_sd == 0) ? 1 : R*(C-1)];
+  real<lower=0> sigma_jrc_raw[(lflag_vary_sd == 0) ? 1 : (R - 1)*(C-1)];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
-  matrix[R, C - 1] E_rc;
+  matrix[R - 1, C - 1] E_rc;
   // vector[R - 1] E_r_raw;
 
   real lambda_zero[n_zero_cells];
@@ -434,11 +434,11 @@ parameters{
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
-  real ILR_jrc[n_areas, R, C - 1];
+  real LOR_jrc[n_areas, R - 1, C - 1];
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
-  matrix<lower=0>[R, C-1] sigma_jrc;
+  matrix<lower=0>[R - 1, C-1] sigma_jrc;
 
   vector[n_areas] E_j = rep_vector(0, n_areas);
   // array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
@@ -515,47 +515,46 @@ transformed parameters{
 
   // cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
   // ALR_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);
-  ILR_jrc = ss_assign_ilr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, lambda_zero, zero_cell_map, structural_zeros, hinge_delta_floor, hinge_delta_min, V_ilr);
 
 
-  for(j in 1:n_areas){
-    for(r in 1:R){
-      if(row_margins[j, r] > 0){
+// 1. Fetch the Log Cell Values from the engine
+  log_cv = ss_assign_lor_wzeros_hinge_newparam_lp(
+      n_areas, R, C,
+      row_margins, col_margins,
+      lambda, lambda_zero, zero_cell_map, structural_zeros,
+      hinge_delta_floor, hinge_delta_min
+  );
 
-        // 1. Pull the ILR coordinate row vector for this specific table cell row
-        row_vector[C - 1] ilr_row;
-        for(c in 1:(C - 1)){
-          ilr_row[c] = ILR_jrc[j, r, c];
+  // 2. Extract cell_values and LOR_jrc
+  for (j in 1:n_areas) {
+    for (r in 1:R) {
+      for (c in 1:C) {
+        // Exponentiate to get absolute cell counts
+        if (log_cv[j, r, c] > -100.0) {
+          cell_values[j, r, c] = exp(log_cv[j, r, c]);
+        } else {
+          cell_values[j, r, c] = 0.0; // Handle structural zeros gracefully
         }
+      }
+    }
 
-        // 2. Map coordinates back into log-proportions via the basis transpose
-        // (1 x C-1) multiplied by (C-1 x C) matrix results in a (1 x C) row vector
-        row_vector[C] log_ratio_projected = ilr_row * V_ilr';
-
-        // 3. Normalize the projected values into a valid row simplex
-        vector[C] prop = softmax(to_vector(log_ratio_projected));
-
-        // 4. Scale by the active row margin to populate true cell spaces
-        for(c in 1:C){
-          cell_values[j, r, c] = row_margins[j, r] * prop[c];
-          log_cv[j, r, c] = log(fmax(cell_values[j, r, c], 1e-10)); // Safe log ceiling
-        }
-
-      } else {
-        // Maintain your strict structural zero handling for empty rows
-        for(c in 1:C){
-          log_cv[j, r, c] = -200.0;
-          cell_values[j, r, c] = 0.0;
-        }
+    // Calculate the Difference-in-Differences interaction directly
+    for (r in 1:(R - 1)) {
+      for (c in 1:(C - 1)) {
+         LOR_jrc[j, r, c] = log_cv[j, r, c]
+                          - log_cv[j, r, C]
+                          - log_cv[j, R, c]
+                          + log_cv[j, R, C];
       }
     }
   }
 
+
 if(lflag_vary_sd == 0){
-    sigma_jrc = rep_matrix(sigma_jrc_raw[1], R, C-1);
+    sigma_jrc = rep_matrix(sigma_jrc_raw[1], R - 1, C-1);
 } else {
     int s = 0;
-    for(r in 1:R){
+    for(r in 1:(R - 1)){
         for(c in 1:(C-1)){
             s += 1;
             sigma_jrc[r,c] = sigma_jrc_raw[s];
@@ -662,17 +661,17 @@ for(j in 1:n_areas){
 // }
     int counter = 0;
     int n_all_cells = n_free_alr_cells + n_areas * (C - 1);
-    vector[n_ilr_params] ilr_vec;
-    vector[n_ilr_params] e_rc_vec;
-    vector[n_ilr_params] sigma_vec;
+    vector[n_free_alr_cells] lor_vec;
+    vector[n_free_alr_cells] e_rc_vec;
+    vector[n_free_alr_cells] sigma_vec;
     row_vector[n_areas * C] cm_vec;
     vector[n_areas * C] e_cm_vec;
     for(j in 1:n_areas){
-        for(r in 1:R){
+        for(r in 1:(R - 1)){
             for(c in 1:(C-1)){
                 if(structural_zeros[j,r,c] == 0){
                     counter += 1;
-                    ilr_vec[counter] = ILR_jrc[j,r,c];
+                    lor_vec[counter] = LOR_jrc[j,r,c];
                     e_rc_vec[counter] = E_rc[r,c];
                     sigma_vec[counter] = sigma_jrc[r,c];
                 }
@@ -681,9 +680,9 @@ for(j in 1:n_areas){
     }
 
 
-    ilr_vec ~ normal(e_rc_vec, sigma_vec);
+    lor_vec ~ normal(e_rc_vec, sigma_vec);
 
-  for(r in 1:R){
+  for(r in 1:(R - 1)){
       E_rc[r, 1:(C - 1)] ~ normal(0, prior_mu_re_scale);
       // E_rc[r, 1:(C - 1)] ~ normal(to_row_vector(E_rc_prior[r, 1:(C - 1)]), 3);
       // sigma_jrc[r] ~ normal(0, prior_cell_effect_scale);
@@ -693,7 +692,7 @@ for(j in 1:n_areas){
 if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    for(s in 1:R*(C-1)){
+    for(s in 1:(R - 1)*(C-1)){
         sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
     }
 } else {
@@ -728,7 +727,7 @@ if(lflag_vary_sd == 2){
   // log_beta_raw ~ std_normal();
   // gamma_raw ~ std_normal();
   lambda_zero ~ normal(-5.0, 2.0);
-  lambda_raw ~ normal(0, 1);
+  lambda_raw ~ normal(0, 3);
 
 
 
