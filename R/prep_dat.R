@@ -90,8 +90,8 @@ prep_options_stan <- function(use_dist,
   if(!vary_sd %in% c(FALSE, TRUE, "partial")){
     stop("vary_sd must be one of: TRUE, FALSE, partial")
   }
-  if(!ll_rep %in% c("ALR 1", "LOR")){
-    stop("ll_rep must be one of: ALR 1, LOR")
+  if(!ll_rep %in% c("ALR 1", "ILR 1", "ILR 2", "LOR")){
+    stop("ll_rep must be one of: ALR 1, ILR 1, ILR 2, LOR")
   }
   if(!llmod_omit_jr %in% c(TRUE, FALSE)){
     stop("llmod_omit_jr must be one of TRUE, FALSE")
@@ -148,6 +148,8 @@ prep_options_stan <- function(use_dist,
     ),
     lflag_ll_rep = dplyr::case_when(
       ll_rep == "ALR 1" ~ 0,
+      ll_rep == "ILR 1" ~ 1,
+      ll_rep == "ILR 2" ~ 2,
       ll_rep == "LOR" ~ 3
      ),
     lflag_llmod_omit_jr = dplyr::case_when(

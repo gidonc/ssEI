@@ -71,6 +71,8 @@ transformed data{
   int K_jc_start;
   int K_jrc_start;
   int K_jrc_rstart[R - 1];
+  int R_ll; // rows in the log-linear representation
+  int C_ll; // cols in the log-linear representation
   int has_area_cell_effects;
   int free_R[n_areas];
   int free_C[n_areas];
@@ -106,9 +108,23 @@ transformed data{
   int n_margin_sigmas;
   int n_jrc_sigmas;
   int n_table_sigmas;
+  int is_ilr = 0;
   real sigma_constrain = .001;
 
   prior_phi_scale = 100;
+
+  if(lflag_ll_rep == 0 || lflag_ll_rep == 3){
+    // ALR case (0)
+    // LOR case (3)
+    R_ll = R - 1;
+    C_ll = C - 1;
+    is_ilr = 0;
+  } else if(lflag_ll_rep == 1||lflag_ll_rep == 2){
+    // ILR case
+    R_ll = R;
+    C_ll = C - 1;
+    is_ilr = 1;
+  }
 
   if(lflag_dist==2){
     has_theta = 1;
@@ -352,39 +368,44 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
 
   matrix[C, C - 1] V_ilr = rep_matrix(0.0, C, C - 1);
 
-  // Build the Orthonormal Basis matrix via Sequential Binary Partitioning
-  for (i in 1:(C - 1)) {
-    real r_i = i;
-    real weight_left = 1.0 / r_i * sqrt(r_i / (r_i + 1.0));
-    real weight_right = -sqrt(r_i / (r_i + 1.0));
-
-    for (j in 1:i) {
-      V_ilr[j, i] = weight_left;
+  if(lflag_ll_rep == 1){
+    // Build the Orthonormal Basis matrix via Sequential Binary Partitioning
+    for (i in 1:(C - 1)) {
+      real r_i = i;
+      real weight_left = 1.0 / r_i * sqrt(r_i / (r_i + 1.0));
+      real weight_right = -sqrt(r_i / (r_i + 1.0));
+      for (j in 1:i) {
+        V_ilr[j, i] = weight_left;
+      }
+      V_ilr[i + 1, i] = weight_right;
     }
-    V_ilr[i + 1, i] = weight_right;
-  }
+  } else if(lflag_ll_rep == 2){
 
-    // matrix[C, C - 1] V_ilr;
   // Build the Orthonormal Basis matrix via CLR contrasts (geometric mean reference)
   // Each coordinate contrasts category c against the geometric mean of all C categories,
   // giving a symmetric basis with no privileged reference category.
-  // {
-    // Step 1: CLR contrast matrix
+    {
+    // CLR contrast matrix
     // Column c has (1 - 1/C) in row c and (-1/C) everywhere else,
     // so each column sums to zero (centred log-ratio structure)
-  //   matrix[C, C - 1] A = rep_matrix(-1.0 / C, C, C - 1);
-  //   for (c in 1:(C - 1)) {
-  //     A[c, c] = 1.0 - 1.0 / C;
-  //   }
-  //   // Step 2: Gram-Schmidt orthonormalisation column by column
-  //   for (c in 1:(C - 1)) {
-  //     vector[C] v = A[, c];
-  //     for (k in 1:(c - 1)) {
-  //       v = v - dot_product(V_ilr[, k], v) * V_ilr[, k];
-  //     }
-  //     V_ilr[, c] = v / sqrt(dot_self(v));
-  //   }
-  // }
+      matrix[C, C - 1] A = rep_matrix(-1.0 / C, C, C - 1);
+      for (c in 1:(C - 1)) {
+        A[c, c] = 1.0 - 1.0 / C;
+      }
+      // Gram-Schmidt orthonormalisation column by column
+      for (c in 1:(C - 1)) {
+        vector[C] v = A[, c];
+        for (k in 1:(c - 1)) {
+          v = v - dot_product(V_ilr[, k], v) * V_ilr[, k];
+        }
+        V_ilr[, c] = v / sqrt(dot_self(v));
+      }
+    }
+  }
+
+
+
+
 
 }
 parameters{
@@ -409,12 +430,12 @@ parameters{
   // vector<lower=0> [has_theta] phi;
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
-  real<lower=0> sigma_jrc_raw[(lflag_vary_sd == 0) ? 1 : (R - 1)*(C-1)];
+  real<lower=0> sigma_jrc_raw[(lflag_vary_sd == 0) ? 1 : R_ll*C_ll];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
-  matrix[R - 1, C - 1] E_rc;
+  matrix[R_ll, C_ll] E_rc;
   // vector[R - 1] E_r_raw;
 
   real lambda_zero[n_zero_cells];
@@ -426,20 +447,11 @@ parameters{
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
-  real LLrep_jrc[n_areas, R - 1, C - 1];
+  real LLrep_jrc[n_areas, R_ll, C_ll];
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
-  matrix<lower=0>[R - 1, C-1] sigma_jrc;
-
-  vector[n_areas] E_j = rep_vector(0, n_areas);
-  // array[n_areas] vector[R] E_jr = rep_array(rep_vector(0, R), n_areas);
-  // array[n_areas] vector[C] E_jc = rep_array(rep_vector(0, C), n_areas);
-  // array[n_areas] matrix[R, C] log_e_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-  // array[n_areas] matrix[R, C] log_r_cell_values =  rep_array(rep_matrix(0, R, C), n_areas);
-
-  vector[R] E_r = rep_vector(0, R);
-  // vector[C] E_c;
+  matrix<lower=0>[R_ll, C_ll] sigma_jrc;
 
 
 if(lflag_rawscw == 1){
@@ -518,6 +530,7 @@ if(lflag_rawscw == 1){
   // cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
   // ALR_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);
   if(lflag_ll_rep == 0){
+    // ALR case
     LLrep_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);
 
     for(j in 1:n_areas){
@@ -538,9 +551,45 @@ if(lflag_rawscw == 1){
       }
     }
   }
+  if(is_ilr == 1){
+    // ILR case
+    LLrep_jrc = ss_assign_ilr_wzeros_hinge_newparam_lp(
+      n_areas, R, C, row_margins, col_margins,
+      lambda, lambda_zero, zero_cell_map, structural_zeros,
+      hinge_delta_floor, hinge_delta_min, V_ilr);
 
+      for(j in 1:n_areas){
+        for(r in 1:R){
+          if(row_margins[j, r] > 0){
+            // 1. Pull the ILR coordinate row vector for this specific table cell row
+            row_vector[C - 1] ilr_row;
+            for(c in 1:(C - 1)){
+              ilr_row[c] = LLrep_jrc[j, r, c];
+            }
+            // Map coordinates back into log-proportions via the basis transpose
+            // (1 x C-1) multiplied by (C-1 x C) matrix results in a (1 x C) row vector
+            row_vector[C] log_ratio_projected = ilr_row * V_ilr';
+
+            // Normalize the projected values into a valid row simplex
+            vector[C] prop = softmax(to_vector(log_ratio_projected));
+            // Scale by the active row margin to populate true cell spaces
+            for(c in 1:C){
+              cell_values[j, r, c] = row_margins[j, r] * prop[c];
+              log_cv[j, r, c] = log(fmax(cell_values[j, r, c], 1e-10)); // Safe log ceiling
+            }
+          } else {
+            // Structural zero handling for empty rows
+            for(c in 1:C){
+              log_cv[j, r, c] = -200.0;
+              cell_values[j, r, c] = 0.0;
+            }
+          }
+        }
+      }
+    }
   if(lflag_ll_rep == 3){
-    // 1. Fetch the Log Cell Values from the engine
+  // Log Odds Ratio case
+  // Function returns the Log Cell Values in this case
   log_cv = ss_assign_lor_wzeros_hinge_newparam_lp(
       n_areas, R, C,
       row_margins, col_margins,
@@ -579,11 +628,11 @@ if(lflag_rawscw == 1){
 
 
 if(lflag_vary_sd == 0){
-    sigma_jrc = rep_matrix(sigma_jrc_raw[1], R - 1, C-1);
+    sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
 } else {
     int s = 0;
-    for(r in 1:(R - 1)){
-        for(c in 1:(C-1)){
+    for(r in 1:R_ll){
+        for(c in 1:C_ll){
             s += 1;
             sigma_jrc[r,c] = sigma_jrc_raw[s];
         }
@@ -592,34 +641,19 @@ if(lflag_vary_sd == 0){
 
 }
 model{
-array[n_poss_cells] int known_cell_values_row_vector;
-vector[n_poss_cells] log_cv_row_vector;
-int counter_cell = 0;
 
-for(j in 1:n_areas){
-    for(r in 1:R){
-        for(c in 1:C){
-            if(structural_zeros[j,r,c]==0){
-                counter_cell += 1;
-                log_cv_row_vector[counter_cell] = log_cv[j, r, c];
-                if(use_known_cells == 1){
-                    known_cell_values_row_vector[counter_cell] = known_cell_values[j, r, c];
-                }
-            }
-        }
-    }
-}
 
     int counter = 0;
     int n_all_cells = n_free_alr_cells + n_areas * (C - 1);
-    vector[n_free_alr_cells] llr_vec;
-    vector[n_free_alr_cells] e_rc_vec;
-    vector[n_free_alr_cells] sigma_vec;
+    int vec_length = is_ilr == 1 ? R_ll*C_ll*n_areas : n_free_alr_cells;
+    vector[vec_length] llr_vec;
+    vector[vec_length] e_rc_vec;
+    vector[vec_length] sigma_vec;
     row_vector[n_areas * C] cm_vec;
     vector[n_areas * C] e_cm_vec;
     for(j in 1:n_areas){
-        for(r in 1:(R - 1)){
-            for(c in 1:(C-1)){
+        for(r in 1:R_ll){
+            for(c in 1:C_ll){
                 if(structural_zeros[j,r,c] == 0){
                     counter += 1;
                     llr_vec[counter] = LLrep_jrc[j,r,c];
@@ -631,14 +665,14 @@ for(j in 1:n_areas){
     }
     llr_vec ~ normal(e_rc_vec, sigma_vec);
 
-  for(r in 1:(R - 1)){
-      E_rc[r, 1:(C - 1)] ~ normal(0, prior_mu_re_scale);
+  for(r in 1:R_ll){
+      E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
   }
 
 if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    for(s in 1:(R - 1)*(C-1)){
+    for(s in 1:R_ll*C_ll){
         sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
     }
 } else {
@@ -647,16 +681,30 @@ if(lflag_vary_sd == 2){
 
     hinge_delta_floor ~ normal(0, .1);
     hinge_delta_min ~ normal(0, .1);
-
-  lambda_zero ~ normal(-5.0, 2.0);
-  lambda_raw ~ normal(0, 3);
+    lambda_zero ~ normal(-5.0, 2.0);
+    lambda_raw ~ normal(0, 3);
 
 
 
     if(use_known_cells == 1){
-      target += poisson_lpmf(known_cell_values_row_vector |
-      exp(log_cv_row_vector) + 1e-10);
-      }
+      array[n_poss_cells] int known_cell_values_row_vector;
+      vector[n_poss_cells] log_cv_row_vector;
+      int counter_cell = 0;
+      for(j in 1:n_areas){
+        for(r in 1:R){
+          for(c in 1:C){
+            if(structural_zeros[j,r,c]==0){
+              counter_cell += 1;
+              log_cv_row_vector[counter_cell] = log_cv[j, r, c];
+              if(use_known_cells == 1){
+                known_cell_values_row_vector[counter_cell] = known_cell_values[j, r, c];
+                }
+              }
+            }
+          }
+        }
+      target += poisson_lpmf(known_cell_values_row_vector | exp(log_cv_row_vector) + 1e-10);
+    }
 }
 generated quantities{
     #include include/generateratesandsummaries.stan
