@@ -30,6 +30,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         use_dist = "pois",
                         area_re = "normal",
                         ll_rep = "ALR 1",
+                        V_ilr = NULL,
+                        n_ilr_rows = NULL,
                         inc_rm = FALSE,
                         vary_sd = FALSE,
                         mod_cols = TRUE,
@@ -53,7 +55,17 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         chains = 4,
                         verbose = TRUE, ...){
 
-  standata <- prep_data_stan(row_margins, col_margins)
+  if(ll_rep == "ALR 3" & is.null(V_ilr)){
+    stop("A V_ilr basis matrix is required for the ALR 3 representation of the log-linear model.")
+  }
+  if(ll_rep=="ALR 3" & is.null(n_ilr_rows)){
+    if(is.null(n_ilr_rows)|nrow(V_ilr)<n_ilr_rows){
+      stop("n_ilr_rows is required if for the ALR 3 representation of the log-linear model and must be less or equal to the number of rows in the V_ilr basis matrix.")
+    }
+  }
+
+
+  standata <- prep_data_stan(row_margins, col_margins, V_ilr, n_ilr_rows)
   standata <- modifyList(standata,
                          prep_options_stan(
                            use_dist = use_dist,

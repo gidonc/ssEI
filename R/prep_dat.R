@@ -7,17 +7,34 @@
 #' @export
 #'
 #' @examples
-prep_data_stan <- function(row_margins, col_margins){
+prep_data_stan <- function(row_margins, col_margins, V_ilr, n_ilr_rows){
   R <- ncol(row_margins)
   C <- ncol(col_margins)
   n_areas <- nrow(row_margins)
+
+  if(is.null(V_ilr)){
+    V_ilr = matrix(0, C, C -1)
+    n_ilr_rows = 0;
+  } else {
+    # check if V'V=I
+    if(isFALSE(all.equal(crossprod(V), diag(ncol(V)),tolerance = 1e-5))) {
+      stop("V_ilr must be an orthonormal matrix but crossprod(V_ilr) does not equal an identity matrix.")
+    }
+    # check if V_ilr is in the clr subspace
+    if(isFalse(all(abs(colSums(V_ilr)) < 1e-5))){
+      stop("V_ilr must be an orthonormal matrix in the clr subspace but some columns do not sum to zero.")
+    }
+    V_ilr = V_ilr
+  }
 
   standata <- list(
     n_areas = n_areas,
     R = R,
     C = C,
     row_margins = row_margins,
-    col_margins = col_margins
+    col_margins = col_margins,
+    V_ilr_data = V_ilr,
+    n_ilr_rows = n_ilr_rows
   )
   return(standata)
 }
@@ -90,8 +107,8 @@ prep_options_stan <- function(use_dist,
   if(!vary_sd %in% c(FALSE, TRUE, "partial")){
     stop("vary_sd must be one of: TRUE, FALSE, partial")
   }
-  if(!ll_rep %in% c("ALR 1", "ILR 1", "ILR 2", "LOR")){
-    stop("ll_rep must be one of: ALR 1, ILR 1, ILR 2, LOR")
+  if(!ll_rep %in% c("ALR 1", "ILR 1", "ILR 2", "ILR 3", "LOR")){
+    stop("ll_rep must be one of: ALR 1, ILR 1, ILR 2, ILR 3, LOR")
   }
   if(!llmod_omit_jr %in% c(TRUE, FALSE)){
     stop("llmod_omit_jr must be one of TRUE, FALSE")
@@ -150,6 +167,7 @@ prep_options_stan <- function(use_dist,
       ll_rep == "ALR 1" ~ 0,
       ll_rep == "ILR 1" ~ 1,
       ll_rep == "ILR 2" ~ 2,
+      ll_rep == "ILR 3" ~ 4,
       ll_rep == "LOR" ~ 3
      ),
     lflag_llmod_omit_jr = dplyr::case_when(

@@ -35,6 +35,8 @@ data{
  int<lower=0> C;  // number of columns
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
+ matrix[C, C - 1] V_ilr_data; // basis matrix for ILR transformation (for ILR 3 case)
+ int n_ilr_rows; // number of rows in the basic construction passed to Stan (for ILR 3 case)
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
@@ -45,7 +47,7 @@ data{
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or row, column and table version of sequential cell weights (lamdba coeffients)
-  int<lower = 0, upper = 3> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
+  int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
@@ -119,9 +121,14 @@ transformed data{
     R_ll = R - 1;
     C_ll = C - 1;
     is_ilr = 0;
-  } else if(lflag_ll_rep == 1||lflag_ll_rep == 2){
-    // ILR case
+  } else if(lflag_ll_rep == 1||lflag_ll_rep == 2||lflag_ll_rep == 4){
+    // Preprogrammed ILR cases
     R_ll = R;
+    C_ll = C - 1;
+    is_ilr = 1;
+  } else if(lflag_ll_rep == 4){
+    // User defined ILR cases
+    R_ll = n_ilr_rows;
     C_ll = C - 1;
     is_ilr = 1;
   }
@@ -401,6 +408,8 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
         V_ilr[, c] = v / sqrt(dot_self(v));
       }
     }
+  } else if (lflag_ll_rep == 4) {
+    V_ilr = V_ilr_data;
   }
 
 
@@ -586,6 +595,12 @@ if(lflag_rawscw == 1){
           }
         }
       }
+eval_df |>
+  filter(use_dist %in% c("gq", "king") | raw_seq_cell_weights)|>
+  # filter(use_dist != "multinom") |>
+  ggplot(aes(rr_eval_cor, cv_eval_cor))+
+  # facet_grid(vary_sd~ll_rep) +
+  geom_point(aes(colour=raw_seq_cell_weights), position="jitter")
     }
   if(lflag_ll_rep == 3){
   // Log Odds Ratio case
