@@ -55,12 +55,12 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         chains = 4,
                         verbose = TRUE, ...){
 
-  if(ll_rep == "ALR 3" & is.null(V_ilr)){
-    stop("A V_ilr basis matrix is required for the ALR 3 representation of the log-linear model.")
+  if(ll_rep == "ILR 3" & is.null(V_ilr)){
+    stop("A V_ilr basis matrix is required for the ILR 3 representation of the log-linear model.")
   }
-  if(ll_rep=="ALR 3" & is.null(n_ilr_rows)){
+  if(ll_rep=="ILR 3" & is.null(n_ilr_rows)){
     if(is.null(n_ilr_rows)|nrow(V_ilr)<n_ilr_rows){
-      stop("n_ilr_rows is required if for the ALR 3 representation of the log-linear model and must be less or equal to the number of rows in the V_ilr basis matrix.")
+      stop("n_ilr_rows is required if for the ILR 3 representation of the log-linear model and must be less or equal to the number of rows in the V_ilr basis matrix.")
     }
   }
 
@@ -110,6 +110,9 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     print(standata$R)
     print(standata$C)
     print(standata$n_areas)
+    print(standata$V_ilr)
+    print(standata$n_ilr_rows)
+    print(standata$lflag_ll_rep)
 
   }
   if(mod_cols){

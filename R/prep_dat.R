@@ -17,12 +17,8 @@ prep_data_stan <- function(row_margins, col_margins, V_ilr, n_ilr_rows){
     n_ilr_rows = 0;
   } else {
     # check if V'V=I
-    if(isFALSE(all.equal(crossprod(V), diag(ncol(V)),tolerance = 1e-5))) {
+    if(isFALSE(all.equal(crossprod(V_ilr), diag(ncol(V_ilr)),tolerance = 1e-5))) {
       stop("V_ilr must be an orthonormal matrix but crossprod(V_ilr) does not equal an identity matrix.")
-    }
-    # check if V_ilr is in the clr subspace
-    if(isFalse(all(abs(colSums(V_ilr)) < 1e-5))){
-      stop("V_ilr must be an orthonormal matrix in the clr subspace but some columns do not sum to zero.")
     }
     V_ilr = V_ilr
   }
@@ -236,4 +232,31 @@ prep_gq <- function(rm, cm){
     formula = formula,
     data = cbind(cm, rm)
   )
+}
+
+#' @export
+build_gm_ilr_basis <- function(C, ref_col = C) {
+  # Reorder so reference category is last
+  cat_order <- c(setdiff(1:C, ref_col), ref_col)
+
+  # Column 1: geometric mean direction  unaffected by ordering
+  v_gm <- rep(1/sqrt(C), C)
+
+  if (C == 2) {
+    return(matrix(v_gm, nrow=C, ncol=1))
+  }
+
+  # Build Helmert ILR basis C×(C-1)
+  V_helm <- matrix(0, nrow=C, ncol=C-1)
+  for (i in 1:(C-1)) {
+    V_helm[1:i, i]  <- (1/i) * sqrt(i/(i+1))
+    V_helm[i+1, i]  <- -sqrt(i/(i+1))
+  }
+
+  # Take first C-2 columns of ILR basis
+  V_ratios <- matrix(V_helm[, 1:(C-2)], nrow=C)
+  V <- cbind(v_gm, V_ratios)
+
+  # Reorder rows so reference category is last
+  V[cat_order, ]
 }

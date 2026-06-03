@@ -1,3 +1,4 @@
+
 //
 // This Stan Ecological Inference Program
 // Constrains to row and column margins using: sequential sampling
@@ -121,7 +122,7 @@ transformed data{
     R_ll = R - 1;
     C_ll = C - 1;
     is_ilr = 0;
-  } else if(lflag_ll_rep == 1||lflag_ll_rep == 2||lflag_ll_rep == 4){
+  } else if(lflag_ll_rep == 1||lflag_ll_rep == 2){
     // Preprogrammed ILR cases
     R_ll = R;
     C_ll = C - 1;
@@ -413,9 +414,6 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   }
 
 
-
-
-
 }
 parameters{
   // real gamma_raw[n_param_gamma]; // the raw atomic cell deviations (leading to sequential cell weights)
@@ -451,8 +449,8 @@ parameters{
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
-  real<lower=0, upper = .1> hinge_delta_floor;
-  real<lower=0, upper = .1> hinge_delta_min;
+  real<lower=0, upper = .0001> hinge_delta_floor;
+  real<lower=0, upper = .0001> hinge_delta_min;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -562,45 +560,26 @@ if(lflag_rawscw == 1){
   }
   if(is_ilr == 1){
     // ILR case
-    LLrep_jrc = ss_assign_ilr_wzeros_hinge_newparam_lp(
+    real LLrep_all[3, n_areas, R, C];
+    LLrep_all = ss_assign_ilr_wzeros_hinge_return_all_lp(
       n_areas, R, C, row_margins, col_margins,
       lambda, lambda_zero, zero_cell_map, structural_zeros,
       hinge_delta_floor, hinge_delta_min, V_ilr);
 
       for(j in 1:n_areas){
+        for(r in 1:R_ll){
+          for(c in 1:C_ll){
+            LLrep_jrc[j, r, c] = LLrep_all[1, j, r, c];
+          }
+        }
         for(r in 1:R){
-          if(row_margins[j, r] > 0){
-            // 1. Pull the ILR coordinate row vector for this specific table cell row
-            row_vector[C - 1] ilr_row;
-            for(c in 1:(C - 1)){
-              ilr_row[c] = LLrep_jrc[j, r, c];
-            }
-            // Map coordinates back into log-proportions via the basis transpose
-            // (1 x C-1) multiplied by (C-1 x C) matrix results in a (1 x C) row vector
-            row_vector[C] log_ratio_projected = ilr_row * V_ilr';
-
-            // Normalize the projected values into a valid row simplex
-            vector[C] prop = softmax(to_vector(log_ratio_projected));
-            // Scale by the active row margin to populate true cell spaces
-            for(c in 1:C){
-              cell_values[j, r, c] = row_margins[j, r] * prop[c];
-              log_cv[j, r, c] = log(fmax(cell_values[j, r, c], 1e-10)); // Safe log ceiling
-            }
-          } else {
-            // Structural zero handling for empty rows
-            for(c in 1:C){
-              log_cv[j, r, c] = -200.0;
-              cell_values[j, r, c] = 0.0;
-            }
+          for(c in 1:C){
+            log_cv[j, r, c] = LLrep_all[2, j, r, c];
+            cell_values[j, r, c] = LLrep_all[3, j, r, c];
           }
         }
       }
-eval_df |>
-  filter(use_dist %in% c("gq", "king") | raw_seq_cell_weights)|>
-  # filter(use_dist != "multinom") |>
-  ggplot(aes(rr_eval_cor, cv_eval_cor))+
-  # facet_grid(vary_sd~ll_rep) +
-  geom_point(aes(colour=raw_seq_cell_weights), position="jitter")
+
     }
   if(lflag_ll_rep == 3){
   // Log Odds Ratio case
@@ -694,8 +673,8 @@ if(lflag_vary_sd == 2){
     sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
 }
 
-    hinge_delta_floor ~ normal(0, .1);
-    hinge_delta_min ~ normal(0, .1);
+    hinge_delta_floor ~ normal(0, .001);
+    hinge_delta_min ~ normal(0, .001);
     lambda_zero ~ normal(-5.0, 2.0);
     lambda_raw ~ normal(0, 3);
 
