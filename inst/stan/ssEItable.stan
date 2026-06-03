@@ -459,6 +459,10 @@ transformed parameters{
   real<lower=0> cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
   matrix<lower=0>[R_ll, C_ll] sigma_jrc;
+  matrix[R_ll, C_ll] ilr_mean;
+  matrix[R_ll, C_ll] ilr_var;
+  matrix[R_ll, C_ll] ilr_n;
+
 
 
 if(lflag_rawscw == 1){
@@ -632,32 +636,64 @@ if(lflag_vary_sd == 0){
         }
     }
 }
+for(r in 1:R_ll){
+    for(c in 1:C_ll){
+        real s = 0;
+        real s2 = 0;
+        real n = 0;
+        for(j in 1:n_areas){
+            if(row_margins[j,r] > 0 && structural_zeros[j,r,c] == 0){
+                real ilr_val = LLrep_jrc[j,r,c];
+                s  += ilr_val;
+                s2 += square(ilr_val);
+                n  += 1;
+            }
+        }
+        ilr_n[r,c]    = n;
+        ilr_mean[r,c] = (n > 0) ? s / n : 0;
+        ilr_var[r,c]  = (n > 1) ? s2/n - square(ilr_mean[r,c]) : 0;
+    }
+}
+
 
 }
 model{
 
-
-    int counter = 0;
-    int n_all_cells = n_free_alr_cells + n_areas * (C - 1);
-    int vec_length = is_ilr == 1 ? R_ll*C_ll*n_areas : n_free_alr_cells;
-    vector[vec_length] llr_vec;
-    vector[vec_length] e_rc_vec;
-    vector[vec_length] sigma_vec;
-    row_vector[n_areas * C] cm_vec;
-    vector[n_areas * C] e_cm_vec;
-    for(j in 1:n_areas){
-        for(r in 1:R_ll){
-            for(c in 1:C_ll){
-                if(structural_zeros[j,r,c] == 0){
-                    counter += 1;
-                    llr_vec[counter] = LLrep_jrc[j,r,c];
-                    e_rc_vec[counter] = E_rc[r,c];
-                    sigma_vec[counter] = sigma_jrc[r,c];
-                }
-            }
+//
+//     int counter = 0;
+//     int n_all_cells = n_free_alr_cells + n_areas * (C - 1);
+//     int vec_length = is_ilr == 1 ? R_ll*C_ll*n_areas : n_free_alr_cells;
+//     vector[vec_length] llr_vec;
+//     vector[vec_length] e_rc_vec;
+//     vector[vec_length] sigma_vec;
+//     row_vector[n_areas * C] cm_vec;
+//     vector[n_areas * C] e_cm_vec;
+//     for(j in 1:n_areas){
+//         for(r in 1:R_ll){
+//             for(c in 1:C_ll){
+//                 if(structural_zeros[j,r,c] == 0){
+//                     counter += 1;
+//                     llr_vec[counter] = LLrep_jrc[j,r,c];
+//                     e_rc_vec[counter] = E_rc[r,c];
+//                     sigma_vec[counter] = sigma_jrc[r,c];
+//                 }
+//             }
+//         }
+//     }
+//     llr_vec ~ normal(e_rc_vec, sigma_vec);
+    for(r in 1:R_ll){
+      for(c in 1:C_ll){
+        if(ilr_n[r,c] > 1){
+          real n  = ilr_n[r,c];
+          real mu = ilr_mean[r,c];
+          real v  = ilr_var[r,c];
+          // Sufficient statistic normal log likelihood
+          target += -n * log(sigma_jrc[r,c])
+                    - n * v / (2 * square(sigma_jrc[r,c]))
+                    - n * square(mu - E_rc[r,c]) / (2 * square(sigma_jrc[r,c]));
         }
     }
-    llr_vec ~ normal(e_rc_vec, sigma_vec);
+}
 
   for(r in 1:R_ll){
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
