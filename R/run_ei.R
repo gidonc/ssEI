@@ -25,7 +25,9 @@
 #'
 #' @examples
 ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
+                        E_rc_fixed = 0, sigma_jrc_fixed =0,
                         use_known_cells = 0,
+                        fix_E_rc = 0, fix_sigma_jrc = 0,
                         zeros_structural = FALSE,
                         use_dist = "pois",
                         area_re = "normal",
@@ -104,7 +106,26 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
   standata <- modifyList(standata,
                          list(E_rc_prior = E_rc_prior,
                               known_cell_values = known_cell_values,
-                              use_known_cells = use_known_cells))
+                              use_known_cells = use_known_cells,
+                              E_rc_fixed = E_rc_fixed,
+                              sigma_jrc_fixed = sigma_jrc_fixed,
+                              lflag_fix_E_rc = fix_E_rc,
+                              lflag_fix_sigma_jrc = fix_sigma_jrc))
+  if(standata$lflag_ll_rep %in% c(0, 3)){
+    R_ll = standata$R - 1
+    C_ll = standata$C - 1
+  } else if(standata$lflag_ll_rep %in% c(1, 2)){
+    R_ll = standata$R
+    C_ll = standata$C - 1
+  } else if(standata$lflag_ll_rep %in% c(4)){
+    R_ll = n_ilr_rows
+    C_ll = C - 1
+  }
+  standata <- modifyList(standata,
+                         list(
+                           R_ll = R_ll,
+                           C_ll = C_ll
+                         ))
 
   if(verbose){
     print(standata$R)

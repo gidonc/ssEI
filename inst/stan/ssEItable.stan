@@ -34,6 +34,8 @@ data{
  int<lower=0> n_areas;
  int<lower=0> R;  // number of rows
  int<lower=0> C;  // number of columns
+ int<lower=0> R_ll; // number of rows in log-linear representation
+ int<lower=0> C_ll; // number of cols in log-linear representation
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
  matrix[C, C - 1] V_ilr_data; // basis matrix for ILR transformation (for ILR 3 case)
@@ -51,6 +53,10 @@ data{
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
+  int<lower=0, upper=1> lflag_fix_E_rc;        // 1 = use fixed values, 0 = estimate
+  int<lower=0, upper=1> lflag_fix_sigma_jrc;   // 1 = use fixed values, 0 = estimate
+  matrix[R_ll, C_ll] E_rc_fixed;         // fixed values, ignored if fix_E_rc=0
+  matrix<lower=0>[R_ll, C_ll] sigma_jrc_fixed;  // fixed values, ignored if fix_sigma_jrc=0
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
@@ -74,8 +80,10 @@ transformed data{
   int K_jc_start;
   int K_jrc_start;
   int K_jrc_rstart[R - 1];
-  int R_ll; // rows in the log-linear representation
-  int C_ll; // cols in the log-linear representation
+  int K_sigmas;
+  int K_sigma_c_sigma;
+  // int R_ll; // rows in the log-linear representation
+  // int C_ll; // cols in the log-linear representation
   int has_area_cell_effects;
   int free_R[n_areas];
   int free_C[n_areas];
@@ -119,18 +127,18 @@ transformed data{
   if(lflag_ll_rep == 0 || lflag_ll_rep == 3){
     // ALR case (0)
     // LOR case (3)
-    R_ll = R - 1;
-    C_ll = C - 1;
+    // R_ll = R - 1;
+    // C_ll = C - 1;
     is_ilr = 0;
   } else if(lflag_ll_rep == 1||lflag_ll_rep == 2){
     // Preprogrammed ILR cases
-    R_ll = R;
-    C_ll = C - 1;
+    // R_ll = R;
+    // C_ll = C - 1;
     is_ilr = 1;
   } else if(lflag_ll_rep == 4){
     // User defined ILR cases
-    R_ll = n_ilr_rows;
-    C_ll = C - 1;
+    // R_ll = n_ilr_rows;
+    // C_ll = C - 1;
     is_ilr = 1;
   }
 
@@ -413,6 +421,21 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     V_ilr = V_ilr_data;
   }
 
+  if(lflag_fix_sigma_jrc == 1){
+    K_sigmas = 0;
+    K_sigma_c_sigma = 0;
+  } else if(lflag_vary_sd == 0){
+    K_sigmas = 1;
+    K_sigma_c_sigma = 0;
+  } else if(lflag_vary_sd == 1){
+    K_sigmas = R_ll*C_ll;
+    K_sigma_c_sigma = 0;
+  } else if(lflag_vary_sd == 2){
+    K_sigmas = R_ll*C_ll;
+    K_sigma_c_sigma = 1;
+  }
+
+
 
 }
 parameters{
@@ -437,12 +460,13 @@ parameters{
   // vector<lower=0> [has_theta] phi;
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
-  real<lower=0> sigma_jrc_raw[(lflag_vary_sd == 0) ? 1 : R_ll*C_ll];
+
+  real<lower=0> sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
-  matrix[R_ll, C_ll] E_rc;
+  matrix[lflag_fix_E_rc ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
   // vector[R - 1] E_r_raw;
 
   real lambda_zero[n_zero_cells];
@@ -462,6 +486,15 @@ transformed parameters{
   matrix[R_ll, C_ll] ilr_mean;
   matrix[R_ll, C_ll] ilr_var;
   matrix[R_ll, C_ll] ilr_n;
+  matrix[R_ll, C_ll] E_rc;
+
+
+  if(lflag_fix_E_rc==1){
+      E_rc = E_rc_fixed;
+  } else {
+      E_rc = E_rc_raw;
+  }
+
 
 
 
@@ -623,9 +656,9 @@ if(lflag_rawscw == 1){
 
 
 
-
-
-if(lflag_vary_sd == 0){
+if(lflag_fix_sigma_jrc==1){
+  sigma_jrc = sigma_jrc_fixed;
+} else if(lflag_vary_sd == 0){
     sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
 } else {
     int s = 0;
@@ -699,7 +732,9 @@ model{
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
   }
 
-if(lflag_vary_sd == 2){
+if(lflag_fix_sigma_jrc == 1){
+
+}else if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
     for(s in 1:R_ll*C_ll){
