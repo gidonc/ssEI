@@ -65,7 +65,7 @@ data{
  real<lower=0> prior_sigma_re_scale; //prior of scale for sigma_re
  real<lower=0> prior_cell_effect_scale; //prior of scale for average cell effects
  real<lower=0> prior_lambda_raw_scale; // prior of scale of the raw lambda_raw (greed) parameters (e.g. logit of the consumption of available mass in each cell)
- matrix[R - 1, C - 1] E_rc_prior; // empirically informed prior centres for E_rc
+ matrix[R_ll, C_ll] E_rc_prior; // empirically informed prior centres for E_rc
  int<lower=0> known_cell_values[n_areas, R, C]; // for testing purposes
  int<lower=0, upper=1> use_known_cells; // for testing purposes
 }
@@ -562,7 +562,7 @@ if(lflag_rawscw == 1){
 
       for (r in 1:fr) {
         for (c in 1:fc) {
-          lambda[j, r, c] = a_scale[r] + b_scale[c] + gamma_mat[r, c];
+          lambda[j, r, c] = mu_scale[j] + a_scale[r] + b_scale[c] + gamma_mat[r, c];
         }
       }
     }

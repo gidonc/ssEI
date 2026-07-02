@@ -260,3 +260,37 @@ build_gm_ilr_basis <- function(C, ref_col = C) {
   # Reorder rows so reference category is last
   V[cat_order, ]
 }
+
+#' @export
+#'
+mk_E_rc <- function(known_cell_values, V_ilr){
+  J <- dim(known_cell_values)[1]
+  R <- dim(known_cell_values)[2]
+  C <- dim(known_cell_values)[3]
+  D <- C - 1
+  Y <- array(NA, dim = c(J, R, D))
+  E_rc <- matrix(NA, nrow = R, ncol = D)
+  sigma_jrc <- matrix(NA, nrow=R, ncol = D)
+  for (j in 1:J){
+    for(r in 1:R){
+      comp <- known_cell_values[j, r, ]
+      if(any(comp<= 0)){
+        comp[comp<=0] <- 1e-3
+      }
+      comp <- comp/sum(comp)
+      Y[j,r, ] <- log(comp) %*% V_ilr
+    }
+  }
+  for(r in 1:R){
+    for(d in 1:D){
+      E_rc[r, d] <- mean(Y[,r, d])
+      sigma_jrc[r, d] <- sd(Y[,r, d])
+    }
+  }
+  return(
+    list(
+      E_rc = E_rc,
+      simga_jrc = sigma_jrc
+    )
+  )
+}

@@ -119,7 +119,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     C_ll = standata$C - 1
   } else if(standata$lflag_ll_rep %in% c(4)){
     R_ll = n_ilr_rows
-    C_ll = C - 1
+    C_ll = standata$C - 1
   }
   standata <- modifyList(standata,
                          list(
