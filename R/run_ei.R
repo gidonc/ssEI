@@ -43,6 +43,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         predictors_cm = FALSE,
                         noncentred = TRUE,
                         raw_seq_cell_weights = FALSE,
+                        sigma_floor = .01,
                         prior_lkj = 2,
                         prior_mu_ce_scale = 2,
                         prior_mu_re_scale = 2,
@@ -110,7 +111,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                               E_rc_fixed = E_rc_fixed,
                               sigma_jrc_fixed = sigma_jrc_fixed,
                               lflag_fix_E_rc = fix_E_rc,
-                              lflag_fix_sigma_jrc = fix_sigma_jrc))
+                              lflag_fix_sigma_jrc = fix_sigma_jrc,
+                              sigma_floor = sigma_floor))
   if(standata$lflag_ll_rep %in% c(0, 3)){
     R_ll = standata$R - 1
     C_ll = standata$C - 1

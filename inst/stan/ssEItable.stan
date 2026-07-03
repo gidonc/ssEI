@@ -57,6 +57,7 @@ data{
   int<lower=0, upper=1> lflag_fix_sigma_jrc;   // 1 = use fixed values, 0 = estimate
   matrix[R_ll, C_ll] E_rc_fixed;         // fixed values, ignored if fix_E_rc=0
   matrix<lower=0>[R_ll, C_ll] sigma_jrc_fixed;  // fixed values, ignored if fix_sigma_jrc=0
+  real<lower=0> sigma_floor; //minimum value for all sigma
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
@@ -461,7 +462,7 @@ parameters{
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
 
-  real<lower=0> sigma_jrc_raw[K_sigmas];
+  real sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   // real<lower=0> sigma_jr;
@@ -659,13 +660,17 @@ if(lflag_rawscw == 1){
 if(lflag_fix_sigma_jrc==1){
   sigma_jrc = sigma_jrc_fixed;
 } else if(lflag_vary_sd == 0){
-    sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
+    sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]*prior_sigma_c_scale), R_ll, C_ll);
 } else {
     int s = 0;
     for(r in 1:R_ll){
         for(c in 1:C_ll){
             s += 1;
-            sigma_jrc[r,c] = sigma_jrc_raw[s];
+            if(lflag_vary_sd==1){
+              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*prior_sigma_c_scale);
+            } else if(lflag_vary_sd == 2){
+              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*sigma_c_sigma[1] + sigma_c_mu[1]);
+            }
         }
     }
 }
@@ -737,11 +742,13 @@ if(lflag_fix_sigma_jrc == 1){
 }else if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    for(s in 1:R_ll*C_ll){
-        sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
-    }
+    to_vector(sigma_jrc_raw) ~ std_normal();
+    // for(s in 1:R_ll*C_ll){
+    //     sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
+    // }
 } else {
-    sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
+  to_vector(sigma_jrc_raw) ~ std_normal();
+    // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
 }
 
     hinge_delta_floor ~ normal(0, .001);
