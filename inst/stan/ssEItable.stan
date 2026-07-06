@@ -497,6 +497,37 @@ transformed parameters{
   }
 
 
+if(lflag_fix_sigma_jrc==1){
+  sigma_jrc = sigma_jrc_fixed;
+} else if(lflag_vary_sd == 0){
+    sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]*prior_sigma_c_scale), R_ll, C_ll);
+} else {
+    int s = 0;
+    for(r in 1:R_ll){
+        for(c in 1:C_ll){
+            s += 1;
+            if(lflag_vary_sd==1){
+              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*prior_sigma_c_scale);
+            } else if(lflag_vary_sd == 2){
+              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*sigma_c_sigma[1] + sigma_c_mu[1]);
+            }
+        }
+    }
+}
+
+
+  // First compute sigma_scale per row in transformed parameters
+  // (after sigma_jrc is computed)
+  vector[R_ll] sigma_scale_r;
+  for(r in 1:R_ll){
+      real ss = 0;
+      for(k in 1:C_ll){
+          ss += square(sigma_jrc[r,k]);
+      }
+      sigma_scale_r[r] = sqrt(ss / C_ll);
+  }
+
+
 
 
 if(lflag_rawscw == 1){
@@ -504,7 +535,7 @@ if(lflag_rawscw == 1){
     lambda[j] = rep_array(0, R - 1, C - 1);
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
-        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
+        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
         }
       }
     }
@@ -656,24 +687,6 @@ if(lflag_rawscw == 1){
   }
 
 
-
-if(lflag_fix_sigma_jrc==1){
-  sigma_jrc = sigma_jrc_fixed;
-} else if(lflag_vary_sd == 0){
-    sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]*prior_sigma_c_scale), R_ll, C_ll);
-} else {
-    int s = 0;
-    for(r in 1:R_ll){
-        for(c in 1:C_ll){
-            s += 1;
-            if(lflag_vary_sd==1){
-              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*prior_sigma_c_scale);
-            } else if(lflag_vary_sd == 2){
-              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*sigma_c_sigma[1] + sigma_c_mu[1]);
-            }
-        }
-    }
-}
 for(r in 1:R_ll){
     for(c in 1:C_ll){
         real s = 0;
@@ -735,7 +748,15 @@ model{
 
   for(r in 1:R_ll){
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
-  }
+  }// Add to target in model block:
+for(r in 1:R_ll){
+    int n_free_r = 0;
+    for(j in 1:n_areas){
+        n_free_r += (free_R[j] > r) ? (free_C[j] - 1) : 0;
+    }
+    target += n_free_r * log(sigma_scale_r[r]);
+}
+
 
 if(lflag_fix_sigma_jrc == 1){
 
