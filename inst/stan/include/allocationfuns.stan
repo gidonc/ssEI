@@ -155,6 +155,175 @@ real[,,] ss_assign_lor_wzeros_hinge_newparam_lp(
     return log_cv_out;
 }
 
+real[,,,] ss_assign_ilr_wzeros_return_all_lp(
+    int n_areas, int R, int C,
+    matrix row_margins, matrix col_margins,
+    real[,,] lambda,
+    array[] real lambda_zero,
+    array[,,] int zero_cell_map,
+    array[,,] int structural_zeros,
+    real delta_floor, real delta_min,
+    matrix V_ilr,
+    int adjust_Jacobian) { // ILR Orthonormal Basis Matrix
+
+     // Declare all variables at the top for strict Stan compatibility
+     real ILR_jrc[n_areas, R, C - 1];
+     real ret_array[3, n_areas, R, C];
+     vector[2] lower_pos;
+     vector[2] upper_pos;
+     real lower_bound;
+     real upper_bound;
+     real rt;
+     int free_R;
+     int free_C;
+     real this_inv_logit;
+     real log_det_J;
+
+// 2. Initialize the return array
+for (i in 1:3) {
+  for (j in 1:n_areas) {
+    for (r in 1:R) {
+      for (c in 1:C) {
+        ret_array[i, j, r, c] = 0.0;
+      }
+    }
+  }
+}
+     // Variables used during the ILR transformation phase
+     int fr;
+     int fc;
+     vector[C] log_cell_row;
+     row_vector[C - 1] ilr_row;
+     real active_log_sum;
+
+     lower_pos[1] = 0.0;
+     log_det_J = 0;
+
+     // =========================================================================
+     // 1. SEQUENTIAL SAMPLING ENGINE (Unchanged from your original logic)
+     // =========================================================================
+     for (j in 1:n_areas){
+       row_vector[R] slack_row_raw = rep_row_vector(0, R);
+       row_vector[C] slack_col_raw = rep_row_vector(0, C);
+       free_R = 0;
+       free_C = 0;
+       for (r in 1:R){
+         if(row_margins[j, r] > 0){
+           free_R += 1;
+           slack_row_raw[free_R] = row_margins[j, r];
+         }
+       }
+       for (c in 1:C){
+         if(col_margins[j, c] > 0){
+           free_C += 1;
+           slack_col_raw[free_C] = col_margins[j, c];
+         }
+       }
+       row_vector[free_R] slack_row = slack_row_raw[1:free_R];
+       row_vector[free_C] slack_col = slack_col_raw[1:free_C];
+       rt = sum(slack_row);
+       matrix[free_R, free_C] tmp_cell_value;
+
+       for (r in 1:(free_R - 1)){
+         for (c in 1:(free_C - 1)){
+           lower_pos[2] = slack_row[r] - sum(tail(slack_col, free_C - c));
+           lower_bound = fmax(lower_pos[2], 0);
+           upper_pos[1] = slack_col[c];
+           upper_pos[2] = slack_row[r];
+           upper_bound = fmin(upper_pos[1], upper_pos[2]);
+           int cols_remaining = free_C - c;
+           real neutral_logit = -log(cols_remaining);
+           this_inv_logit = inv_logit(neutral_logit + lambda[j, r, c]);
+           tmp_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
+           slack_col[c] = fmax(slack_col[c] - tmp_cell_value[r, c], 0.0);
+           slack_row[r] = fmax(slack_row[r] - tmp_cell_value[r, c], 0.0);
+           rt = fmax(rt - tmp_cell_value[r, c], 0.0);
+           log_det_J += log(fmax(fmax(upper_bound - lower_bound, 1e-10) * this_inv_logit * (1 - this_inv_logit), 1e-10));
+         }
+         tmp_cell_value[r, free_C] = fmax(slack_row[r], 1e-10);
+         rt = fmax(rt - tmp_cell_value[r, free_C], 0.0);
+         slack_col[free_C] = fmax(slack_col[free_C] - tmp_cell_value[r, free_C], 0.0);
+         slack_row[r] = fmax(slack_row[r] - tmp_cell_value[r, free_C], 0.0);
+       }
+       for (c in 1:(free_C - 1)){
+         tmp_cell_value[free_R, c] = fmax(slack_col[c], 1e-10);
+         rt = fmax(rt - tmp_cell_value[free_R, c], 0.0);
+         slack_col[c] = fmax(slack_col[c] - tmp_cell_value[free_R, c], 0.0);
+         slack_row[free_R] = fmax(slack_row[free_R] - tmp_cell_value[free_R, c], 0.0);
+       }
+       tmp_cell_value[free_R, free_C] = fmax(rt, 1e-10);
+
+       // =========================================================================
+       // 2. REVISED: LATENT ZERO INJECTION & ILR ROTATION
+       // =========================================================================
+       fr = 0;
+       for(r in 1:R){
+         if(row_margins[j, r] > 0){
+           fr += 1;
+           fc = 0;
+           active_log_sum = 0.0;
+
+           // Step A: Build the true log-scale composition vector for active rows
+           for(c in 1:C){
+             if(col_margins[j, c] > 0){
+               fc += 1;
+               log_cell_row[c] = log(fmax(tmp_cell_value[fr, fc], 1e-10));
+               active_log_sum += log_cell_row[c]; // Track only active elements
+               ret_array[3, j, r, c] = tmp_cell_value[fr, fc];
+
+             } else if(structural_zeros[j, r, c] == 0){
+               // Sampling Zero: Inject estimated latent parameter directly
+               log_cell_row[c] = lambda_zero[zero_cell_map[j, r, c]];
+             } else {
+               // Structural Zero
+               log_cell_row[c] = -10.0;
+             }
+           }
+          ret_array[2, j, r, 1:C] = to_array_1d(log_cell_row);
+
+
+           // Step B: Dynamic Jacobian (isolating strictly free cell elements)
+           if(fr < free_R){
+             log_det_J += log(fmax(row_margins[j, r], 1e-10)) - active_log_sum;
+           }
+
+           // Step C: Multiply by the Orthonormal Matrix to map cleanly into ILR Space
+           ilr_row = (to_row_vector(log_cell_row) -log(fmax(row_margins[j, r], 1e-10))) * V_ilr;
+           for(c in 1:(C - 1)){
+             ILR_jrc[j, r, c] = ilr_row[c];
+             ret_array[1, j, r, c] = ilr_row[c];
+           }
+
+
+         } else {
+           // handle zero-margin rows via ILR to maintain geometry
+           real log_implied_total = -200;
+           for(c in 1:C){
+             if(structural_zeros[j, r, c] == 0){
+               log_cell_row[c] = lambda_zero[zero_cell_map[j, r, c]];
+               log_implied_total = log_sum_exp(log_implied_total, log_cell_row[c]);
+             } else {
+               log_cell_row[c] = -10.0;
+             }
+           }
+           ret_array[2, j, r, 1:C] = to_array_1d(log_cell_row);
+           ret_array[3, j, r, 1:C] = rep_array(0, C);
+
+           ilr_row = (to_row_vector(log_cell_row) - log_implied_total) * V_ilr;
+           for(c in 1:(C - 1)){
+             ILR_jrc[j, r, c] = ilr_row[c];
+             ret_array[1, j, r, c] = ilr_row[c];
+           }
+         }
+       }
+     }
+     if(adjust_Jacobian == 1){
+      target += log_det_J; // Ensure Jacobian updates target density internally
+     }
+
+    return ret_array;
+}
+
 real[,,,] ss_assign_ilr_wzeros_hinge_return_all_lp(
     int n_areas, int R, int C,
     matrix row_margins, matrix col_margins,

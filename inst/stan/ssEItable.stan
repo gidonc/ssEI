@@ -49,7 +49,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
-  int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or row, column and table version of sequential cell weights (lamdba coeffients)
+  int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
@@ -98,6 +98,8 @@ transformed data{
   int n_poss_cols=0;
   int n_zero_cells;
   int zero_cell_map[n_areas, R, C];
+  int zero_cell_map_global[1, R, C];
+  int structural_zeros_global[1, R, C];  // an array indicating any structural zeros in the global sums (shouldn't be any)
   int n_free_alr_cells = 0; // free cells in (R-1)*(C-1) submatrix
   int n_ilr_params= 0; // number of semi-free ilr components
   int has_theta;
@@ -115,6 +117,8 @@ transformed data{
   matrix[n_areas, R] rm_log;
   matrix[n_areas, C] cm_prop;
   matrix[n_areas, C] cm_log;
+  matrix[1, R] global_rm;
+  matrix[1, C] global_cm;
   vector[n_areas] tot_log;
   real<lower=0> prior_phi_scale;
   int n_margin_sigmas;
@@ -122,6 +126,9 @@ transformed data{
   int n_table_sigmas;
   int is_ilr = 0;
   real sigma_constrain = .001;
+  int n_free_areas_rc[R - 1, C - 1]; // count of free areas for each (r, c) for decentred lambdas
+  int dev_start_rc[R-1, C-1]; // start for deviation parameters
+  int dev_idx = (R-1)*(C-1); // index for deviation parameters in (r, c) order
 
   prior_phi_scale = 100;
 
@@ -223,6 +230,11 @@ transformed data{
       n_poss_cols += sum(structural_zeros[j, 1:R, c])==R ? 0 :1;
     }
   }
+  for(r in 1:R){
+    for(c in 1:C){
+      structural_zeros_global[1, r, c] = 0;
+    }
+  }
   n_poss_cells = n_areas*R*C - n_structural_zeros;
 
   n_zero_cells = 0;
@@ -238,6 +250,11 @@ for(j in 1:n_areas){
             }
         }
     }
+}
+for(r in 1:R){
+  for(c in 1:C){
+    zero_cell_map_global[1, r, c] = 0;
+  }
 }
 
 for(j in 1:n_areas){
@@ -309,6 +326,8 @@ for(j in 1:n_areas){
       }
     }
 
+
+
     // Store the flat array 1-based start indices for this area
     alpha_start[j] = n_param_alpha + 1;
     beta_start[j] = n_param_beta + 1;
@@ -331,6 +350,29 @@ for(j in 1:n_areas){
       n_param_gamma += (fr - 1) * (fc - 1);
     }
   }
+
+  // Parameter Trackers for decentred sequential cell weights with lambda_mu and then sum to zero lambda deviations from lambda_mu in each (r,c)
+
+  // Count of free areas per (r, c)
+  for(r in 1:(R-1)){
+      for(c in 1:(C-1)){
+          n_free_areas_rc[r,c] = 0;
+          for(j in 1:n_areas){
+              if(param_map[j,r,c] > 0){
+                  n_free_areas_rc[r,c] += 1;
+              }
+          }
+      }
+  }
+  // Assign start indices for lambda deviations
+  // First (R-1)*(C-1) slots = lambda_mu parameters
+  // Remaining slots = deviation parameters in (r,c) order
+    for(r in 1:(R-1)){
+        for(c in 1:(C-1)){
+            dev_start_rc[r,c] = dev_idx + 1;
+            dev_idx += max(0, n_free_areas_rc[r,c] - 1);
+        }
+    }
 
   for (j in 1:n_areas){
     tot_log[j] = log(sum(row_margins[j, 1:R]));
@@ -359,6 +401,9 @@ for(j in 1:n_areas){
     }
 
   }
+  for(r in 1:R) global_rm[1, r] = sum(row_margins[1:n_areas, r]);
+  for(c in 1:C) global_cm[1, c] = sum(col_margins[1:n_areas, c]);
+
 
 if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   print("paramater map mismatch");
@@ -429,10 +474,18 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     K_sigmas = 1;
     K_sigma_c_sigma = 0;
   } else if(lflag_vary_sd == 1){
-    K_sigmas = R_ll*C_ll;
+    if(lflag_rawscw==1){
+      K_sigmas = R_ll*C_ll;
+    } else{
+      K_sigmas = (R - 1)*(C - 1);
+    }
     K_sigma_c_sigma = 0;
   } else if(lflag_vary_sd == 2){
-    K_sigmas = R_ll*C_ll;
+      if(lflag_rawscw==1){
+      K_sigmas = R_ll*C_ll;
+    } else{
+      K_sigmas = (R - 1)*(C - 1);
+    }
     K_sigma_c_sigma = 1;
   }
 
@@ -445,6 +498,7 @@ parameters{
   // real alpha_raw[n_param_alpha]; // Total sum of (free_R[j] - 1) // Row-specific volatility
   // real log_beta_raw[n_param_beta];  // Total sum of (free_C[j] - 2) // Column-specific volatility
   vector[n_param] lambda_raw;
+  // real lambda_mu_rc[lflag_rawscw == 0 ? (R - 1) : 0, C - 1];
   // array[n_areas] vector[R*C - 1] E_jrc_raw;
   // array[n_areas] matrix[R, C - 1] E_jrc_raw;
   // array[n_areas] vector[R - 1] E_jr_raw;
@@ -462,20 +516,20 @@ parameters{
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
 
-  real sigma_jrc_raw[K_sigmas];
+  real<lower=0> sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
-  matrix[lflag_fix_E_rc ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
+  matrix[((lflag_fix_E_rc)||(lflag_rawscw == 0)) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
   // vector[R - 1] E_r_raw;
 
   real lambda_zero[n_zero_cells];
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
-  real<lower=0, upper = .0001> hinge_delta_floor;
-  real<lower=0, upper = .0001> hinge_delta_min;
+  real<lower=0, upper = .00000000001> hinge_delta_floor;
+  real<lower=0, upper = .00000000001> hinge_delta_min;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -488,120 +542,152 @@ transformed parameters{
   matrix[R_ll, C_ll] ilr_var;
   matrix[R_ll, C_ll] ilr_n;
   matrix[R_ll, C_ll] E_rc;
+  real lambda_mu_rc[R - 1, C - 1];
 
+  array[lflag_rawscw == 0 ? n_areas: 0, R - 1, C - 1] real lambda_dev = rep_array(0.0, n_areas, R - 1, C - 1);
+  matrix[lflag_rawscw == 0 ? R_ll: 0, C_ll] E_rc_baseline;
 
-  if(lflag_fix_E_rc==1){
+   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
-  } else {
+  } else if(lflag_rawscw == 1){
       E_rc = E_rc_raw;
-  }
+
+ } else if(lflag_rawscw==0){
+    //E_rc_baseline as the assignment from lambda_mu_rc on global cell counts
+    for(r in 1:(R - 1)){
+      for(c in 1:(C - 1)){
+        lambda_mu_rc[r, c] = lambda_raw[(r-1)*(C-1) + c];
+      }
+    }
+
+    if(is_ilr == 1){
+    // ILR case
+    real LLrep_all_global[3, 1, R, C];
+    real lambda_mu_rc_tmp[1, R - 1, C - 1];
+
+    for(r in 1:R - 1){
+      for(c in 1:C - 1){
+        lambda_mu_rc_tmp[1, r, c] = lambda_mu_rc[r, c];
+      }
+    }
+    LLrep_all_global = ss_assign_ilr_wzeros_return_all_lp(
+      1, R, C, global_rm, global_cm,
+      lambda_mu_rc_tmp, lambda_zero, zero_cell_map_global, structural_zeros_global,
+      hinge_delta_floor, hinge_delta_min, V_ilr, 1);
+
+      for(r in 1:R_ll){
+        for(c in 1:C_ll){
+          E_rc_baseline[r, c] = LLrep_all_global[1, 1, r, c];
+          E_rc[r, c] = E_rc_baseline[r, c];
+        }
+      }
+
+    }
+ }
 
 
 if(lflag_fix_sigma_jrc==1){
   sigma_jrc = sigma_jrc_fixed;
-} else if(lflag_vary_sd == 0){
-    sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]*prior_sigma_c_scale), R_ll, C_ll);
-} else {
-    int s = 0;
-    for(r in 1:R_ll){
-        for(c in 1:C_ll){
-            s += 1;
-            if(lflag_vary_sd==1){
-              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*prior_sigma_c_scale);
-            } else if(lflag_vary_sd == 2){
-              sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*sigma_c_sigma[1] + sigma_c_mu[1]);
-            }
+} else if(lflag_rawscw == 0){
+      matrix[R_ll, C_ll] var_accumulator = rep_matrix(0.0, R_ll, C_ll);
+      real lambda_mu_rc_tmp[1, R - 1, C - 1];
+        for (r in 1:(R - 1)){
+          for(c in 1:(C - 1)){
+            lambda_mu_rc_tmp[1, r, c] = lambda_mu_rc[r, c];
+          }
         }
-    }
-}
+      int s = 0;
+      for(r in 1:(R-1)){
+        for(c in 1:(C-1)){
+          if(lflag_vary_sd==0){
+            s = 1;
+          } else{
+            s += 1;
+          }
+          // Perturb lambda_mu_rc at (r,c) by sigma_jrc_raw[r,c]
+          real lambda_perturbed[1, R-1, C-1] = lambda_mu_rc_tmp;
+          real LLrep_perturbed_global[3, 1, R, C];
+          lambda_perturbed[1, r, c] += sigma_jrc_raw[s];
+          // Forward pass with perturbed lambda
+
+          LLrep_perturbed_global = ss_assign_ilr_wzeros_return_all_lp(
+            1, R, C, global_rm, global_cm,
+            lambda_perturbed, lambda_zero, zero_cell_map_global, structural_zeros_global,
+            hinge_delta_floor, hinge_delta_min, V_ilr, 0);
 
 
-  // First compute sigma_scale per row in transformed parameters
-  // (after sigma_jrc is computed)
-  vector[R_ll] sigma_scale_r;
-  for(r in 1:R_ll){
-      real ss = 0;
-      for(k in 1:C_ll){
-          ss += square(sigma_jrc[r,k]);
+            for(r_ll in 1:R_ll){
+              for(c_ll in 1:C_ll){
+                real delta = LLrep_perturbed_global[1, 1, r_ll, c_ll] - E_rc[r_ll, c_ll];
+                var_accumulator[r_ll, c_ll] += square(delta);
+                }
+              }
+            }
       }
-      sigma_scale_r[r] = sqrt(ss / C_ll);
+      for(r in 1:R_ll){
+        for(c in 1:C_ll){
+          sigma_jrc[r, c] = sqrt(var_accumulator[r, c]);
+        }
+      }
+
+    } else if(lflag_rawscw==1){
+      int s = 0;
+      for(r in 1:R_ll){
+          for(c in 1:C_ll){
+              s += 1;
+              if(lflag_vary_sd == 0){
+                sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]*prior_sigma_c_scale), R_ll, C_ll);
+              } else if(lflag_vary_sd==1){
+                sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*prior_sigma_c_scale);
+              } else if(lflag_vary_sd == 2){
+                sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]*sigma_c_sigma[1] + sigma_c_mu[1]);
+              }
+          }
+      }
   }
-
-
-
 
 if(lflag_rawscw == 1){
     for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
-        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
+        // lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
+        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
         }
       }
     }
    } else {
-   vector[n_areas] mu_scale = lambda_raw[1:n_areas];
-   vector[n_param_gamma] gamma_raw = lambda_raw[(n_areas + 1):(n_areas + n_param_gamma)];
-   vector[n_param_alpha] log_alpha_raw = lambda_raw[(n_areas + n_param_gamma + 1):(n_areas + n_param_gamma + n_param_alpha)];
-   vector[n_param_beta] log_beta_raw = lambda_raw[(n_areas + n_param_gamma + n_param_alpha + 1):(n_areas + n_param_gamma + n_param_alpha + n_param_beta)];
-
-
-   for(j in 1:n_areas){
-     lambda[j] = rep_array(0, R - 1, C - 1);
-
-     int fr = free_R[j] - 1;
-     int fc = free_C[j] - 1;
-
-     if (fr > 0 && fc > 0) {
-       vector[fr] a_scale = rep_vector(1.0, fr);
-       vector[fc] b_scale = rep_vector(1.0, fc);
-       matrix[fr, fc] gamma_mat = rep_matrix(0.0, fr, fc);
-
-       if(fr > 1){
-         vector[fr - 1] raw_a;
-         for (i in 1:(fr - 1)) {
-           raw_a[i] = log_alpha_raw[alpha_start[j] + i - 1];
-        }
-        a_scale = sum_to_zero(raw_a);
-
-       }
-
-      if (fc > 1) {
-        vector[fc - 1] raw_b;
-        for (i in 1:(fc - 1)) {
-          raw_b[i] = log_beta_raw[beta_start[j] + i - 1];
-        }
-        b_scale = sum_to_zero(raw_b);
-      }
-
-      if (fr > 1 && fc > 1) {
-        matrix[fr - 1, fc - 1] raw_gamma;
-        for (r in 1:(fr - 1)) {
-          for (c in 1:(fc - 1)) {
-            raw_gamma[r, c] = gamma_raw[gamma_start[j] + (r - 1) * (fc - 1) + c - 1];
+    // for (j in 1:n_areas){
+    //    lambda[j] = rep_array(0, R - 1, C - 1);
+    // for (r in 1:(free_R[j]-1)){
+    //   for (c in 1:(free_C[j] - 1)){
+    //     // lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
+    //     lambda[j, r, c] = lambda_mu_rc[r, c] + lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_jrc_raw[(r - 1) *(C - 1) + c];
+    //     }
+    //   }
+    // }
+    for(r in 1:(R - 1)){
+      for(c in 1:(C - 1)){
+          int n_dev = n_free_areas_rc[r, c] - 1;
+          vector[n_dev] raw_dev;
+          for(i in 1:n_dev){
+            raw_dev[i] = lambda_raw[dev_start_rc[r, c] + i - 1];
+          }
+          vector[n_free_areas_rc[r, c]] dev = sum_to_zero(raw_dev);
+          int k = 0;
+          for(j in 1:n_areas){
+            if(param_map[j, r, c] > 0){
+              k +=1;
+              lambda[j, r, c] = lambda_mu_rc[r, c] + dev[k]*sigma_jrc_raw[(r - 1)*(C - 1) + c];
+            } else {
+              lambda[j, r, c] = 0;
+            }
           }
         }
-
-        matrix[fr - 1, fc] pass1_gamma;
-        for (r in 1:(fr - 1)) {
-          pass1_gamma[r] = to_row_vector(sum_to_zero(to_vector(raw_gamma[r])));
-        }
-
-        for (c in 1:fc) {
-          gamma_mat[1:fr, c] = sum_to_zero(pass1_gamma[1:(fr - 1), c]);
-        }
       }
-
-      for (r in 1:fr) {
-        for (c in 1:fc) {
-          lambda[j, r, c] = mu_scale[j] + a_scale[r] + b_scale[c] + gamma_mat[r, c];
-        }
-      }
-    }
-   }
-
 
  }
+
 
   // cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
   // ALR_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);
@@ -630,10 +716,10 @@ if(lflag_rawscw == 1){
   if(is_ilr == 1){
     // ILR case
     real LLrep_all[3, n_areas, R, C];
-    LLrep_all = ss_assign_ilr_wzeros_hinge_return_all_lp(
+    LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
       n_areas, R, C, row_margins, col_margins,
       lambda, lambda_zero, zero_cell_map, structural_zeros,
-      hinge_delta_floor, hinge_delta_min, V_ilr);
+      hinge_delta_floor, hinge_delta_min, V_ilr, 1);
 
       for(j in 1:n_areas){
         for(r in 1:R_ll){
@@ -748,13 +834,21 @@ model{
 
   for(r in 1:R_ll){
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
-  }// Add to target in model block:
-for(r in 1:R_ll){
-    int n_free_r = 0;
-    for(j in 1:n_areas){
-        n_free_r += (free_R[j] > r) ? (free_C[j] - 1) : 0;
+  }
+if(lflag_rawscw==0){
+  for(j in 1:n_areas){
+    for(r in 1:(R - 1)){
+      for(c in 1:(C - 1)){
+        if(param_map[j, r, c]>0){
+          if(lflag_vary_sd == 0){
+            target += log(fabs(sigma_jrc_raw[1]));
+          } else{
+            target += log(fabs(sigma_jrc_raw[(r - 1) * (C - 1) + c]));
+          }
+        }
+      }
     }
-    target += n_free_r * log(sigma_scale_r[r]);
+  }
 }
 
 
@@ -763,17 +857,17 @@ if(lflag_fix_sigma_jrc == 1){
 }else if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    to_vector(sigma_jrc_raw) ~ std_normal();
+    to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
     // for(s in 1:R_ll*C_ll){
     //     sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
     // }
 } else {
-  to_vector(sigma_jrc_raw) ~ std_normal();
+    to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
 }
 
-    hinge_delta_floor ~ normal(0, .001);
-    hinge_delta_min ~ normal(0, .001);
+    hinge_delta_floor ~ normal(0, .00000000001);
+    hinge_delta_min ~ normal(0, .000000000001);
     lambda_zero ~ normal(-5.0, 2.0);
     lambda_raw ~ normal(0, 3);
 
