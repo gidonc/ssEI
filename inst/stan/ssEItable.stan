@@ -591,6 +591,7 @@ if(lflag_fix_sigma_jrc==1){
 } else if(lflag_rawscw == 0){
       matrix[R_ll, C_ll] var_accumulator = rep_matrix(0.0, R_ll, C_ll);
       real lambda_mu_rc_tmp[1, R - 1, C - 1];
+      real epsilon = .01; // small pertubation
         for (r in 1:(R - 1)){
           for(c in 1:(C - 1)){
             lambda_mu_rc_tmp[1, r, c] = lambda_mu_rc[r, c];
@@ -607,7 +608,7 @@ if(lflag_fix_sigma_jrc==1){
           // Perturb lambda_mu_rc at (r,c) by sigma_jrc_raw[r,c]
           real lambda_perturbed[1, R-1, C-1] = lambda_mu_rc_tmp;
           real LLrep_perturbed_global[3, 1, R, C];
-          lambda_perturbed[1, r, c] += sigma_jrc_raw[s];
+          lambda_perturbed[1, r, c] += epsilon;
           // Forward pass with perturbed lambda
 
           LLrep_perturbed_global = ss_assign_ilr_wzeros_return_all_lp(
@@ -618,8 +619,10 @@ if(lflag_fix_sigma_jrc==1){
 
             for(r_ll in 1:R_ll){
               for(c_ll in 1:C_ll){
-                real delta = LLrep_perturbed_global[1, 1, r_ll, c_ll] - E_rc[r_ll, c_ll];
-                var_accumulator[r_ll, c_ll] += square(delta);
+                // Cacluate the Jacobian dy/dx
+                real sensitivity = (LLrep_perturbed_global[1, 1, r_ll, c_ll] - E_rc[r_ll, c_ll])/epsilon;
+                // Var(Y) += (dy/dx)^2 * Var(X)
+                var_accumulator[r_ll, c_ll] += square(sensitivity)*square(sigma_jrc_raw[s]);
                 }
               }
             }
