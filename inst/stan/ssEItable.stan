@@ -521,7 +521,7 @@ parameters{
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   real lambda_mu_rc[R - 1, C - 1];
   real lambda_raw_mu;
-  real<lower=0> lambda_raw_sigma;
+  // real<lower=0> lambda_raw_sigma;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
   matrix[((lflag_fix_E_rc)||(lflag_rawscw == 0)) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
@@ -576,7 +576,7 @@ transformed parameters{
     LLrep_all_global = ss_assign_ilr_wzeros_return_all_lp(
       1, R, C, global_rm, global_cm,
       lambda_mu_rc_tmp, lambda_zero, zero_cell_map_global, structural_zeros_global,
-      hinge_delta_floor, hinge_delta_min, V_ilr, 0);
+      hinge_delta_floor, hinge_delta_min, V_ilr, 1);
 
       for(r in 1:R_ll){
         for(c in 1:C_ll){
@@ -881,8 +881,8 @@ if(lflag_fix_sigma_jrc == 1){
     hinge_delta_floor ~ normal(0, .00000000001);
     hinge_delta_min ~ normal(0, .000000000001);
     lambda_zero ~ normal(-5.0, 2.0);
-    lambda_raw ~ normal(lambda_raw_mu, lambda_raw_sigma);
-    lambda_raw_sigma ~ normal(0, prior_sigma_c_scale);
+    lambda_raw ~ normal(lambda_raw_mu, 1);
+    // lambda_raw_sigma ~ normal(0, prior_sigma_c_scale);
     lambda_raw_mu ~ normal(0, prior_sigma_c_mu_scale);
 
 
