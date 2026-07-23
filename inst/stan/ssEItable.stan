@@ -477,14 +477,16 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     if(lflag_rawscw==1){
       K_sigmas = R_ll*C_ll;
     } else{
-      K_sigmas = (R - 1)*(C - 1);
+      K_sigmas = R_ll*C_ll;
+      // K_sigmas = (R - 1)*(C - 1);
     }
     K_sigma_c_sigma = 0;
   } else if(lflag_vary_sd == 2){
       if(lflag_rawscw==1){
       K_sigmas = R_ll*C_ll;
     } else{
-      K_sigmas = (R - 1)*(C - 1);
+      K_sigmas = R_ll*C_ll;
+      // K_sigmas = (R - 1)*(C - 1);
     }
     K_sigma_c_sigma = 1;
   }
@@ -519,20 +521,20 @@ parameters{
   real<lower=0> sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
-  real lambda_mu_rc[R - 1, C - 1];
-  real lambda_raw_mu;
+  // real lambda_mu_rc[R - 1, C - 1];
+  // real lambda_raw_mu;
   // real<lower=0> lambda_raw_sigma;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
-  matrix[((lflag_fix_E_rc)||(lflag_rawscw == 0)) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
+  matrix[lflag_fix_E_rc ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
   // vector[R - 1] E_r_raw;
 
   real lambda_zero[n_zero_cells];
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
-  real<lower=0, upper = .00000000001> hinge_delta_floor;
-  real<lower=0, upper = .00000000001> hinge_delta_min;
+  real<lower=0, upper = .1> hinge_delta_floor;
+  real<lower=0, upper = .1> hinge_delta_min;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
@@ -548,95 +550,64 @@ transformed parameters{
 
 
   array[lflag_rawscw == 0 ? n_areas: 0, R - 1, C - 1] real lambda_dev = rep_array(0.0, n_areas, R - 1, C - 1);
-  matrix[lflag_rawscw == 0 ? R_ll: 0, C_ll] E_rc_baseline;
+  // matrix[lflag_rawscw == 0 ? R_ll: 0, C_ll] E_rc_baseline;
 
-   if(lflag_fix_E_rc==1){
+  if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
-  } else if(lflag_rawscw == 1){
+  } else {
       E_rc = E_rc_raw;
-
- } else if(lflag_rawscw==0){
-    //E_rc_baseline as the assignment from lambda_mu_rc on global cell counts
-    // for(r in 1:(R - 1)){
-    //   for(c in 1:(C - 1)){
-    //     lambda_mu_rc[r, c] = lambda_raw[(r-1)*(C-1) + c];
-    //   }
-    // }
-
-    if(is_ilr == 1){
-    // ILR case
-    real LLrep_all_global[3, 1, R, C];
-    real lambda_mu_rc_tmp[1, R - 1, C - 1];
-
-    for(r in 1:R - 1){
-      for(c in 1:C - 1){
-        lambda_mu_rc_tmp[1, r, c] = lambda_mu_rc[r, c];
-      }
-    }
-    LLrep_all_global = ss_assign_ilr_wzeros_return_all_lp(
-      1, R, C, global_rm, global_cm,
-      lambda_mu_rc_tmp, lambda_zero, zero_cell_map_global, structural_zeros_global,
-      hinge_delta_floor, hinge_delta_min, V_ilr, 1);
-
-      for(r in 1:R_ll){
-        for(c in 1:C_ll){
-          E_rc_baseline[r, c] = LLrep_all_global[1, 1, r, c];
-          E_rc[r, c] = E_rc_baseline[r, c];
-        }
-      }
-
-    }
- }
+  }
 
 
 if(lflag_fix_sigma_jrc==1){
   sigma_jrc = sigma_jrc_fixed;
-} else if(lflag_rawscw == 0){
-      matrix[R_ll, C_ll] var_accumulator = rep_matrix(0.0, R_ll, C_ll);
-      real lambda_mu_rc_tmp[1, R - 1, C - 1];
-      real epsilon = .01; // small pertubation
-        for (r in 1:(R - 1)){
-          for(c in 1:(C - 1)){
-            lambda_mu_rc_tmp[1, r, c] = lambda_mu_rc[r, c];
-          }
-        }
-      int s = 0;
-      for(r in 1:(R-1)){
-        for(c in 1:(C-1)){
-          if(lflag_vary_sd==0){
-            s = 1;
-          } else{
-            s += 1;
-          }
-          // Perturb lambda_mu_rc at (r,c) by sigma_jrc_raw[r,c]
-          real lambda_perturbed[1, R-1, C-1] = lambda_mu_rc_tmp;
-          real LLrep_perturbed_global[3, 1, R, C];
-          lambda_perturbed[1, r, c] += epsilon;
-          // Forward pass with perturbed lambda
+// } else if(lflag_rawscw == 0){
+      // matrix[R_ll, C_ll] var_accumulator = rep_matrix(0.0, R_ll, C_ll);
+      // real lambda_mu_rc_tmp[1, R - 1, C - 1];
+      // real epsilon = .01; // small pertubation
+      //   for (r in 1:(R - 1)){
+      //     for(c in 1:(C - 1)){
+      //       lambda_mu_rc_tmp[1, r, c] = lambda_mu_rc[r, c];
+      //     }
+      //   }
+      // int s = 0;
+      // for(r in 1:(R-1)){
+      //   for(c in 1:(C-1)){
+      //     if(lflag_vary_sd==0){
+      //       s = 1;
+      //     } else{
+      //       s += 1;
+      //     }
+      //     // Perturb lambda_mu_rc at (r,c) by sigma_jrc_raw[r,c]
+      //     real lambda_perturbed[1, R-1, C-1] = lambda_mu_rc_tmp;
+      //     real LLrep_perturbed_global[3, 1, R, C];
+      //     lambda_perturbed[1, r, c] += epsilon;
+      //     // Forward pass with perturbed lambda
+      //
+      //     LLrep_perturbed_global = ss_assign_ilr_wzeros_return_all_lp(
+      //       1, R, C, global_rm, global_cm,
+      //       lambda_perturbed, lambda_zero, zero_cell_map_global, structural_zeros_global,
+      //       hinge_delta_floor, hinge_delta_min, V_ilr, 0);
+      //
+      //
+      //       for(r_ll in 1:R_ll){
+      //         for(c_ll in 1:C_ll){
+      //           // Cacluate the Jacobian dy/dx
+      //           real sensitivity = (LLrep_perturbed_global[1, 1, r_ll, c_ll] - E_rc[r_ll, c_ll])/epsilon;
+      //           // Var(Y) += (dy/dx)^2 * Var(X)
+      //           var_accumulator[r_ll, c_ll] += square(sensitivity)*square(sigma_jrc_raw[s]);
+      //           }
+      //         }
+      //       }
+      // }
+      // for(r in 1:R_ll){
+      //   for(c in 1:C_ll){
+      //     sigma_jrc[r, c] = sqrt(var_accumulator[r, c]);
+      //   }
+      // }
 
-          LLrep_perturbed_global = ss_assign_ilr_wzeros_return_all_lp(
-            1, R, C, global_rm, global_cm,
-            lambda_perturbed, lambda_zero, zero_cell_map_global, structural_zeros_global,
-            hinge_delta_floor, hinge_delta_min, V_ilr, 0);
-
-
-            for(r_ll in 1:R_ll){
-              for(c_ll in 1:C_ll){
-                // Cacluate the Jacobian dy/dx
-                real sensitivity = (LLrep_perturbed_global[1, 1, r_ll, c_ll] - E_rc[r_ll, c_ll])/epsilon;
-                // Var(Y) += (dy/dx)^2 * Var(X)
-                var_accumulator[r_ll, c_ll] += square(sensitivity)*square(sigma_jrc_raw[s]);
-                }
-              }
-            }
-      }
-      for(r in 1:R_ll){
-        for(c in 1:C_ll){
-          sigma_jrc[r, c] = sqrt(var_accumulator[r, c]);
-        }
-      }
-
-    } else if(lflag_rawscw==1){
+    // } else if(lflag_rawscw==1){
+    } else {
       int s = 0;
       for(r in 1:R_ll){
           for(c in 1:C_ll){
@@ -667,8 +638,8 @@ if(lflag_rawscw == 1){
        lambda[j] = rep_array(0, R - 1, C - 1);
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
-        // lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
-        lambda[j, r, c] = lambda_mu_rc[r, c] + lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_jrc_raw[(r - 1) *(C - 1) + c];
+        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
+        // lambda[j, r, c] = lambda_mu_rc[r, c] + lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_jrc_raw[(r - 1) *(C - 1) + c];
         }
       }
     }
@@ -722,10 +693,17 @@ if(lflag_rawscw == 1){
   if(is_ilr == 1){
     // ILR case
     real LLrep_all[3, n_areas, R, C];
-    LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
-      n_areas, R, C, row_margins, col_margins,
-      lambda, lambda_zero, zero_cell_map, structural_zeros,
-      hinge_delta_floor, hinge_delta_min, V_ilr, 1);
+    if(lflag_rawscw == 1){
+      LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
+        n_areas, R, C, row_margins, col_margins,
+        lambda, lambda_zero, zero_cell_map, structural_zeros,
+        hinge_delta_floor, hinge_delta_min, V_ilr, 1);
+    } else if(lflag_rawscw == 0){
+      LLrep_all = ss_assign_ilr_wzeros_raw_return_all_lp(
+        n_areas, R, C, row_margins, col_margins,
+        lambda, E_rc, sigma_jrc, lambda_zero, zero_cell_map, structural_zeros,
+        hinge_delta_floor, hinge_delta_min, V_ilr, 1);
+    }
 
       for(j in 1:n_areas){
         for(r in 1:R_ll){
@@ -843,25 +821,14 @@ model{
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
     }
   } else {
-    for(r in 1:R - 1){
-      to_vector(lambda_mu_rc[r, 1:(C - 1)]) ~ normal(0, prior_mu_re_scale);
+    for(r in 1:R_ll){
+      E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
     }
+    // for(r in 1:R - 1){
+    //   to_vector(lambda_mu_rc[r, 1:(C - 1)]) ~ normal(0, prior_mu_re_scale);
+    // }
   }
-if(lflag_rawscw==0){
-  for(j in 1:n_areas){
-    for(r in 1:(R - 1)){
-      for(c in 1:(C - 1)){
-        if(param_map[j, r, c]>0){
-          if(lflag_vary_sd == 0){
-            target += log(fabs(sigma_jrc_raw[1]));
-          } else{
-            target += log(fabs(sigma_jrc_raw[(r - 1) * (C - 1) + c]));
-          }
-        }
-      }
-    }
-  }
-}
+
 
 
 if(lflag_fix_sigma_jrc == 1){
@@ -869,21 +836,22 @@ if(lflag_fix_sigma_jrc == 1){
 }else if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
-    // for(s in 1:R_ll*C_ll){
-    //     sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
-    // }
+    // to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
+    for(s in 1:R_ll*C_ll){
+        sigma_jrc_raw[s] ~ lognormal(sigma_c_mu[1], sigma_c_sigma[1]);
+    }
 } else {
     to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
 }
 
-    hinge_delta_floor ~ normal(0, .00000000001);
-    hinge_delta_min ~ normal(0, .000000000001);
+    hinge_delta_floor ~ normal(0, .1);
+    hinge_delta_min ~ normal(0, .1);
     lambda_zero ~ normal(-5.0, 2.0);
-    lambda_raw ~ normal(lambda_raw_mu, 1);
+    lambda_raw ~ normal(0, prior_lambda_raw_scale);
+    // lambda_raw ~ normal(lambda_raw_mu, 1);
     // lambda_raw_sigma ~ normal(0, prior_sigma_c_scale);
-    lambda_raw_mu ~ normal(0, prior_sigma_c_mu_scale);
+    // lambda_raw_mu ~ normal(0, prior_sigma_c_mu_scale);
 
 
 
