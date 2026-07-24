@@ -159,8 +159,8 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
     int n_areas, int R, int C,
     matrix row_margins, matrix col_margins,
     real[,,] lambda_raw,
-    matrix E_rc,
-    matrix sigma_jrc,
+    matrix lambda_mu,
+    matrix sigma_scale,
     array[] real lambda_zero,
     array[,,] int zero_cell_map,
     array[,,] int structural_zeros,
@@ -179,11 +179,6 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
      int free_R;
      int free_C;
      real this_inv_logit;
-     matrix[R - 1, C] prop_from_E_rc;
-    // vector[R - 1] rms_sigma;
-     real lambda_mu_jrc;
-     real sigma_scale_jrc;
-     real E_rc_implied_cell;
      real log_det_J;
 
      // Variables used during the ILR transformation phase
@@ -206,12 +201,6 @@ for (i in 1:3) {
     }
   }
 }
-
-
-     for(r in 1:(R - 1)){
-       row_vector[C] log_prop =  E_rc[r, 1:cols(E_rc)]*V_ilr';
-       prop_from_E_rc[r,1:C] = to_row_vector(softmax(to_vector(log_prop)));
-     }
 
 
      // =========================================================================
@@ -249,42 +238,7 @@ for (i in 1:3) {
            int cols_remaining = free_C - c;
            real neutral_logit = -log(cols_remaining);
            real bound_width = upper_bound - lower_bound;
-          //E_rc_implied_cell = prop_from_E_rc[r, c]*row_margins[j, r];
-          // Renormalised E_rc_implied_cell using remaining row slack
-          real prop_remaining_sum = sum(prop_from_E_rc[r, c:C]);
-          real prop_renorm = prop_from_E_rc[r, c] / fmax(prop_remaining_sum, 1e-10);
-          E_rc_implied_cell = prop_renorm * slack_row[r];
-
-          real E_rc_safe = fmax(lower_bound + (bound_width) * inv_logit(delta_floor),
-                                 fmin(upper_bound - (bound_width) * inv_logit(delta_floor),
-                                      E_rc_implied_cell));
-           real p_mu_raw = (E_rc_safe - lower_bound)/fmax(bound_width, 1e-6);
-           real p_mu = fmax(1e-6, fmin(1.0 - 1e6, p_mu_raw));
-           lambda_mu_jrc = logit(p_mu);
-           real cell_value_mu = lower_bound + p_mu * bound_width;
-           real J_jrc = fmax(bound_width, 1e-6) * p_mu * (1 - p_mu);
-           real ss = 0;
-           for (k in 1:cols(sigma_jrc)){
-             ss += square(V_ilr[c, k])*square(sigma_jrc[r, k]);
-           }
-           real target_sigma = sqrt(ss/cols(sigma_jrc));
-
-           real remaining_slack = rt - cell_value_mu;
-           real induced_sens_sq = 0;
-           for(k in 1:cols(sigma_jrc)){
-             real sens_k = V_ilr[c, k] / fmax(cell_value_mu, 1e-10) - V_ilr[C, k] / fmax(remaining_slack, 1e-10);
-             induced_sens_sq += square(sens_k);
-      }
-      real exact_log_ratio_sensitivity = sqrt(induced_sens_sq);
-
-      // sigma_scale_jrc = target_sigma /fmax(J_jrc * exact_log_ratio_sensitivity, 1e-10);
-      sigma_scale_jrc = log(1 + target_sigma) /fmax(J_jrc * exact_log_ratio_sensitivity, 1e-10);
-
-
-
-
-           //sigma_scale_jrc = cell_value_mu * rms_sigma[r]/fmax(J_jrc, 1e-6);
-           real lambda_jrc = lambda_mu_jrc + lambda_raw[j, r, c] * sigma_scale_jrc;
+           real lambda_jrc = lambda_mu[r,c] + lambda_raw[j, r, c] * sigma_scale[r, c];
            // print("E_rc_implied_cell");
            // print(E_rc_implied_cell);
            // print("E_rc_safe");
@@ -311,8 +265,7 @@ for (i in 1:3) {
            slack_col[c] = fmax(slack_col[c] - tmp_cell_value[r, c], 0.0);
            slack_row[r] = fmax(slack_row[r] - tmp_cell_value[r, c], 0.0);
            rt = fmax(rt - tmp_cell_value[r, c], 0.0);
-           log_det_J += log(log(1 + sigma_jrc[r, c])) - log(J_jrc * exact_log_ratio_sensitivity);
-           // log_det_J += .5 * log(fmax(sigma_scale_jrc, 1e-10)); // for transform from lambda_raw to lambda
+           log_det_J += log(sigma_scale[r,c]); // for transform from lambda_raw to lambda
            log_det_J += log(fmax(fmax(upper_bound - lower_bound, 1e-10) * this_inv_logit * (1 - this_inv_logit), 1e-10)); // for rest of transformation
          }
          tmp_cell_value[r, free_C] = fmax(slack_row[r], 1e-10);
