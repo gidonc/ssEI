@@ -159,8 +159,8 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
     int n_areas, int R, int C,
     matrix row_margins, matrix col_margins,
     real[,,] lambda_raw,
-    matrix lambda_mu,
-    matrix sigma_scale,
+    matrix lambda_mu_rc,
+    matrix sigma_jrc,
     array[] real lambda_zero,
     array[,,] int zero_cell_map,
     array[,,] int structural_zeros,
@@ -176,6 +176,7 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
      real lower_bound;
      real upper_bound;
      real rt;
+     real mu_rt;
      int free_R;
      int free_C;
      real this_inv_logit;
@@ -223,11 +224,78 @@ for (i in 1:3) {
            slack_col_raw[free_C] = col_margins[j, c];
          }
        }
+       array[free_R] int active_row_map;
+       array[free_C] int active_col_map;
+       int temp_fr = 0;
+       for (r in 1:R){
+         if(row_margins[j, r] > 0){
+           temp_fr += 1;
+           active_row_map[temp_fr] = r;
+         }
+       }
+
+       int temp_fc = 0;
+       for (c in 1:C){
+         if(col_margins[j, c] > 0){
+           temp_fc += 1;
+           active_col_map[temp_fc] = c;
+         }
+       }
+
        row_vector[free_R] slack_row = slack_row_raw[1:free_R];
        row_vector[free_C] slack_col = slack_col_raw[1:free_C];
+       row_vector[free_R] mu_slack_row = slack_row_raw[1:free_R];
+       row_vector[free_C] mu_slack_col = slack_col_raw[1:free_C];
        rt = sum(slack_row);
+       mu_rt = sum(mu_slack_row);
        matrix[free_R, free_C] tmp_cell_value;
+       matrix[free_R, free_C] tmp_J_mu;
+       matrix[free_R, free_C] sigma_scale;
+       matrix[R, C] local_mu_cell_value;
 
+       // first push through allocation at lambda_mu for local Jacobian/sensitivity
+       for(r in 1:(free_R - 1)){
+         for(c in 1:(free_C - 1)){
+           lower_pos[2] = slack_row[r] - sum(tail(slack_col, free_C - c));
+           lower_bound = fmax(lower_pos[2], 0);
+           upper_pos[1] = slack_col[c];
+           upper_pos[2] = slack_row[r];
+           upper_bound = fmin(upper_pos[1], upper_pos[2]);
+           int cols_remaining = free_C - c;
+           real neutral_logit = -log(cols_remaining);
+           real bound_width = upper_bound - lower_bound;
+           this_inv_logit = inv_logit(neutral_logit + lambda_mu_rc[active_row_map[r], active_col_map[c]]);
+           local_mu_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
+           tmp_J_mu[r,c] = (upper_bound - lower_bound)*this_inv_logit*(1 - this_inv_logit);
+           mu_slack_col[c] = fmax(mu_slack_col[c] - local_mu_cell_value[r, c], 0.0);
+           mu_slack_row[r] = fmax(mu_slack_row[r] - local_mu_cell_value[r, c], 0.0);
+           mu_rt = fmax(mu_rt - local_mu_cell_value[r, c], 0.0);
+         }
+         local_mu_cell_value[r, free_C] = fmax(mu_slack_row[r], 1e-10);
+         mu_rt = fmax(mu_rt - local_mu_cell_value[r, free_C], 0.0);
+         mu_slack_col[free_C] = fmax(mu_slack_col[free_C] - local_mu_cell_value[r, free_C], 0.0);
+         mu_slack_row[r] = fmax(mu_slack_row[r] - local_mu_cell_value[r, free_C], 0.0);
+         for (c in 1:(free_C - 1)){
+           local_mu_cell_value[free_R, c] = fmax(slack_col[c], 1e-10);
+           mu_rt = fmax(mu_rt - local_mu_cell_value[free_R, c], 0.0);
+           mu_slack_col[c] = fmax(mu_slack_col[c] - local_mu_cell_value[free_R, c], 0.0);
+           mu_slack_row[free_R] = fmax(mu_slack_row[free_R] - local_mu_cell_value[free_R, c], 0.0);
+        }
+       local_mu_cell_value[free_R, free_C] = fmax(mu_rt, 1e-10);
+       }
+       for(r in 1:(free_R - 1)){
+         for(c in 1:(free_C - 1)){
+           real sens_sq = 0;
+           for(k in 1:(C - 1)){
+             real sens_k = V_ilr[c,k]/fmax(local_mu_cell_value[r, c], 1e-10) - V_ilr[free_C,k]/fmax(local_mu_cell_value[r, free_C], 1e-10);
+             sens_sq += square(sens_k) * square(sigma_jrc[active_row_map[r],k]);
+           }
+           real target_sigma = sqrt(sens_sq);
+           sigma_scale[r, c] = target_sigma/fmax(tmp_J_mu[r, c], 1e-10);
+         }
+       }
+
+       // second push through allocation at lambda using sensitivity to make actual allocations
        for (r in 1:(free_R - 1)){
          for (c in 1:(free_C - 1)){
            lower_pos[2] = slack_row[r] - sum(tail(slack_col, free_C - c));
@@ -238,26 +306,7 @@ for (i in 1:3) {
            int cols_remaining = free_C - c;
            real neutral_logit = -log(cols_remaining);
            real bound_width = upper_bound - lower_bound;
-           real lambda_jrc = lambda_mu[r,c] + lambda_raw[j, r, c] * sigma_scale[r, c];
-           // print("E_rc_implied_cell");
-           // print(E_rc_implied_cell);
-           // print("E_rc_safe");
-           // print(E_rc_safe);
-           // print("lower bound");
-           // print(lower_bound);
-           // print("upper bound");
-           // print(upper_bound);
-           // print("bound_width");
-           // print(bound_width);
-           // print("p_mu");
-           // print(p_mu);
-           // print("J_jrc");
-           // print(J_jrc);
-           // print("sigma_scale");
-           // print(sigma_scale_jrc);
-           // print("lambda_jrc");
-           // print(lambda_jrc);
-           // this_inv_logit = inv_logit(neutral_logit + lambda[j, r, c]);
+           real lambda_jrc = neutral_logit + lambda_mu_rc[active_row_map[r],active_col_map[c]] + lambda_raw[j, r, c] * sigma_scale[r, c];
            this_inv_logit = inv_logit(lambda_jrc);
            tmp_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
            // print("tmp cell value");
