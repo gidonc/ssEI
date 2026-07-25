@@ -360,9 +360,9 @@ for (i in 1:3) {
 
 
            // Step B: Dynamic Jacobian (isolating strictly free cell elements)
-           //if(fr < free_R){
-            // log_det_J += log(fmax(row_margins[j, r], 1e-10)) - active_log_sum;
-           //}
+           if(fr < free_R){
+             log_det_J += log(fmax(row_margins[j, r], 1e-10)) - active_log_sum;
+           }
 
            // Step C: Multiply by the Orthonormal Matrix to map cleanly into ILR Space
            ilr_row = (to_row_vector(log_cell_row) -log(fmax(row_margins[j, r], 1e-10))) * V_ilr;
