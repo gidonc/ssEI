@@ -129,7 +129,8 @@ transformed data{
   int n_free_areas_rc[R - 1, C - 1]; // count of free areas for each (r, c) for decentred lambdas
   int dev_start_rc[R-1, C-1]; // start for deviation parameters
   int dev_idx = (R-1)*(C-1); // index for deviation parameters in (r, c) order
-
+  real hinge_delta_floor = .01;
+  real hinge_delta_min = .01;
   prior_phi_scale = 100;
 
   if(lflag_ll_rep == 0 || lflag_ll_rep == 3){
@@ -527,20 +528,20 @@ parameters{
   // real<lower=0> lambda_raw_sigma;
   // real<lower=0> sigma_jr;
   //real<lower=0> sigma_j;
-  matrix[(lflag_fix_E_rc||lflag_rawscw == 0) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
+  matrix[(lflag_fix_E_rc) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
   // vector[R - 1] E_r_raw;
 
   real lambda_zero[n_zero_cells];
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
-  real<lower=0, upper = .1> hinge_delta_floor;
-  real<lower=0, upper = .1> hinge_delta_min;
+  // real<lower=0, upper = .1> hinge_delta_floor;
+  // real<lower=0, upper = .1> hinge_delta_min;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real LLrep_jrc[n_areas, R_ll, C_ll];
-
+  real lambda_mu_LLrep[lflag_rawscw==0 ? R_ll : 0, C_ll];
   real<lower=0> cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
   matrix<lower=0>[R_ll, C_ll] sigma_jrc;
@@ -556,7 +557,7 @@ transformed parameters{
 
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
-  } else if(lflag_rawscw == 1) {
+  } else {
       E_rc = E_rc_raw;
   }
 
@@ -637,10 +638,18 @@ if(lflag_rawscw == 1){
         lambda, lambda_zero, zero_cell_map, structural_zeros,
         hinge_delta_floor, hinge_delta_min, V_ilr, 1);
     } else if(lflag_rawscw == 0){
-      LLrep_all = ss_assign_ilr_wzeros_raw_return_all_lp(
+      real LLrep_all_tmp[6, n_areas, R, C];
+      LLrep_all_tmp = ss_assign_ilr_wzeros_raw_return_all_lp(
         n_areas, R, C, row_margins, col_margins,
         lambda, lambda_mu_rc, sigma_jrc, lambda_zero, zero_cell_map, structural_zeros,
         hinge_delta_floor, hinge_delta_min, V_ilr, 1);
+      LLrep_all = LLrep_all_tmp[1:3, 1:n_areas, 1:R, 1:C];
+      for(r in 1:R_ll){
+        for(c in 1:C_ll){
+          lambda_mu_LLrep[r, c] = mean(LLrep_all_tmp[6, 1:n_areas, r, c]);
+        }
+      }
+
 
     }
 
@@ -712,10 +721,10 @@ for(r in 1:R_ll){
         ilr_n[r,c]    = n;
         ilr_mean[r,c] = (n > 0) ? s / n : 0;
         ilr_var[r,c]  = (n > 1) ? s2/n - square(ilr_mean[r,c]) : 0;
-        if(lflag_rawscw == 0){
-          E_rc[r, c] = ilr_mean[r, c];
+        // if(lflag_rawscw == 0){
+          // E_rc[r, c] = ilr_mean[r, c];
           // sigma_jrc[r, c] = sqrt(ilr_var[r, c] *n /fmax(n - 1, 1));
-        }
+        // }
 
     }
 }
@@ -784,10 +793,17 @@ if(lflag_predictors_cm){
           real n  = ilr_n[r,c];
           real mu = ilr_mean[r,c];
           real v  = ilr_var[r,c];
+          if(lflag_rawscw == 1){
           // Sufficient statistic normal log likelihood
           target += -n * log(sigma_jrc[r,c])
                     - n * v / (2 * square(sigma_jrc[r,c]))
                     - n * square(mu - E_rc[r,c]) / (2 * square(sigma_jrc[r,c]));
+          } else if(lflag_rawscw==0){
+            real sigma_sq = square(sigma_jrc[r, c]);
+            // first term from desired prior normal
+            // second term from induced prior normal (lambda_mu_LLrep)
+            target += -n * log(sigma_jrc[r, c]) + (-1 * n/(2*sigma_sq)) * (square(mu - E_rc[r, c]) - square(mu - lambda_mu_LLrep[r, c]));
+          }
 
           }
         }
@@ -798,9 +814,9 @@ if(lflag_predictors_cm){
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
     }
   } else {
-    // for(r in 1:R_ll){
-    //   // E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
-    // }
+    for(r in 1:R_ll){
+      E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
+    }
     // target += det_J_raw; // transformation from lambda_raw*sigma_scale to lambda
     for(r in 1:R - 1){
       to_vector(lambda_mu_rc[r, 1:C - 1]) ~ normal(0, prior_mu_re_scale);
@@ -827,8 +843,8 @@ if(lflag_fix_sigma_jrc == 1){
     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
 }
 
-    hinge_delta_floor ~ normal(0, .1);
-    hinge_delta_min ~ normal(0, .1);
+    // hinge_delta_floor ~ normal(0, .1);
+    // hinge_delta_min ~ normal(0, .1);
     lambda_zero ~ normal(-5.0, 2.0);
     lambda_raw ~ normal(0, prior_lambda_raw_scale);
     // lambda_raw ~ normal(lambda_raw_mu, 1);

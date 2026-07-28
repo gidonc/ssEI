@@ -170,7 +170,7 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
 
      // Declare all variables at the top for strict Stan compatibility
      real ILR_jrc[n_areas, R, C - 1];
-     real ret_array[3, n_areas, R, C];
+     real ret_array[6, n_areas, R, C];
      vector[2] lower_pos;
      vector[2] upper_pos;
      real lower_bound;
@@ -193,7 +193,7 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
      log_det_J = 0;
 
      // 2. Initialize the return array
-for (i in 1:3) {
+for (i in 1:6) {
   for (j in 1:n_areas) {
     for (r in 1:R) {
       for (c in 1:C) {
@@ -256,10 +256,10 @@ for (i in 1:3) {
        // first push through allocation at lambda_mu for local Jacobian/sensitivity
        for(r in 1:(free_R - 1)){
          for(c in 1:(free_C - 1)){
-           lower_pos[2] = slack_row[r] - sum(tail(slack_col, free_C - c));
+           lower_pos[2] = mu_slack_row[r] - sum(tail(mu_slack_col, free_C - c));
            lower_bound = fmax(lower_pos[2], 0);
-           upper_pos[1] = slack_col[c];
-           upper_pos[2] = slack_row[r];
+           upper_pos[1] = mu_slack_col[c];
+           upper_pos[2] = mu_slack_row[r];
            upper_bound = fmin(upper_pos[1], upper_pos[2]);
            int cols_remaining = free_C - c;
            real neutral_logit = -log(cols_remaining);
@@ -275,25 +275,83 @@ for (i in 1:3) {
          mu_rt = fmax(mu_rt - local_mu_cell_value[r, free_C], 0.0);
          mu_slack_col[free_C] = fmax(mu_slack_col[free_C] - local_mu_cell_value[r, free_C], 0.0);
          mu_slack_row[r] = fmax(mu_slack_row[r] - local_mu_cell_value[r, free_C], 0.0);
-         for (c in 1:(free_C - 1)){
-           local_mu_cell_value[free_R, c] = fmax(slack_col[c], 1e-10);
+       }
+       for (c in 1:(free_C - 1)){
+           local_mu_cell_value[free_R, c] = fmax(mu_slack_col[c], 1e-10);
            mu_rt = fmax(mu_rt - local_mu_cell_value[free_R, c], 0.0);
            mu_slack_col[c] = fmax(mu_slack_col[c] - local_mu_cell_value[free_R, c], 0.0);
            mu_slack_row[free_R] = fmax(mu_slack_row[free_R] - local_mu_cell_value[free_R, c], 0.0);
         }
        local_mu_cell_value[free_R, free_C] = fmax(mu_rt, 1e-10);
-       }
+
+
+       fr = 0;
+       for(r in 1:R){
+         if(row_margins[j, r] > 0){
+           fr += 1;
+           fc = 0;
+           active_log_sum = 0.0;
+
+           // Step A: Build the true log-scale composition vector for active rows
+           for(c in 1:C){
+             if(col_margins[j, c] > 0){
+               fc += 1;
+               log_cell_row[c] = log(fmax(local_mu_cell_value[fr, fc], 1e-10));
+               active_log_sum += log_cell_row[c]; // Track only active elements
+               ret_array[4, j, r, c] = local_mu_cell_value[fr, fc];
+
+             } else if(structural_zeros[j, r, c] == 0){
+               // Sampling Zero: Inject estimated latent parameter directly
+               log_cell_row[c] = lambda_zero[zero_cell_map[j, r, c]];
+             } else {
+               // Structural Zero
+               log_cell_row[c] = -10.0;
+             }
+           }
+          ret_array[5, j, r, 1:C] = to_array_1d(log_cell_row);
+           // Multiply by the Orthonormal Matrix to map cleanly into ILR Space
+           ilr_row = (to_row_vector(log_cell_row) -log(fmax(row_margins[j, r], 1e-10))) * V_ilr;
+           for(c in 1:(C - 1)){
+             ret_array[6, j, r, c] = ilr_row[c];
+           }
+         } else {
+            // Handle zero-margin rows for layer 6 so the mean isn't corrupted by 0.0s
+            real log_implied_total = -200;
+            for(c in 1:C){
+              if(structural_zeros[j, r, c] == 0){
+                log_cell_row[c] = lambda_zero[zero_cell_map[j, r, c]];
+                log_implied_total = log_sum_exp(log_implied_total, log_cell_row[c]);
+              } else {
+                log_cell_row[c] = -10.0;
+              }
+            }
+            ret_array[5, j, r, 1:C] = to_array_1d(log_cell_row);
+
+            ilr_row = (to_row_vector(log_cell_row) - log_implied_total) * V_ilr;
+            for(c in 1:(C - 1)){
+              ret_array[6, j, r, c] = ilr_row[c];
+            }
+          }
+        }
+
+
+
+
+
        for(r in 1:(free_R - 1)){
          for(c in 1:(free_C - 1)){
            real sens_sq = 0;
            for(k in 1:(C - 1)){
-             real sens_k = V_ilr[c,k]/fmax(local_mu_cell_value[r, c], 1e-10) - V_ilr[free_C,k]/fmax(local_mu_cell_value[r, free_C], 1e-10);
+             real sens_k = V_ilr[active_col_map[c], k] / fmax(local_mu_cell_value[r, c], 1e-10) - V_ilr[active_col_map[free_C], k] / fmax(local_mu_cell_value[r, free_C], 1e-10);
+             //real sens_k = V_ilr[c,k]/fmax(local_mu_cell_value[r, c], 1e-10) - V_ilr[free_C,k]/fmax(local_mu_cell_value[r, free_C], 1e-10);
              sens_sq += square(sens_k) * square(sigma_jrc[active_row_map[r],k]);
            }
            real target_sigma = sqrt(sens_sq);
            sigma_scale[r, c] = target_sigma/fmax(tmp_J_mu[r, c], 1e-10);
          }
        }
+
+
 
        // second push through allocation at lambda using sensitivity to make actual allocations
        for (r in 1:(free_R - 1)){
