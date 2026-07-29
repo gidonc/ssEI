@@ -170,7 +170,7 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
 
      // Declare all variables at the top for strict Stan compatibility
      real ILR_jrc[n_areas, R, C - 1];
-     real ret_array[6, n_areas, R, C];
+     real ret_array[7, n_areas, R, C];
      vector[2] lower_pos;
      vector[2] upper_pos;
      real lower_bound;
@@ -181,6 +181,9 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
      int free_C;
      real this_inv_logit;
      real log_det_J;
+     real delta_mean[R, C - 1];
+     matrix[R, C - 1] E_mu;
+     matrix[R, C - 1] E_hat;
 
      // Variables used during the ILR transformation phase
      int fr;
@@ -452,6 +455,39 @@ for (i in 1:6) {
          }
        }
      }
+    for (j in 1:n_areas){
+       for(r in 1:R){
+         for(c in 1:(C - 1)){
+           // delta[j,r,c]
+           ret_array[7, j, r, c] = ret_array[1, j, r, c] - ret_array[6, j, r, c];
+         }
+       }
+     }
+
+     for (r in 1:R){
+       for (c in 1:(C - 1)){
+         E_mu[r, c] = mean(ret_array[6, 1:n_areas, r, c]);
+         E_hat[r, c] = mean(ret_array[1, 1:n_areas, r, c]);
+         delta_mean[r, c] = mean(ret_array[7, 1:n_areas, r, c]);
+       }
+     }
+     for (j in 1:n_areas){
+       for(r in 1:R){
+         for(c in 1:(C - 1)){
+           // convert delta to dev[j,r,c] (delta - mu_delta)
+           ret_array[7, j, r, c] -= delta_mean[r, c];
+         }
+       }
+     }
+
+  for (r in 1:R){
+    for (c in 1:(C-1)){
+      if (fabs(E_hat[r,c] - (E_mu[r,c] + delta_mean[r,c])) > 1e-8)
+      print("E decomposition failed:", fabs(E_hat[r,c] - (E_mu[r,c] + delta_mean[r,c])));
+  }
+}
+
+
      if(adjust_Jacobian == 1){
       target += log_det_J; // Ensure Jacobian updates target density internally
      }

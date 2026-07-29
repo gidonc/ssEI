@@ -548,6 +548,10 @@ transformed parameters{
   matrix[R_ll, C_ll] ilr_mean;
   matrix[R_ll, C_ll] ilr_var;
   matrix[R_ll, C_ll] ilr_n;
+  real dev[lflag_rawscw == 0 ? n_areas:0, R_ll, C_ll];
+  matrix[lflag_rawscw == 0 ? R_ll:0, C_ll] dev_n;
+  matrix[lflag_rawscw == 0 ? R_ll:0, C_ll] dev_ss;
+  matrix[lflag_rawscw == 0 ? R_ll:0, C_ll] dev_var;
   matrix[R_ll, C_ll] E_rc;
   real det_J_raw = 0;
 
@@ -638,15 +642,17 @@ if(lflag_rawscw == 1){
         lambda, lambda_zero, zero_cell_map, structural_zeros,
         hinge_delta_floor, hinge_delta_min, V_ilr, 1);
     } else if(lflag_rawscw == 0){
-      real LLrep_all_tmp[6, n_areas, R, C];
+      real LLrep_all_tmp[7, n_areas, R, C];
       LLrep_all_tmp = ss_assign_ilr_wzeros_raw_return_all_lp(
         n_areas, R, C, row_margins, col_margins,
         lambda, lambda_mu_rc, sigma_jrc, lambda_zero, zero_cell_map, structural_zeros,
         hinge_delta_floor, hinge_delta_min, V_ilr, 1);
       LLrep_all = LLrep_all_tmp[1:3, 1:n_areas, 1:R, 1:C];
+      dev = LLrep_all_tmp[7, 1:n_areas, 1:R_ll, 1:C_ll];
       for(r in 1:R_ll){
         for(c in 1:C_ll){
           lambda_mu_LLrep[r, c] = mean(LLrep_all_tmp[6, 1:n_areas, r, c]);
+
         }
       }
 
@@ -704,8 +710,8 @@ if(lflag_rawscw == 1){
 
   }
 
-
-for(r in 1:R_ll){
+if(lflag_rawscw == 1){
+  for(r in 1:R_ll){
     for(c in 1:C_ll){
         real s = 0;
         real s2 = 0;
@@ -727,6 +733,32 @@ for(r in 1:R_ll){
         // }
 
     }
+  }
+}
+if(lflag_rawscw == 0){
+  for(r in 1:R_ll){
+    for(c in 1:C_ll){
+        real s = 0;
+        real s2 = 0;
+        real n = 0;
+        for(j in 1:n_areas){
+            if(row_margins[j,r] > 0 && structural_zeros[j,r,c] == 0){
+                real ilr_val = LLrep_jrc[j,r,c];
+                s  += dev[j, r, c];
+                s2 += square(dev[j, r, c]);
+                n  += 1;
+            }
+        }
+        dev_n[r,c]    = n;
+        dev_ss[r,c] = (n > 0) ? s2 : 0;
+        dev_var[r,c]  = (n > 1) ? s2/n : 0;
+        // if(lflag_rawscw == 0){
+          // E_rc[r, c] = ilr_mean[r, c];
+          // sigma_jrc[r, c] = sqrt(ilr_var[r, c] *n /fmax(n - 1, 1));
+        // }
+
+    }
+  }
 }
 
 
@@ -787,7 +819,8 @@ if(lflag_predictors_cm){
 //         }
 //     }
 //     llr_vec ~ normal(e_rc_vec, sigma_vec);
-    for(r in 1:R_ll){
+if(lflag_rawscw == 1){
+  for(r in 1:R_ll){
       for(c in 1:C_ll){
         if(ilr_n[r,c] > 1){
           real n  = ilr_n[r,c];
@@ -808,6 +841,19 @@ if(lflag_predictors_cm){
           }
         }
     }
+}
+if(lflag_rawscw == 0){
+  for(r in 1:R_ll){
+    for(c in 1:C_ll){
+      real n = dev_n[r,c];
+      real v = dev_var[r, c];
+      if(dev_n[r, c] > 1){
+        target += -(n - 1) * log(sigma_jrc[r, c])
+                  -(n - 1) * dev_ss[r, c]/(2*square(sigma_jrc[r, c]));
+      }
+    }
+  }
+}
 
   if(lflag_rawscw==1){
     for(r in 1:R_ll){
