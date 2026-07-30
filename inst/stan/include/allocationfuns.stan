@@ -170,7 +170,7 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
 
      // Declare all variables at the top for strict Stan compatibility
      real ILR_jrc[n_areas, R, C - 1];
-     real ret_array[7, n_areas, R, C];
+     real ret_array[8, n_areas, R, C];
      vector[2] lower_pos;
      vector[2] upper_pos;
      real lower_bound;
@@ -196,7 +196,7 @@ real[,,,] ss_assign_ilr_wzeros_raw_return_all_lp(
      log_det_J = 0;
 
      // 2. Initialize the return array
-for (i in 1:6) {
+for (i in 1:8) {
   for (j in 1:n_areas) {
     for (r in 1:R) {
       for (c in 1:C) {
@@ -350,7 +350,15 @@ for (i in 1:6) {
              sens_sq += square(sens_k) * square(sigma_jrc[active_row_map[r],k]);
            }
            real target_sigma = sqrt(sens_sq);
-           sigma_scale[r, c] = target_sigma/fmax(tmp_J_mu[r, c], 1e-10);
+           real log_ss_raw = log(target_sigma) - log(fmax(tmp_J_mu[r,c], 1e-10));
+           real lo = log(0.006);
+           real hi = log(5.0);
+           real width = hi - lo;
+           real center = (hi + lo)/2;
+           real log_ss = center + (width/2) * tanh((log_ss_raw - center) / (width/2));
+           sigma_scale[r,c] = exp(log_ss);
+           // sigma_scale[r, c] = fmin(fmax(target_sigma/fmax(tmp_J_mu[r, c], 1e-10), 0.06), 5);
+           ret_array[8, j, r, c] = sigma_scale[r, c];
          }
        }
 
