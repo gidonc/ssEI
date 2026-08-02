@@ -62,6 +62,7 @@ data{
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
  real<lower=0> prior_sigma_c_scale; //prior for scale of sigma_c (or sigma_c_sigma if lflag_vary_sd == 2)
  real<lower=0> prior_sigma_c_mu_scale; //prior for scale of sigma_c_mu (only if lflag_vary_sd == 2)
+ real prior_sigma_mu; //prior for mean of sigma_jrc if lflag_vary_sd == 1 or 0
  real<lower=0> prior_sigma_ce_scale; //prior of scale for sigma_ce
  real<lower=0> prior_sigma_re_scale; //prior of scale for sigma_re
  real<lower=0> prior_cell_effect_scale; //prior of scale for average cell effects
@@ -546,6 +547,10 @@ transformed parameters{
   matrix[R_ll, C_ll] E_rc;
   real det_J_raw = 0;
   real sigma_scale[lflag_rawscw==0?n_areas:0, R - 1, C - 1];
+  real sigma_sq_row_out[lflag_rawscw==0?n_areas:0, R_ll, C_ll];
+  real sens_sq_out[lflag_rawscw==0?n_areas:0, R_ll, C_ll];
+  real tmp_J_mu_out[lflag_rawscw==0?n_areas:0, R_ll, C_ll];
+
 
   // matrix[(R - 1)*(C - 1), (R - 1) * (C - 1)] Chol_Sigma_lambda = diag_pre_multiply(sigma_lambda_raw, Lcorr_raw);
 
@@ -622,13 +627,17 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
       //   n_areas, R, C, row_margins, col_margins,
       //   lambda, lambda_zero, zero_cell_map, structural_zeros,
       //   hinge_delta_floor, hinge_delta_min, V_ilr, 0);
-      real LLrep_all_tmp[8, n_areas, R, C];
+      real LLrep_all_tmp[11, n_areas, R, C];
       LLrep_all_tmp = ss_assign_ilr_wzeros_raw_return_all_lp(
         n_areas, R, C, row_margins, col_margins,
         lambda, lambda_mu_rc, sigma_jrc, lambda_zero, zero_cell_map, structural_zeros,
         hinge_delta_floor, hinge_delta_min, V_ilr, 1);
       LLrep_all = LLrep_all_tmp[1:3, 1:n_areas, 1:R, 1:C];
       sigma_scale = LLrep_all_tmp[8, 1:n_areas, 1:(R - 1), 1:(C - 1)];
+      sigma_sq_row_out = LLrep_all_tmp[9,  1:n_areas, 1:R_ll, 1:C_ll];
+      sens_sq_out = LLrep_all_tmp[10, 1:n_areas, 1:R_ll, 1:C_ll];
+      tmp_J_mu_out = LLrep_all_tmp[11, 1:n_areas, 1:R_ll, 1:C_ll];
+
       // dev = LLrep_all_tmp[7, 1:n_areas, 1:R_ll, 1:C_ll];
       for(r in 1:R_ll){
         for(c in 1:C_ll){
@@ -826,13 +835,13 @@ if(lflag_fix_sigma_jrc == 1){
         sigma_jrc_raw[s] ~ normal(sigma_c_mu[1], sigma_c_sigma[1]);
     }
 } else {
-    to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
+    to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
 }
 
     // hinge_delta_floor ~ normal(0, .1);
     // hinge_delta_min ~ normal(0, .1);
-    lambda_zero ~ normal(-5.0, 2.0);
+    lambda_zero ~ normal(0, 1.0);
     if(lflag_rawscw == 1){
       lambda_raw ~ normal(0, prior_lambda_raw_scale);
     } else {
