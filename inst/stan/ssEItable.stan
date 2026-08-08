@@ -49,6 +49,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
+  int<lower=0, upper = 1> lflag_noncentred_mat[R_ll, C_ll]; //flag indicated whether cell is centred (0) or non-centred (1)
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
@@ -544,7 +545,6 @@ parameters{
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   real LLrep_raw[n_areas, R_ll, C_ll];
-  vector<lower=0, upper=1>[lflag_noncentred==1 ? R_ll: 0] cen_weight;
   vector[n_areas * R_ll] row_effect_raw;
   real mu_re;
   real<lower=0> sigma_re;
@@ -643,9 +643,8 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
     for (r in 1:R_ll) {
       row_effect[j, r] = row_effect_raw[(j - 1) * R_ll + r];
       for (c in 1:C_ll){
-        if(lflag_noncentred==1){
-          real sigma_pow = exp(cen_weight[r] * log(sigma_jrc[r, c]));
-          LLrep_jrc[j, r, c] = E_rc[r, c] + sigma_pow * LLrep_raw[j, r, c];
+        if(lflag_noncentred_mat[r, c]==1){
+          LLrep_jrc[j, r, c] = E_rc[r, c] + sigma_jrc[r, c] * LLrep_raw[j, r, c];
         } else {
           LLrep_jrc[j, r, c] = LLrep_raw[j, r, c];
         }
@@ -687,8 +686,6 @@ model{
 matrix[R, C] overall_values;
 matrix[R, C] global_prop;
 matrix[n_areas, C] implied_col_var;
-
-cen_weight ~ uniform(0, 1);
 
 
 for(r in 1:R){
@@ -784,10 +781,8 @@ sigma_re ~ normal(0, 10);
 for(j in 1:n_areas){
   for(r in 1:R_ll){
     for(c in 1:C_ll){
-      if(lflag_noncentred==1){
-        real llrep_mean = E_rc[r, c] * (1 - cen_weight[r]);
-        real llrep_sd   = exp((1 - cen_weight[r]) * log(sigma_jrc[r, c]));
-        LLrep_raw[j, r, c] ~ normal(llrep_mean, llrep_sd);
+      if(lflag_noncentred_mat[r, c]==1){
+        LLrep_raw[j, r, c] ~ std_normal();
       } else {
         LLrep_raw[j, r, c] ~ normal(E_rc[r, c], sigma_jrc[r, c]);
       }

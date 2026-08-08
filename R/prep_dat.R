@@ -86,6 +86,7 @@ prep_options_stan <- function(use_dist,
                               llmod_omit_jrc,
                               predictors_cm,
                               noncentred,
+                              noncentred_mat,
                               raw_seq_cell_weights
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
@@ -150,6 +151,7 @@ prep_options_stan <- function(use_dist,
       noncentred == FALSE ~ 0,
       noncentred == TRUE ~ 1
     ),
+    lflag_noncentred_mat = noncentred_mat,
     lflag_rawscw = dplyr::case_when(
       raw_seq_cell_weights == FALSE ~ 0,
       raw_seq_cell_weights == TRUE ~ 1
