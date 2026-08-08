@@ -1763,7 +1763,10 @@ real[,,] ss_assign_log_row_rates_wzeros_hinge_lp (int n_areas, int R, int C, mat
            upper_pos[1]=slack_col[c];
            upper_pos[2]=slack_row[r];
            upper_bound=robust_hinge_min(upper_pos, delta_min);
-           this_inv_logit = inv_logit(lambda[j,r,c]);
+           int cols_remaining = free_C - c;
+           real neutral_logit = -log(cols_remaining);
+
+           this_inv_logit = inv_logit(neutral_logit + lambda[j,r,c]);
            tmp_cell_value[r,c]= lower_bound + this_inv_logit*(upper_bound-lower_bound);
            slack_col[c]=slack_col[c] - tmp_cell_value[r,c];
            slack_row[r]=slack_row[r] - tmp_cell_value[r,c];

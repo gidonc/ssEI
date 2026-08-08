@@ -41,7 +41,7 @@ data{
  matrix[C, C - 1] V_ilr_data; // basis matrix for ILR transformation (for ILR 3 case)
  int n_ilr_rows; // number of rows in the basic construction passed to Stan (for ILR 3 case)
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
- int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
+ int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2)paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
@@ -133,6 +133,26 @@ transformed data{
   real hinge_delta_floor = .01;
   real hinge_delta_min = .01;
   prior_phi_scale = 100;
+  int n_active_cells = 0;
+  for (j in 1:n_areas)
+    for (r in 1:R)
+      for (c in 1:C)
+        if (structural_zeros[j, r, c] == 0)
+          n_active_cells += 1;   // only structural zeros excluded now — every other cell active
+
+  array[n_active_cells] int active_j;
+  array[n_active_cells] int active_r;
+  array[n_active_cells] int active_c;
+  {
+    int idx = 0;
+    for (j in 1:n_areas)
+      for (r in 1:R)
+        for (c in 1:C)
+          if (structural_zeros[j, r, c] == 0) {
+            idx += 1;
+            active_j[idx] = j; active_r[idx] = r; active_c[idx] = c;
+          }
+  }
 
   if(lflag_ll_rep == 0 || lflag_ll_rep == 3){
     // ALR case (0)
@@ -523,11 +543,15 @@ parameters{
   real sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
+  real LLrep_raw[n_areas, R_ll, C_ll];
+  vector[n_areas * R_ll] row_effect_raw;
+  real mu_re;
+  real<lower=0> sigma_re;
 
   matrix[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
   // vector[R - 1] E_r_raw;
 
-  real lambda_zero[n_zero_cells];
+  // real lambda_zero[n_zero_cells];
   // vector<lower=0>[C] sigma_c;
 
   // vector<lower=0>[K_j] sigma_j_all;
@@ -539,6 +563,7 @@ transformed parameters{
   real LLrep_jrc[n_areas, R_ll, C_ll];
   real lambda_mu_LLrep[lflag_rawscw==0 ? R_ll : 0, C_ll];
   real<lower=0> cell_values[n_areas, R, C];
+  real<lower=0> expected_cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
   matrix<lower=0>[R_ll, C_ll] sigma_jrc;
   matrix[R_ll, C_ll] ilr_mean;
@@ -550,6 +575,14 @@ transformed parameters{
   real sigma_sq_row_out[lflag_rawscw==0?n_areas:0, R_ll, C_ll];
   real sens_sq_out[lflag_rawscw==0?n_areas:0, R_ll, C_ll];
   real tmp_J_mu_out[lflag_rawscw==0?n_areas:0, R_ll, C_ll];
+  matrix[n_areas, R_ll] row_effect;
+  // vector[C_ll] LLrep_star[n_areas, R_ll];
+
+  for (j in 1:n_areas) {
+    for (r in 1:R_ll) {
+      row_effect[j, r] = row_effect_raw[(j - 1) * R_ll + r];
+    }
+  }
 
 
   // matrix[(R - 1)*(C - 1), (R - 1) * (C - 1)] Chol_Sigma_lambda = diag_pre_multiply(sigma_lambda_raw, Lcorr_raw);
@@ -590,120 +623,39 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
    }
 
 
-  // cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
-  // ALR_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);
-  if(lflag_ll_rep == 0){
-    // ALR case
-    LLrep_jrc = ss_assign_alr_wzeros_hinge_newparam_lp(n_areas, R, C, row_margins, col_margins, lambda, structural_zeros, hinge_delta_floor, hinge_delta_min);
-
-    for(j in 1:n_areas){
-      for (r in 1:R){
-        if(row_margins[j, r] > 0){
-          log_cv[j, r, C] = log(fmax(row_margins[j, r], 3e-10)) - log_sum_exp(LLrep_jrc[j, r, 1:C]);
-          cell_values[j, r, C] = exp(log_cv[j, r, C]);
-          for(c in 1:(C - 1)){
-            log_cv[j, r, c] = LLrep_jrc[j, r, c] + log_cv[j, r, C];
-            cell_values[j, r, c] = exp(log_cv[j, r, c]);
-          }
-        } else {
-          for (c in 1:C){
-            log_cv[j, r, c] = -200;
-            cell_values[j, r, c] = 0;
-          }
-        }
-      }
-    }
-  }
-  if(is_ilr == 1){
-    // ILR case
-    real LLrep_all[3, n_areas, R, C];
-    if(lflag_rawscw == 1){
-      LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
-        n_areas, R, C, row_margins, col_margins,
-        lambda, lambda_zero, zero_cell_map, structural_zeros,
-        hinge_delta_floor, hinge_delta_min, V_ilr, 1);
-    } else if(lflag_rawscw == 0){
-      // LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
-      //   n_areas, R, C, row_margins, col_margins,
-      //   lambda, lambda_zero, zero_cell_map, structural_zeros,
-      //   hinge_delta_floor, hinge_delta_min, V_ilr, 0);
-      real LLrep_all_tmp[11, n_areas, R, C];
-      LLrep_all_tmp = ss_assign_ilr_wzeros_raw_return_all_lp(
-        n_areas, R, C, row_margins, col_margins,
-        lambda, lambda_mu_rc, sigma_jrc, lambda_zero, zero_cell_map, structural_zeros,
-        hinge_delta_floor, hinge_delta_min, V_ilr, 1);
-      LLrep_all = LLrep_all_tmp[1:3, 1:n_areas, 1:R, 1:C];
-      sigma_scale = LLrep_all_tmp[8, 1:n_areas, 1:(R - 1), 1:(C - 1)];
-      sigma_sq_row_out = LLrep_all_tmp[9,  1:n_areas, 1:R_ll, 1:C_ll];
-      sens_sq_out = LLrep_all_tmp[10, 1:n_areas, 1:R_ll, 1:C_ll];
-      tmp_J_mu_out = LLrep_all_tmp[11, 1:n_areas, 1:R_ll, 1:C_ll];
-
-      // dev = LLrep_all_tmp[7, 1:n_areas, 1:R_ll, 1:C_ll];
-      for(r in 1:R_ll){
-        for(c in 1:C_ll){
-          lambda_mu_LLrep[r, c] = mean(LLrep_all_tmp[6, 1:n_areas, r, c]);
-          E_rc[r, c] = mean(LLrep_all_tmp[6, 1:n_areas, r, c]);
-        }
-      }
-
-
-    }
-
-      for(j in 1:n_areas){
-        for(r in 1:R_ll){
-          for(c in 1:C_ll){
-            LLrep_jrc[j, r, c] = LLrep_all[1, j, r, c];
-          }
-        }
-        for(r in 1:R){
-          for(c in 1:C){
-            log_cv[j, r, c] = LLrep_all[2, j, r, c];
-            cell_values[j, r, c] = LLrep_all[3, j, r, c];
-          }
-        }
-      }
-
-    }
-  if(lflag_ll_rep == 3){
-  // Log Odds Ratio case
-  // Function returns the Log Cell Values in this case
-  log_cv = ss_assign_lor_wzeros_hinge_newparam_lp(
-      n_areas, R, C,
-      row_margins, col_margins,
-      lambda, lambda_zero, zero_cell_map, structural_zeros,
-      hinge_delta_floor, hinge_delta_min
-  );
-
-  // 2. Extract cell_values and LLR_jrc
-  for (j in 1:n_areas) {
-    for (r in 1:R) {
-      for (c in 1:C) {
-        // Exponentiate to get absolute cell counts
-        if (log_cv[j, r, c] > -100.0) {
-          cell_values[j, r, c] = exp(log_cv[j, r, c]);
-        } else {
-          cell_values[j, r, c] = 0.0; // Handle structural zeros gracefully
-        }
-      }
-    }
-
-    // Calculate the Difference-in-Differences interaction directly
-    for (r in 1:(R - 1)) {
-      for (c in 1:(C - 1)) {
-         LLrep_jrc[j, r, c] = log_cv[j, r, c]
-                          - log_cv[j, r, C]
-                          - log_cv[j, R, c]
-                          + log_cv[j, R, C];
+  cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
+  for(j in 1:n_areas){
+    for (r in 1:R){
+      for(c in 1:C){
+        log_cv[j, r, c] = fmax(log(cell_values[j, r, c]), 1e-10);
       }
     }
   }
 
-  }
-
-    if(lflag_fix_E_rc==1){
+  if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
   } else if (lflag_rawscw==1){
       E_rc = E_rc_raw;
+  }
+
+  for (j in 1:n_areas) {
+    for (r in 1:R_ll) {
+      row_effect[j, r] = row_effect_raw[(j - 1) * R_ll + r];
+      for (c in 1:C_ll){
+        if(lflag_noncentred==1){
+          LLrep_jrc[j, r, c] = E_rc[r, c] + sigma_jrc[r, c]*LLrep_raw[j, r, c];
+        } else {
+          LLrep_jrc[j, r, c] = LLrep_raw[j, r, c];
+        }
+
+      }
+
+      row_vector[C] clr_row = to_row_vector(LLrep_jrc[j, r]) * V_ilr';
+      vector[C] composition = softmax(to_vector(clr_row));
+
+      for (c in 1:C)
+        expected_cell_values[j, r, c] = exp(row_effect[j, r]) * composition[c];
+    }
   }
 
 
@@ -754,6 +706,7 @@ for(j in 1:n_areas){
         }
     }
 }
+
 if(lflag_predictors_cm){
   for(j in 1:n_areas){
     for(c in 1:C){
@@ -763,43 +716,52 @@ if(lflag_predictors_cm){
   }
 }
 
+// margin-generating layer — every row
+  for (j in 1:n_areas)
+      target += realpoisson_lpdf(row_margins[j] | exp(to_vector(row_effect[j])));
+{
+    row_vector[n_active_cells] obs_flat;
+    vector[n_active_cells] rate_flat;
+    for (idx in 1:n_active_cells) {
+      obs_flat[idx]  = cell_values[active_j[idx], active_r[idx], active_c[idx]];
+      rate_flat[idx] = fmax(expected_cell_values[active_j[idx], active_r[idx], active_c[idx]], 1e-8);
+    }
+    target += realpoisson_lpdf(obs_flat | rate_flat);
+  }
 //
-//     int counter = 0;
-//     int n_all_cells = n_free_alr_cells + n_areas * (C - 1);
-//     int vec_length = is_ilr == 1 ? R_ll*C_ll*n_areas : n_free_alr_cells;
-//     vector[vec_length] llr_vec;
-//     vector[vec_length] e_rc_vec;
-//     vector[vec_length] sigma_vec;
-//     row_vector[n_areas * C] cm_vec;
-//     vector[n_areas * C] e_cm_vec;
-//     for(j in 1:n_areas){
-//         for(r in 1:R_ll){
-//             for(c in 1:C_ll){
-//                 if(structural_zeros[j,r,c] == 0){
-//                     counter += 1;
-//                     llr_vec[counter] = LLrep_jrc[j,r,c];
-//                     e_rc_vec[counter] = E_rc[r,c];
-//                     sigma_vec[counter] = sigma_jrc[r,c];
-//                 }
-//             }
+// for (r in 1:R_ll){
+//   for(k in 1:C_ll){
+//     real ss = 0;
+//     for (j in 1:n_areas){
+//       if(row_margins[j, r]>0 && structural_zeros[j, r, k] == 0){
+//         real extra_var = 0;
+//         for (c in 1:C){
+//           if(col_margins[j, c]>0){
+//             extra_var += square(V_ilr[c, k])/fmax(cell_values[j, r, c], 1e-6);
+//           }
+//         }
+//         real total_var = square(sigma_jrc[r, k]) + extra_var;
+//         ss += normal_lpdf(LLrep_jrc[j, r, k] | E_rc[r, k], sqrt(total_var));
+//       }
+//     }
+//     target += ss;
+//   }
+// }
+// if(lflag_rawscw == 1||lflag_rawscw == 0){
+//   for(r in 1:R_ll){
+//       for(c in 1:C_ll){
+//         if(ilr_n[r,c] > 1){
+//           real n  = ilr_n[r,c];
+//           real mu = ilr_mean[r,c];
+//           real v  = ilr_var[r,c];
+//           // Sufficient statistic normal log likelihood
+//           target += -n * log(sigma_jrc[r,c])
+//                     - n * v / (2 * square(sigma_jrc[r,c]))
+//                     - n * square(mu - E_rc[r,c]) / (2 * square(sigma_jrc[r,c]));
+//           }
 //         }
 //     }
-//     llr_vec ~ normal(e_rc_vec, sigma_vec);
-if(lflag_rawscw == 1||lflag_rawscw == 0){
-  for(r in 1:R_ll){
-      for(c in 1:C_ll){
-        if(ilr_n[r,c] > 1){
-          real n  = ilr_n[r,c];
-          real mu = ilr_mean[r,c];
-          real v  = ilr_var[r,c];
-          // Sufficient statistic normal log likelihood
-          target += -n * log(sigma_jrc[r,c])
-                    - n * v / (2 * square(sigma_jrc[r,c]))
-                    - n * square(mu - E_rc[r,c]) / (2 * square(sigma_jrc[r,c]));
-          }
-        }
-    }
-}
+// }
 // if(lflag_rawscw == 0){
 //   for(r in 1:R_ll){
 //     for(c in 1:C_ll){
@@ -812,9 +774,20 @@ if(lflag_rawscw == 1||lflag_rawscw == 0){
 //     }
 //   }
 // }
-
-
-
+row_effect_raw ~ normal(mu_re, sigma_re);
+mu_re ~ normal(0, 10);
+sigma_re ~ normal(0, 10);
+for(j in 1:n_areas){
+  for(r in 1:R_ll){
+    for(c in 1:C_ll){
+      if(lflag_noncentred==1){
+        LLrep_raw[j, r, c] ~ std_normal();
+      } else {
+        LLrep_raw[j, r, c] ~ normal(E_rc[r, c], sigma_jrc[r, c]);
+      }
+    }
+  }
+}
 if(lflag_rawscw == 1){
   for(r in 1:R_ll){
       E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
@@ -841,7 +814,6 @@ if(lflag_fix_sigma_jrc == 1){
 
     // hinge_delta_floor ~ normal(0, .1);
     // hinge_delta_min ~ normal(0, .1);
-    lambda_zero ~ normal(0, 1.0);
     if(lflag_rawscw == 1){
       lambda_raw ~ normal(0, prior_lambda_raw_scale);
     } else {
