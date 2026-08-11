@@ -49,7 +49,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
-  int<lower=0, upper = 1> lflag_noncentred_mat[R_ll, C_ll]; //flag indicated whether cell is centred (0) or non-centred (1)
+  int<lower=0, upper = 1> lflag_noncentred_mat[n_areas, R_ll, C_ll]; //flag indicated whether cell is centred (0) or non-centred (1)
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
@@ -131,8 +131,8 @@ transformed data{
   int n_free_areas_rc[R - 1, C - 1]; // count of free areas for each (r, c) for decentred lambdas
   int dev_start_rc[R-1, C-1]; // start for deviation parameters
   int dev_idx = (R-1)*(C-1); // index for deviation parameters in (r, c) order
-  real hinge_delta_floor = .01;
-  real hinge_delta_min = .01;
+  real hinge_delta_floor = 1e-10;
+  real hinge_delta_min = 1e-10;
   prior_phi_scale = 100;
   int n_active_cells = 0;
   for (j in 1:n_areas)
@@ -643,7 +643,7 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
     for (r in 1:R_ll) {
       row_effect[j, r] = row_effect_raw[(j - 1) * R_ll + r];
       for (c in 1:C_ll){
-        if(lflag_noncentred_mat[r, c]==1){
+        if(lflag_noncentred_mat[j, r, c]==1){
           LLrep_jrc[j, r, c] = E_rc[r, c] + sigma_jrc[r, c] * LLrep_raw[j, r, c];
         } else {
           LLrep_jrc[j, r, c] = LLrep_raw[j, r, c];
@@ -781,7 +781,7 @@ sigma_re ~ normal(0, 10);
 for(j in 1:n_areas){
   for(r in 1:R_ll){
     for(c in 1:C_ll){
-      if(lflag_noncentred_mat[r, c]==1){
+      if(lflag_noncentred_mat[j, r, c]==1){
         LLrep_raw[j, r, c] ~ std_normal();
       } else {
         LLrep_raw[j, r, c] ~ normal(E_rc[r, c], sigma_jrc[r, c]);
