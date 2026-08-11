@@ -567,6 +567,7 @@ transformed parameters{
   real<lower=0> expected_cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
   matrix<lower=0>[R_ll, C_ll] sigma_jrc;
+  real composition_arr[n_areas, R, C] = rep_array(0.0, n_areas, R, C);
   matrix[R_ll, C_ll] ilr_mean;
   matrix[R_ll, C_ll] ilr_var;
   matrix[R_ll, C_ll] ilr_n;
@@ -623,16 +624,6 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
     }
    }
 
-
-  cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
-  for(j in 1:n_areas){
-    for (r in 1:R){
-      for(c in 1:C){
-        log_cv[j, r, c] = fmax(log(cell_values[j, r, c]), 1e-10);
-      }
-    }
-  }
-
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
   } else if (lflag_rawscw==1){
@@ -653,9 +644,22 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
 
       row_vector[C] clr_row = to_row_vector(LLrep_jrc[j, r]) * V_ilr';
       vector[C] composition = softmax(to_vector(clr_row));
+      for (c in 1:C) composition_arr[j, r, c] = composition[c];
 
       for (c in 1:C)
         expected_cell_values[j, r, c] = exp(row_effect[j, r]) * composition[c];
+    }
+  }
+if(lflag_noncentred == 1){
+  cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, hinge_delta_floor, hinge_delta_min);
+} else if(lflag_noncentred == 0){
+  cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
+}
+  for(j in 1:n_areas){
+    for (r in 1:R){
+      for(c in 1:C){
+        log_cv[j, r, c] = fmax(log(cell_values[j, r, c]), 1e-10);
+      }
     }
   }
 
