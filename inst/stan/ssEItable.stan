@@ -70,6 +70,9 @@ data{
  matrix[R_ll, C_ll] E_rc_prior; // empirically informed prior centres for E_rc
  int<lower=0> known_cell_values[n_areas, R, C]; // for testing purposes
  int<lower=0, upper=1> use_known_cells; // for testing purposes
+ real hinge_delta_floor;
+ real hinge_delta_min;
+
 }
 transformed data{
   int K;
@@ -130,8 +133,6 @@ transformed data{
   int n_free_areas_rc[R - 1, C - 1]; // count of free areas for each (r, c) for decentred lambdas
   int dev_start_rc[R-1, C-1]; // start for deviation parameters
   int dev_idx = (R-1)*(C-1); // index for deviation parameters in (r, c) order
-  real hinge_delta_floor = .01;
-  real hinge_delta_min = .01;
   prior_phi_scale = 100;
 
   if(lflag_ll_rep == 0 || lflag_ll_rep == 3){

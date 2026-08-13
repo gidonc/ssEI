@@ -644,6 +644,7 @@ real[,,,] ss_assign_ilr_wzeros_return_all_lp(
      int free_C;
      real this_inv_logit;
      real log_det_J;
+     real slack_tol = 1e-8;
 
 // 2. Initialize the return array
 for (i in 1:3) {
@@ -693,31 +694,63 @@ for (i in 1:3) {
        for (r in 1:(free_R - 1)){
          for (c in 1:(free_C - 1)){
            lower_pos[2] = slack_row[r] - sum(tail(slack_col, free_C - c));
-           lower_bound = fmax(lower_pos[2], 0);
+           // lower_bound = fmax(lower_pos[2], 0);
+           lower_bound = robust_hinge_floor_zero(lower_pos[2], delta_floor);
            upper_pos[1] = slack_col[c];
            upper_pos[2] = slack_row[r];
-           upper_bound = fmin(upper_pos[1], upper_pos[2]);
+           // upper_bound = fmin(upper_pos[1], upper_pos[2]);
+           upper_bound = robust_hinge_min(upper_pos, delta_min);
+           if (upper_bound - lower_bound < -slack_tol) reject("Negative cell width:", upper_bound - lower_bound);
+           upper_bound = fmax(lower_bound, upper_bound);
            int cols_remaining = free_C - c;
            real neutral_logit = -log(cols_remaining);
-           this_inv_logit = inv_logit(neutral_logit + lambda[j, r, c]);
+           real x = neutral_logit + lambda[j, r, c];
+           this_inv_logit = inv_logit(x);
+
            tmp_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
-           slack_col[c] = fmax(slack_col[c] - tmp_cell_value[r, c], 0.0);
-           slack_row[r] = fmax(slack_row[r] - tmp_cell_value[r, c], 0.0);
-           rt = fmax(rt - tmp_cell_value[r, c], 0.0);
-           log_det_J += log(fmax(fmax(upper_bound - lower_bound, 1e-10) * this_inv_logit * (1 - this_inv_logit), 1e-10));
+           // slack_col[c] = fmax(slack_col[c] - tmp_cell_value[r, c], 0.0);
+           slack_col[c] = slack_col[c] - tmp_cell_value[r, c];
+           if (slack_col[c] < -slack_tol) reject("Substantial negative column slack:", slack_col[c]);
+           slack_col[c] = fmax(slack_col[c], 0.0);
+           // slack_row[r] = fmax(slack_row[r] - tmp_cell_value[r, c], 0.0);
+           slack_row[r] = slack_row[r] - tmp_cell_value[r, c];
+           if (slack_row[r] < -slack_tol)  reject("Substantial negative row slack:", slack_row[r]);
+           slack_row[r] = fmax(slack_row[r], 0.0);
+
+
+           // rt = fmax(rt - tmp_cell_value[r, c], 0.0);
+           rt = rt - tmp_cell_value[r, c];
+           if (rt < -slack_tol)  reject("Substantial negative total slack:", rt);
+           rt = fmax(rt, 0.0);
+
+           // log_det_J += log(fmax(fmax(upper_bound - lower_bound, 1e-10) * this_inv_logit * (1 - this_inv_logit), 1e-10));
+           log_det_J += log(fmax(upper_bound - lower_bound, 1e-20)) + log_inv_logit(x) + log1m_inv_logit(x);
          }
-         tmp_cell_value[r, free_C] = fmax(slack_row[r], 1e-10);
-         rt = fmax(rt - tmp_cell_value[r, free_C], 0.0);
-         slack_col[free_C] = fmax(slack_col[free_C] - tmp_cell_value[r, free_C], 0.0);
-         slack_row[r] = fmax(slack_row[r] - tmp_cell_value[r, free_C], 0.0);
+         // tmp_cell_value[r, free_C] = fmax(slack_row[r], 1e-10);
+         tmp_cell_value[r, free_C] = slack_row[r];
+         // slack_col[free_C] = fmax(slack_col[free_C] - tmp_cell_value[r, free_C], 0.0);
+         slack_col[free_C] = slack_col[free_C] - tmp_cell_value[r, free_C];
+         if(slack_col[free_C] < -slack_tol) reject("Substantial negative column residual:", slack_col[free_C]);
+         slack_col[free_C] = fmax(slack_col[free_C], 0.0);
+
+         // rt = fmax(rt - tmp_cell_value[r, free_C], 0.0);
+         rt = rt - tmp_cell_value[r, free_C];
+         if(rt < -slack_tol) reject("Substantial negative total slack:", rt);
+         rt = fmax(rt, 0.0);
+
+         slack_row[r] = slack_row[r] - tmp_cell_value[r, free_C];
+         if (slack_row[r] < -slack_tol) reject("Substantial negative final row slack:", slack_row[r]);
+         if (slack_row[r] > slack_tol) reject("Substantial positive row slack after allocation should be complete:", slack_row[r]);
        }
        for (c in 1:(free_C - 1)){
-         tmp_cell_value[free_R, c] = fmax(slack_col[c], 1e-10);
-         rt = fmax(rt - tmp_cell_value[free_R, c], 0.0);
+         tmp_cell_value[free_R, c] = slack_col[c];
+         rt = rt - tmp_cell_value[free_R, c];
+         if (rt < -slack_tol) reject("Substantial negative total in final cell:", rt);
+         rt = fmax(rt, 0.0);
          slack_col[c] = fmax(slack_col[c] - tmp_cell_value[free_R, c], 0.0);
          slack_row[free_R] = fmax(slack_row[free_R] - tmp_cell_value[free_R, c], 0.0);
        }
-       tmp_cell_value[free_R, free_C] = fmax(rt, 1e-10);
+       tmp_cell_value[free_R, free_C] = rt;
 
        // =========================================================================
        // 2. REVISED: LATENT ZERO INJECTION & ILR ROTATION
