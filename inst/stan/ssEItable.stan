@@ -541,7 +541,7 @@ parameters{
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
 
-  real sigma_jrc_raw[K_sigmas];
+  real<lower=0> sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   real LLrep_raw[n_areas, R_ll, C_ll];
@@ -602,11 +602,11 @@ if(lflag_fix_sigma_jrc==1){
           for(c in 1:C_ll){
               s += 1;
               if(lflag_vary_sd == 0){
-                sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]), R_ll, C_ll);
+                sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
               } else if(lflag_vary_sd==1){
-                sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]);
+                sigma_jrc[r,c] = sigma_jrc_raw[s];
               } else if(lflag_vary_sd == 2){
-                sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]);
+                sigma_jrc[r,c] = sigma_jrc_raw[s];
               }
           }
       }

@@ -198,27 +198,28 @@
            real this_share = comp_row[c]/fmax(remaining_comp_sum, 1e-10);
            // real neutral_logit = -log(cols_remaining);
            real neutral_logit = logit(this_share);
-
+           real x = neutral_logit + lambda[j, r, c];
            this_inv_logit = inv_logit(neutral_logit + lambda[j,r,c]);
-           tmp_cell_value[r,c]= lower_bound + this_inv_logit*(upper_bound-lower_bound);
-           slack_col[c]=slack_col[c] - tmp_cell_value[r,c];
-           slack_row[r]=slack_row[r] - tmp_cell_value[r,c];
-           rt = rt - tmp_cell_value[r, c];
-           log_det_J += log((upper_bound - lower_bound)*this_inv_logit*(1-this_inv_logit));
+           tmp_cell_value[r,c]= fmax(0.0, lower_bound + this_inv_logit*(upper_bound-lower_bound));
+           slack_col[c]=fmax(0.0, slack_col[c] - tmp_cell_value[r,c]);
+           slack_row[r]=fmax(0.0, slack_row[r] - tmp_cell_value[r,c]);
+           rt = fmax(0.0, rt - tmp_cell_value[r, c]);
+           log_det_J += log(fmax(upper_bound - lower_bound, 1e-15)) + log_inv_logit(x) + log1m_inv_logit(x);
+           // log_det_J += log((upper_bound - lower_bound)*this_inv_logit*(1-this_inv_logit));
          }
-         tmp_cell_value[r, free_C]=slack_row[r];
-         rt = rt - tmp_cell_value[r, free_C];
-         slack_col[free_C] = slack_col[free_C] - tmp_cell_value[r, free_C];
-         slack_row[r] = slack_row[r] - tmp_cell_value[r, free_C];
+         tmp_cell_value[r, free_C]=fmax(0.0, slack_row[r]);
+         rt = fmax(0.0, rt - tmp_cell_value[r, free_C]);
+         slack_col[free_C] = fmax(0.0, slack_col[free_C] - tmp_cell_value[r, free_C]);
+         slack_row[r] = fmax(0.0, slack_row[r] - tmp_cell_value[r, free_C]);
        }
 
        for (c in 1:(free_C-1)){
          tmp_cell_value[free_R, c] = slack_col[c];
-         rt = rt- tmp_cell_value[free_R, c];
-         slack_col[c] = slack_col[c] - tmp_cell_value[free_R, c];
-         slack_row[free_R] = slack_row[free_R] - tmp_cell_value[free_R, c];
+         rt = fmax(0.0, rt- tmp_cell_value[free_R, c]);
+         slack_col[c] = fmax(0.0, slack_col[c] - tmp_cell_value[free_R, c]);
+         slack_row[free_R] = fmax(0.0, slack_row[free_R] - tmp_cell_value[free_R, c]);
        }
-       tmp_cell_value[free_R, free_C]=rt;
+       tmp_cell_value[free_R, free_C]=fmax(0.0, rt);
 
       int fr = 0;
       for (r in 1:R){
