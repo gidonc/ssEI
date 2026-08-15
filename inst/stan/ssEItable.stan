@@ -72,6 +72,7 @@ data{
  int<lower=0, upper=1> use_known_cells; // for testing purposes
  real hinge_delta_floor;
  real hinge_delta_min;
+ real<lower=0.0> slack_tol;
 
 }
 transformed data{
@@ -622,7 +623,7 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
       LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
         n_areas, R, C, row_margins, col_margins,
         lambda, lambda_zero, zero_cell_map, structural_zeros,
-        hinge_delta_floor, hinge_delta_min, V_ilr, 1);
+        hinge_delta_floor, hinge_delta_min, slack_tol, V_ilr, 1);
     } else if(lflag_rawscw == 0){
       // LLrep_all = ss_assign_ilr_wzeros_return_all_lp(
       //   n_areas, R, C, row_margins, col_margins,

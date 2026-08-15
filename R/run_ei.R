@@ -43,7 +43,10 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         predictors_cm = FALSE,
                         noncentred = TRUE,
                         raw_seq_cell_weights = FALSE,
-                        sigma_floor = .01,
+                        sigma_floor = 0,
+                        hinge_delta_floor = 1e-8,
+                        hinge_delta_min = 1e-8,
+                        slack_tol = 1e-8,
                         prior_lkj = 2,
                         prior_mu_ce_scale = 2,
                         prior_mu_re_scale = 2,
@@ -128,7 +131,10 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
   standata <- modifyList(standata,
                          list(
                            R_ll = R_ll,
-                           C_ll = C_ll
+                           C_ll = C_ll,
+                           hinge_delta_floor = hinge_delta_floor,
+                           hinge_delta_min = hinge_delta_min,
+                           slack_tol = slack_tol
                          ))
 
   if(verbose){

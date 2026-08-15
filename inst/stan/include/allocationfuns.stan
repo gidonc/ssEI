@@ -628,7 +628,7 @@ real[,,,] ss_assign_ilr_wzeros_return_all_lp(
     array[] real lambda_zero,
     array[,,] int zero_cell_map,
     array[,,] int structural_zeros,
-    real delta_floor, real delta_min,
+    real delta_floor, real delta_min, real slack_tol,
     matrix V_ilr,
     int adjust_Jacobian) { // ILR Orthonormal Basis Matrix
 
@@ -644,7 +644,6 @@ real[,,,] ss_assign_ilr_wzeros_return_all_lp(
      int free_C;
      real this_inv_logit;
      real log_det_J;
-     real slack_tol = 1e-8;
 
 // 2. Initialize the return array
 for (i in 1:3) {
@@ -701,13 +700,14 @@ for (i in 1:3) {
            // upper_bound = fmin(upper_pos[1], upper_pos[2]);
            upper_bound = robust_hinge_min(upper_pos, delta_min);
            if (upper_bound - lower_bound < -slack_tol) reject("Negative cell width:", upper_bound - lower_bound);
-           upper_bound = fmax(lower_bound, upper_bound);
+           real width = robust_hinge_floor_zero(upper_bound - lower_bound, delta_min);
+
            int cols_remaining = free_C - c;
            real neutral_logit = -log(cols_remaining);
            real x = neutral_logit + lambda[j, r, c];
            this_inv_logit = inv_logit(x);
-
-           tmp_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
+           tmp_cell_value[r, c] = lower_bound + this_inv_logit * width;
+            // tmp_cell_value[r, c] = lower_bound + this_inv_logit * (upper_bound - lower_bound);
            // slack_col[c] = fmax(slack_col[c] - tmp_cell_value[r, c], 0.0);
            slack_col[c] = slack_col[c] - tmp_cell_value[r, c];
            if (slack_col[c] < -slack_tol) reject("Substantial negative column slack:", slack_col[c]);
@@ -724,7 +724,8 @@ for (i in 1:3) {
            rt = fmax(rt, 0.0);
 
            // log_det_J += log(fmax(fmax(upper_bound - lower_bound, 1e-10) * this_inv_logit * (1 - this_inv_logit), 1e-10));
-           log_det_J += log(fmax(upper_bound - lower_bound, 1e-20)) + log_inv_logit(x) + log1m_inv_logit(x);
+           log_det_J += log(width) + log_inv_logit(x) + log1m_inv_logit(x);
+
          }
          // tmp_cell_value[r, free_C] = fmax(slack_row[r], 1e-10);
          tmp_cell_value[r, free_C] = slack_row[r];
@@ -766,7 +767,8 @@ for (i in 1:3) {
            for(c in 1:C){
              if(col_margins[j, c] > 0){
                fc += 1;
-               log_cell_row[c] = log(fmax(tmp_cell_value[fr, fc], 1e-10));
+               // log_cell_row[c] = log(fmax(tmp_cell_value[fr, fc], 1e-10));
+               log_cell_row[c] = log(robust_hinge_floor_zero(tmp_cell_value[fr,fc], delta_floor));
                active_log_sum += log_cell_row[c]; // Track only active elements
                ret_array[3, j, r, c] = tmp_cell_value[fr, fc];
 
@@ -783,11 +785,11 @@ for (i in 1:3) {
 
            // Step B: Dynamic Jacobian (isolating strictly free cell elements)
            if(fr < free_R){
-             log_det_J += log(fmax(row_margins[j, r], 1e-10)) - active_log_sum;
+             log_det_J += log(row_margins[j, r]) - active_log_sum;
            }
 
            // Step C: Multiply by the Orthonormal Matrix to map cleanly into ILR Space
-           ilr_row = (to_row_vector(log_cell_row) -log(fmax(row_margins[j, r], 1e-10))) * V_ilr;
+           ilr_row = (to_row_vector(log_cell_row) - log(row_margins[j, r])) * V_ilr;
            for(c in 1:(C - 1)){
              ILR_jrc[j, r, c] = ilr_row[c];
              ret_array[1, j, r, c] = ilr_row[c];
