@@ -211,3 +211,44 @@ ei_cv_summary_optim <- function(ei_optim){
                   `50%` = mean, `75%` = NA, `97.5%` = NA,
                   n_eff = NA, Rhat = NA)
 }
+
+#' @export
+ei_param_map <- function(row_margins, col_margins){
+  # reproduce Stan's transformed data block in R
+  n_areas <- nrow(row_margins)
+  R <- ncol(row_margins)
+  C <- ncol(col_margins)
+
+  free_R <- integer(n_areas)
+  free_C <- integer(n_areas)
+  param_count_from <- integer(n_areas)
+  area_indices <- vector("list", n_areas)   # this area's lambda_raw indices, in the SAME order as param_map
+
+  n_param <- 0
+  for (j in 1:n_areas) {
+    free_R[j] <- sum(row_margins[j, ] > 0)
+    free_C[j] <- sum(col_margins[j, ] > 0)
+
+    n_free_j <- max(0, (free_R[j] - 1) * (free_C[j] - 1))
+
+    if (n_free_j > 0) {
+      # matches Stan's (r-1)*(free_C[j]-1) + c ordering exactly: r outer, c inner
+      area_indices[[j]] <- (n_param + 1):(n_param + n_free_j)
+    } else {
+      area_indices[[j]] <- integer(0)
+    }
+
+    param_count_from[j] <- n_param
+    n_param <- n_param + n_free_j
+  }
+
+  list(
+    param_count_from = param_count_from,
+    area_indices = area_indices,
+    free_R =free_R,
+    free_C = free_C,
+    n_param =n_param
+
+  )
+
+}

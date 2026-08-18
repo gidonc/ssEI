@@ -81,6 +81,7 @@ prep_options_stan <- function(use_dist,
                               inc_rm,
                               vary_sd,
                               ll_rep,
+                              mod_corr,
                               llmod_omit_jr,
                               llmod_omit_jc,
                               llmod_omit_jrc,
@@ -102,6 +103,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!vary_sd %in% c(FALSE, TRUE, "partial")){
     stop("vary_sd must be one of: TRUE, FALSE, partial")
+  }
+  if(!mod_corr %in% c(FALSE, TRUE)){
+    stop("mod_corr must be one of: TRUE, FALSE")
   }
   if(!ll_rep %in% c("ALR 1", "ILR 1", "ILR 2", "ILR 3", "LOR")){
     stop("ll_rep must be one of: ALR 1, ILR 1, ILR 2, ILR 3, LOR")
@@ -145,6 +149,10 @@ prep_options_stan <- function(use_dist,
     lflag_predictors_cm = dplyr::case_when(
       predictors_cm == FALSE ~ 0,
       predictors_cm == TRUE ~ 1
+    ),
+    lflag_mod_corr = dplyr::case_when(
+      mod_corr == FALSE ~ 0,
+      mod_corr == TRUE ~ 1
     ),
     lflag_noncentred = dplyr::case_when(
       noncentred == FALSE ~ 0,

@@ -44,6 +44,7 @@ data{
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2) paramertization
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
+ int<lower = 0, upper = 1> lflag_mod_corr; // flag indicating whether to model correlation matrix between LLrep_jrc components
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
@@ -70,6 +71,7 @@ data{
  matrix[R_ll, C_ll] E_rc_prior; // empirically informed prior centres for E_rc
  int<lower=0> known_cell_values[n_areas, R, C]; // for testing purposes
  int<lower=0, upper=1> use_known_cells; // for testing purposes
+ matrix[(R-1)*(C-1), (R-1)*(C-1)] V_dcorr_mat[n_areas];
  real hinge_delta_floor;
  real hinge_delta_min;
  real<lower=0.0> slack_tol;
@@ -525,6 +527,7 @@ parameters{
   real sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
+  cholesky_factor_corr[lflag_mod_corr ? R_ll * C_ll: 0] L_corr;   // only if lflag_mod_corr == 1
 
   matrix[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : R_ll, lflag_fix_E_rc? 0 : C_ll] E_rc_raw;
   // vector[R - 1] E_r_raw;
@@ -537,12 +540,14 @@ parameters{
   // real<lower=0, upper = .1> hinge_delta_min;
 }
 transformed parameters{
+  vector[n_param] lambda_flat;
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   real LLrep_jrc[n_areas, R_ll, C_ll];
   real lambda_mu_LLrep[lflag_rawscw==0 ? R_ll : 0, C_ll];
   real<lower=0> cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
   matrix<lower=0>[R_ll, C_ll] sigma_jrc;
+  vector<lower=0>[lflag_mod_corr*R_ll*C_ll] sigma_jrc_flat;
   matrix[R_ll, C_ll] ilr_mean;
   matrix[R_ll, C_ll] ilr_var;
   matrix[R_ll, C_ll] ilr_n;
@@ -570,22 +575,41 @@ if(lflag_fix_sigma_jrc==1){
               s += 1;
               if(lflag_vary_sd == 0){
                 sigma_jrc = rep_matrix(sigma_floor + exp(sigma_jrc_raw[1]), R_ll, C_ll);
+                if(lflag_mod_corr==1){
+                  sigma_jrc_flat = rep_vector(sigma_floor + exp(sigma_jrc_raw[1]), R_ll*C_ll);
+                }
               } else if(lflag_vary_sd==1){
                 sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]);
+                if(lflag_mod_corr == 1){
+                  sigma_jrc_flat[s] = sigma_floor + exp(sigma_jrc_raw[s]);
+                }
               } else if(lflag_vary_sd == 2){
                 sigma_jrc[r,c] = sigma_floor + exp(sigma_jrc_raw[s]);
+                if(lflag_mod_corr == 1){
+                    sigma_jrc_flat[s] = sigma_floor + exp(sigma_jrc_raw[s]);
+                }
               }
           }
       }
   }
 
 if(lflag_rawscw == 1||lflag_rawscw==0){
-    for (j in 1:n_areas){
+  for(j in 1:n_areas){
+    int n_free_j = (free_R[j] - 1) * (free_C[j] - 1);
+    if(n_free_j > 0) {
+      int start = param_count_from[j] + 1;
+      int end = param_count_from[j] + n_free_j;
+      vector[n_free_j] lambda_j = lambda_raw[start:end];
+      matrix[n_free_j, n_free_j] V_j = V_dcorr_mat[j][1:n_free_j, 1:n_free_j];
+      lambda_flat[start:end] = V_j * lambda_j;
+    }
+  }
+  for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
         // lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
-        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
+        lambda[j, r, c] = lambda_flat[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
         }
       }
     }
@@ -735,6 +759,9 @@ model{
 matrix[R, C] overall_values;
 matrix[R, C] global_prop;
 matrix[n_areas, C] implied_col_var;
+matrix[lflag_mod_corr*R_ll*C_ll, R_ll*C_ll] L_Sigma;
+vector[lflag_mod_corr*R_ll*C_ll] E_rc_flat;
+vector[lflag_mod_corr*R_ll*C_ll] LLobs_flat[n_areas];
 
 
 for(r in 1:R){
@@ -787,7 +814,7 @@ if(lflag_predictors_cm){
 //         }
 //     }
 //     llr_vec ~ normal(e_rc_vec, sigma_vec);
-if(lflag_rawscw == 1||lflag_rawscw == 0){
+if(lflag_mod_corr == 0){
   for(r in 1:R_ll){
       for(c in 1:C_ll){
         if(ilr_n[r,c] > 1){
@@ -795,12 +822,34 @@ if(lflag_rawscw == 1||lflag_rawscw == 0){
           real mu = ilr_mean[r,c];
           real v  = ilr_var[r,c];
           // Sufficient statistic normal log likelihood
+          if(lflag_mod_corr == 0){
           target += -n * log(sigma_jrc[r,c])
                     - n * v / (2 * square(sigma_jrc[r,c]))
                     - n * square(mu - E_rc[r,c]) / (2 * square(sigma_jrc[r,c]));
           }
+          }
         }
     }
+} else if(lflag_mod_corr == 1){
+  for (j in 1:n_areas){
+    int s = 0;
+    for(r in 1:R_ll){
+      for(c in 1:C_ll){
+        s += 1;
+        LLobs_flat[j, s] = LLrep_jrc[j, r, c];
+      }
+    }
+  }
+  int s = 0;
+  for(r in 1:R_ll){
+    for(c in 1:C_ll){
+      s += 1;
+      E_rc_flat[s] = E_rc[r, c];
+    }
+  }
+  L_Sigma = diag_pre_multiply(sigma_jrc_flat, L_corr);
+
+  LLobs_flat ~ multi_normal_cholesky(E_rc_flat, L_Sigma);
 }
 // if(lflag_rawscw == 0){
 //   for(r in 1:R_ll){
@@ -839,6 +888,10 @@ if(lflag_fix_sigma_jrc == 1){
 } else {
     to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
+}
+
+if(lflag_mod_corr == 1){
+  L_corr ~ lkj_corr_cholesky(2);
 }
 
     // hinge_delta_floor ~ normal(0, .1);

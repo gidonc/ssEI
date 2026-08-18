@@ -33,10 +33,12 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         area_re = "normal",
                         ll_rep = "ALR 1",
                         V_ilr = NULL,
+                        V_dcorr_mat = NULL,
                         n_ilr_rows = NULL,
                         inc_rm = FALSE,
                         vary_sd = FALSE,
                         mod_cols = TRUE,
+                        mod_corr = FALSE,
                         llmod_omit_jr = FALSE,
                         llmod_omit_jc = FALSE,
                         llmod_omit_jrc = FALSE,
@@ -80,6 +82,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            inc_rm = inc_rm,
                            vary_sd = vary_sd,
                            ll_rep = ll_rep,
+                           mod_corr = mod_corr,
                            llmod_omit_jr = llmod_omit_jr,
                            llmod_omit_jc = llmod_omit_jc,
                            llmod_omit_jrc = llmod_omit_jrc,
@@ -128,10 +131,18 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     R_ll = n_ilr_rows
     C_ll = standata$C - 1
   }
+  if(is.null(V_dcorr_mat)){
+    V_dcorr_mat <- vector("list", standata$n_areas)
+    for(j in 1:standata$n_areas){
+      V_dcorr_mat[[j]] <- diag((standata$R - 1)*(standata$C - 1))
+    }
+  }
+
   standata <- modifyList(standata,
                          list(
                            R_ll = R_ll,
                            C_ll = C_ll,
+                           V_dcorr_mat = V_dcorr_mat,
                            hinge_delta_floor = hinge_delta_floor,
                            hinge_delta_min = hinge_delta_min,
                            slack_tol = slack_tol
