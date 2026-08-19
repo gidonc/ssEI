@@ -367,3 +367,56 @@ rlkjcorr <- function ( n , K , eta = 1 ) {
   }
   return(R)
 }
+
+#' @export
+mk_sim_tables_ilr <- function(n_areas, n_row, n_col,
+                              V_ilr,
+                              max_row_margin = 1000,
+                              scale_sd = -2, sd_sd = 1,
+                              contextual_effects = TRUE,
+                              lkj_eta = 1, mu_sigma = 1,
+                              fix_Sigma = NULL,
+                              fix_mu = NULL){
+  K <- n_row * (n_col - 1)
+  row_margins <- mk_row_margins(n_areas, n_row, max_row_margin)
+
+  if(!is.null(fix_Sigma)){
+    Sigma = fix_Sigma
+  } else if (contextual_effects) {
+    Sigma <- mk_Sigma(K, scale_sd = scale_sd, sd_sd = sd_sd, lkj_eta = lkj_eta)
+  } else {
+    sd_diag <- exp(rnorm(K, scale_sd, sd_sd))
+    Sigma <- diag(sd_diag^2)
+  }
+
+  if(!is.null(fix_mu)){
+    mu_raw <- fix_mu
+  } else {
+    mu_raw <- mk_mu_raw(n_row, n_col, mu_sigma)
+  }
+
+  eta <- mk_eta_ilr(n_areas, mu_raw, n_row, n_col, Sigma, V_ilr)
+  sim_tables <- sim_tables_from_probs(n_areas, row_margins, n_col, eta)
+  sim_tables$Sigma <- Sigma
+  sim_tables
+}
+
+mk_eta_ilr <- function(n_areas, mu_raw, n_row, n_col, Sigma, V_ilr){
+  myinv_ilr <- function(x, V_ilr){
+    clr <- as.vector(V_ilr %*% x)
+    comp <- exp(clr)
+    comp / sum(comp)
+  }
+  K <- n_row * (n_col - 1)
+  eta <- vector(length = n_areas, mode = "list")
+  for (j in 1:n_areas){
+    eta_raw_j_flat <- MASS::mvrnorm(1, rep(0, K), Sigma)
+    eta_raw_j <- matrix(eta_raw_j_flat, nrow = n_row, ncol = n_col - 1, byrow = TRUE)
+    # eta_raw_j <- matrix(MASS::mvrnorm(1, rep(0, K), Sigma), nrow = n_row, ncol = n_col - 1)
+    eta[[j]] <- matrix(nrow = n_row, ncol = n_col)
+    for (r in 1:n_row){
+      eta[[j]][r, ] <- myinv_ilr(mu_raw[r, ] + eta_raw_j[r, ], V_ilr)
+    }
+  }
+  eta
+}
