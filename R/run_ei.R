@@ -33,6 +33,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         area_re = "normal",
                         ll_rep = "ALR 1",
                         V_ilr = NULL,
+                        V_dcorr_mat = NULL,
                         n_ilr_rows = NULL,
                         inc_rm = FALSE,
                         vary_sd = FALSE,
@@ -40,11 +41,15 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         llmod_omit_jr = FALSE,
                         llmod_omit_jc = FALSE,
                         llmod_omit_jrc = FALSE,
+                        pin_row_effect = FALSE,
                         predictors_cm = FALSE,
                         noncentred = TRUE,
                         noncentred_mat = matrix(1, nrow=3, ncol=2),
                         raw_seq_cell_weights = FALSE,
-                        sigma_floor = .01,
+                        sigma_floor = 0,
+                        hinge_delta_floor = 1e-8,
+                        hinge_delta_min = 1e-8,
+                        slack_tol = 1e-8,
                         prior_lkj = 2,
                         prior_mu_ce_scale = 2,
                         prior_mu_re_scale = 2,
@@ -87,18 +92,18 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            raw_seq_cell_weights = raw_seq_cell_weights
                          ))
   standata <- modifyList(standata,
-                        prep_priors_stan(
-                          prior_lkj = prior_lkj,
-                          prior_mu_ce_scale = prior_mu_ce_scale,
-                          prior_mu_re_scale = prior_mu_re_scale,
-                          prior_sigma_c_scale = prior_sigma_c_scale,
-                          prior_sigma_c_mu_scale = prior_sigma_c_mu_scale,
-                          prior_sigma_mu = prior_sigma_mu,
-                          prior_sigma_ce_scale = prior_sigma_ce_scale,
-                          prior_sigma_re_scale = prior_sigma_re_scale,
-                          prior_cell_effect_scale = prior_cell_effect_scale,
-                          prior_lambda_raw_scale = prior_lambda_raw_scale
-                        ))
+                         prep_priors_stan(
+                           prior_lkj = prior_lkj,
+                           prior_mu_ce_scale = prior_mu_ce_scale,
+                           prior_mu_re_scale = prior_mu_re_scale,
+                           prior_sigma_c_scale = prior_sigma_c_scale,
+                           prior_sigma_c_mu_scale = prior_sigma_c_mu_scale,
+                           prior_sigma_mu = prior_sigma_mu,
+                           prior_sigma_ce_scale = prior_sigma_ce_scale,
+                           prior_sigma_re_scale = prior_sigma_re_scale,
+                           prior_cell_effect_scale = prior_cell_effect_scale,
+                           prior_lambda_raw_scale = prior_lambda_raw_scale
+                         ))
   if(zeros_structural == TRUE){
     zero_rm <- row_margins
     zero_cm <- col_margins
@@ -127,10 +132,22 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     R_ll = n_ilr_rows
     C_ll = standata$C - 1
   }
+  if(is.null(V_dcorr_mat)){
+    V_dcorr_mat <- vector("list", standata$n_areas)
+    for(j in 1:standata$n_areas){
+      V_dcorr_mat[[j]] <- diag((standata$R - 1)*(standata$C - 1))
+    }
+  }
+
   standata <- modifyList(standata,
                          list(
                            R_ll = R_ll,
-                           C_ll = C_ll
+                           C_ll = C_ll,
+                           lflag_pin_row_effect = pin_row_effect,
+                           V_dcorr_mat = V_dcorr_mat,
+                           hinge_delta_floor = hinge_delta_floor,
+                           hinge_delta_min = hinge_delta_min,
+                           slack_tol = slack_tol
                          ))
 
   if(verbose){

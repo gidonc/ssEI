@@ -3,6 +3,10 @@
     vector[num_elements(x)] lpdf = (to_vector(x) .* log(lambda)) - lambda - to_vector(lgamma(x + 1));
     return sum(lpdf);
   }
+  real realpoisson_lograte_lpdf(row_vector x, vector log_lambda){
+    vector[num_elements(x)] lpdf = (to_vector(x) .* log_lambda) - exp(log_lambda) - to_vector(lgamma(x + 1));
+    return sum(lpdf);
+  }
     real realnegbinom2_lpdf(vector x, real mu, real psi){
       vector[num_elements(x)] lpdf;
       for (n in 1:num_elements(x)){

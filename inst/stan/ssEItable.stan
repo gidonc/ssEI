@@ -47,6 +47,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
+  int<lower =0, upper = 1> lflag_pin_row_effect; // flag indicating the model on row effects
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
   int<lower=0, upper = 1> lflag_noncentred_mat[n_areas, R_ll, C_ll]; //flag indicated whether cell is centred (0) or non-centred (1)
@@ -71,6 +72,9 @@ data{
  matrix[R_ll, C_ll] E_rc_prior; // empirically informed prior centres for E_rc
  int<lower=0> known_cell_values[n_areas, R, C]; // for testing purposes
  int<lower=0, upper=1> use_known_cells; // for testing purposes
+ real<lower = 0> hinge_delta_floor;
+ real<lower = 0> hinge_delta_min;
+ real<lower=0.0> slack_tol;
 }
 transformed data{
   int K;
@@ -131,8 +135,8 @@ transformed data{
   int n_free_areas_rc[R - 1, C - 1]; // count of free areas for each (r, c) for decentred lambdas
   int dev_start_rc[R-1, C-1]; // start for deviation parameters
   int dev_idx = (R-1)*(C-1); // index for deviation parameters in (r, c) order
-  real hinge_delta_floor = 1e-10;
-  real hinge_delta_min = 1e-10;
+  // real hinge_delta_floor = 1e-10;
+  // real hinge_delta_min = 1e-10;
   prior_phi_scale = 100;
   int n_active_cells = 0;
   for (j in 1:n_areas)
@@ -541,7 +545,7 @@ parameters{
   // real<lower=0> sigma_j;
   // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
 
-  real<lower=0> sigma_jrc_raw[K_sigmas];
+  real sigma_jrc_raw[K_sigmas];
   real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
   vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   real LLrep_raw[n_areas, R_ll, C_ll];
@@ -564,7 +568,7 @@ transformed parameters{
   real LLrep_jrc[n_areas, R_ll, C_ll];
   real lambda_mu_LLrep[lflag_rawscw==0 ? R_ll : 0, C_ll];
   real<lower=0> cell_values[n_areas, R, C];
-  real<lower=0> expected_cell_values[n_areas, R, C];
+  real log_expected_cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
   matrix<lower=0>[R_ll, C_ll] sigma_jrc;
   real composition_arr[n_areas, R, C] = rep_array(0.0, n_areas, R, C);
@@ -604,9 +608,9 @@ if(lflag_fix_sigma_jrc==1){
               if(lflag_vary_sd == 0){
                 sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
               } else if(lflag_vary_sd==1){
-                sigma_jrc[r,c] = sigma_jrc_raw[s];
+                sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
               } else if(lflag_vary_sd == 2){
-                sigma_jrc[r,c] = sigma_jrc_raw[s];
+                sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
               }
           }
       }
@@ -643,22 +647,22 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
       }
 
       row_vector[C] clr_row = to_row_vector(LLrep_jrc[j, r]) * V_ilr';
-      vector[C] composition = softmax(to_vector(clr_row));
-      for (c in 1:C) composition_arr[j, r, c] = composition[c];
+      vector[C] log_composition = log_softmax(to_vector(clr_row));
+      for (c in 1:C) composition_arr[j, r, c] = exp(log_composition[c]);
 
       for (c in 1:C)
-        expected_cell_values[j, r, c] = exp(row_effect[j, r]) * composition[c];
+        log_expected_cell_values[j, r, c] = row_effect[j, r] + log_composition[c];
     }
   }
 if(lflag_noncentred == 1){
-  cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, hinge_delta_floor, hinge_delta_min);
+  cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, hinge_delta_floor, hinge_delta_min, slack_tol);
 } else if(lflag_noncentred == 0){
-  cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min);
+  cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min, slack_tol);
 }
   for(j in 1:n_areas){
     for (r in 1:R){
       for(c in 1:C){
-        log_cv[j, r, c] = fmax(log(cell_values[j, r, c]), 1e-10);
+        log_cv[j, r, c] = log(robust_hinge_floor_zero(cell_values[j, r, c], hinge_delta_min));
       }
     }
   }
@@ -721,17 +725,20 @@ if(lflag_predictors_cm){
   }
 }
 
-// margin-generating layer — every row
+if(lflag_pin_row_effect == 1){
+  // margin-generating layer — every row
   for (j in 1:n_areas)
       target += realpoisson_lpdf(row_margins[j] | exp(to_vector(row_effect[j])));
+}
+
 {
     row_vector[n_active_cells] obs_flat;
-    vector[n_active_cells] rate_flat;
+    vector[n_active_cells] log_rate_flat;
     for (idx in 1:n_active_cells) {
       obs_flat[idx]  = cell_values[active_j[idx], active_r[idx], active_c[idx]];
-      rate_flat[idx] = fmax(expected_cell_values[active_j[idx], active_r[idx], active_c[idx]], 1e-8);
+      log_rate_flat[idx] = log_expected_cell_values[active_j[idx], active_r[idx], active_c[idx]];
     }
-    target += realpoisson_lpdf(obs_flat | rate_flat);
+    target += realpoisson_lograte_lpdf(obs_flat | log_rate_flat);
   }
 //
 // for (r in 1:R_ll){
@@ -839,15 +846,13 @@ if(lflag_fix_sigma_jrc == 1){
           for(c in 1:C){
             if(structural_zeros[j,r,c]==0){
               counter_cell += 1;
-              log_cv_row_vector[counter_cell] = log_cv[j, r, c];
-              if(use_known_cells == 1){
-                known_cell_values_row_vector[counter_cell] = known_cell_values[j, r, c];
+              log_cv_row_vector[counter_cell] = log_expected_cell_values[j, r, c];
+              known_cell_values_row_vector[counter_cell] = known_cell_values[j, r, c];
                 }
               }
             }
           }
-        }
-      target += poisson_lpmf(known_cell_values_row_vector | exp(log_cv_row_vector) + 1e-10);
+      target += poisson_lpmf(known_cell_values_row_vector | exp(log_cv_row_vector));
     }
 }
 generated quantities{
