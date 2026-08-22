@@ -643,7 +643,7 @@ if(lflag_fix_sigma_jrc==1){
           for(c in 1:C_ll){
               s += 1;
               if(lflag_vary_sd == 0){
-                sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
+                sigma_jrc = rep_matrix(exp(sigma_jrc_raw[1]), R_ll, C_ll);
               } else if(lflag_vary_sd==1){
                 sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
               } else if(lflag_vary_sd == 2){
