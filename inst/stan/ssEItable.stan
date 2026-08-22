@@ -330,6 +330,9 @@ for(j in 1:n_areas){
   non0_rm = sum(free_R);
   non0_cm = sum(free_C);
 
+
+
+
   // Parameter Trackers for cell, row, column and table sequential cell weights
   int n_param_alpha = 0;
   int n_param_beta = 0;
@@ -377,6 +380,40 @@ for(j in 1:n_areas){
       n_param_gamma += (fr - 1) * (fc - 1);
     }
   }
+
+  // Param offset tracker
+  real neutral_logit_offset[n_param];
+
+  int count = 0;
+  for(j in 1:n_areas){
+    for(r in 1:(free_R[j] - 1)){
+      for(c in 1:(free_C[j] - 1)){
+        count += 1;
+        neutral_logit_offset[count] = log(free_C[j] - c);
+      }
+    }
+  }
+  array[n_areas, R] int active_row_map = rep_array(0, n_areas, R);
+  array[n_areas, C] int active_col_map = rep_array(0, n_areas, C);
+
+  for(j in 1:n_areas){
+    int t = 0;
+    for (r in 1:R){
+      if (row_margins[j,r]>0) {
+        t += 1;
+         active_row_map[j, t] = r;
+        }
+    }
+    int s = 0;
+    for (c in 1:C){
+      if (col_margins[j,c]>0){
+        s += 1;
+        active_col_map[j, s] = c;
+        }
+      }
+    }
+
+
 
   // Parameter Trackers for decentred sequential cell weights with lambda_mu and then sum to zero lambda deviations from lambda_mu in each (r,c)
 
@@ -826,10 +863,28 @@ if(lflag_fix_sigma_jrc == 1){
 
     // hinge_delta_floor ~ normal(0, .1);
     // hinge_delta_min ~ normal(0, .1);
-    if(lflag_rawscw == 1){
-      lambda_raw ~ normal(0, prior_lambda_raw_scale);
-    } else {
-      // lambda_raw ~ std_normal();
+    if(lflag_noncentred == 0){
+      lambda_raw ~ normal(neutral_logit_offset, prior_lambda_raw_scale);
+    } else if(lflag_noncentred==1){
+      real comp_logit_offset[n_param];
+      int counter = 0;
+      for(j in 1:n_areas){
+        for(r in 1:(free_R[j] - 1)){
+          vector[free_C[j]] comp_row;
+          for(k in 1:free_C[j]) {
+           comp_row[k] = composition_arr[j, active_row_map[j, r], active_col_map[j, k]];
+         }
+
+          for(c in 1:(free_C[j] - 1)){
+            counter += 1;
+           real remaining_comp_sum = sum(comp_row[c:free_C[j]]);
+           real this_share = comp_row[c]/remaining_comp_sum;
+           // real neutral_logit = -log(cols_remaining);
+           comp_logit_offset[counter] = -1 * logit(this_share);
+          }
+        }
+      }
+      lambda_raw ~ normal(comp_logit_offset, prior_lambda_raw_scale);
     }
     // lambda_raw ~ normal(lambda_raw_mu, 1);
     // lambda_raw_sigma ~ normal(0, prior_sigma_c_scale);
