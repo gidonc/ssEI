@@ -88,7 +88,8 @@ prep_options_stan <- function(use_dist,
                               noncentred,
                               noncentred_mat,
                               raw_seq_cell_weights,
-                              family
+                              family,
+                              E_rc_hier
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -128,6 +129,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!family %in% c("lognormal", "cauchy", "Gamma")) {
     stop("family must be one of: lognormal, cauchy, Gamma")
+  }
+  if(!E_rc_hier %in% c(TRUE, FALSE)){
+    stop("E_rc_heir must be one of: TRUE, FALSE")
   }
   list(
     lflag_dist = dplyr::case_when(
@@ -187,6 +191,10 @@ prep_options_stan <- function(use_dist,
       family == "lognormal" ~ 0,
       family == "cauchy" ~ 1,
       family == "Gamma" ~ 2
+    ),
+    lflag_E_rc_hier = dplyr::case_when(
+      E_rc_hier == TRUE ~ 1,
+      E_rc_hier == FALSE ~ 0
     )
   )
 }

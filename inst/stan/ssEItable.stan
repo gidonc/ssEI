@@ -43,6 +43,7 @@ data{
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2)paramertization
  int<lower=0, upper=2> lflag_family; // flag indicating whether scale of LLrep distribution is based on log-normal (0), cauchy(1) or Gamma (2) family
+ int<lower=0, upper=1> lflag_E_rc_hier; // does E_rc have hyperparameters (1) or is it based on E_rc_prior (0)
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
@@ -595,6 +596,9 @@ real<lower=0> sigma_jrc_direct[(lflag_family == 2) ? K_sigmas : 0];
 real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0];
 vector[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0] sigma_c_mu;
 
+  real E_rc_mu[(lflag_E_rc_hier == 1) ? 1 : 0];       // shared centre across all cells
+  real<lower=0> E_rc_sigma[(lflag_E_rc_hier == 1) ? 1 : 0];
+
 // partial-pooling hyperparameters, gamma (mean + shape/concentration parameterization)
 real<lower=0> sigma_c_mu_gamma[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
 real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
@@ -705,8 +709,10 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
 
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
-  } else if (lflag_rawscw==1){
-      E_rc = E_rc_raw;
+  } else if (lflag_E_rc_hier==1){
+      E_rc = E_rc_mu[1] + E_rc_raw;
+  } else {
+    E_rc = E_rc_prior + E_rc_raw;
   }
 
   for (j in 1:n_areas) {
@@ -876,9 +882,19 @@ for(j in 1:n_areas){
   }
 }
 if(lflag_rawscw == 1){
-  for(r in 1:R_ll){
-      E_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
+  if(lflag_E_rc_hier == 1){
+    E_rc_mu ~ normal(0, prior_mu_re_scale);
+    E_rc_sigma ~ gamma(prior_gamma_shape, prior_gamma_rate);
+    for(r in 1:R_ll){
+      E_rc_raw[r, 1:C_ll] ~ normal(0, E_rc_sigma[1]);
     }
+  } else{
+    for(r in 1:R_ll){
+        E_rc_raw[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
+    }
+
+
+  }
 } else if(lflag_rawscw == 0){
   for(r in 1:(R - 1)){
     lambda_mu_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);

@@ -44,6 +44,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         pin_row_effect = FALSE,
                         predictors_cm = FALSE,
                         noncentred = TRUE,
+                        E_rc_hier = FALSE,
                         noncentred_mat = matrix(1, nrow=3, ncol=2),
                         family = "lognormal",
                         raw_seq_cell_weights = FALSE,
@@ -93,7 +94,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            noncentred = noncentred,
                            noncentred_mat = noncentred_mat,
                            raw_seq_cell_weights = raw_seq_cell_weights,
-                           family = family
+                           family = family,
+                           E_rc_hier = E_rc_hier
                          ))
   standata <- modifyList(standata,
                          prep_priors_stan(
