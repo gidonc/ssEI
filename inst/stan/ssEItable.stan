@@ -42,6 +42,7 @@ data{
  int n_ilr_rows; // number of rows in the basic construction passed to Stan (for ILR 3 case)
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2)paramertization
+ int<lower=0, upper=2> lflag_family; // flag indicating whether scale of LLrep distribution is based on log-normal (0), cauchy(1) or Gamma (2) family
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
@@ -69,6 +70,8 @@ data{
  real<lower=0> prior_sigma_re_scale; //prior of scale for sigma_re
  real<lower=0> prior_cell_effect_scale; //prior of scale for average cell effects
  real<lower=0> prior_lambda_raw_scale; // prior of scale of the raw lambda_raw (greed) parameters (e.g. logit of the consumption of available mass in each cell)
+ real<lower=0> prior_gamma_shape;
+ real<lower=0> prior_gamma_rate;
  matrix[R_ll, C_ll] E_rc_prior; // empirically informed prior centres for E_rc
  int<lower=0> known_cell_values[n_areas, R, C]; // for testing purposes
  int<lower=0, upper=1> use_known_cells; // for testing purposes
@@ -580,11 +583,25 @@ parameters{
   // vector<lower=0, upper= 1> [n_areas*has_theta] theta;
   // vector<lower=0> [has_theta] phi;
   // real<lower=0> sigma_j;
-  // matrix<lower=0>[R - 1, C - 1] sigma_jrc;
+  // matrix<lower=0>[R - 1, C - 1] sigma_jrc;,
 
-  real sigma_jrc_raw[K_sigmas];
-  real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
-  vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
+  // lognormal (0) and cauchy (1) share this additive/log-scale structure
+real sigma_jrc_raw[(lflag_family != 2) ? K_sigmas : 0];
+
+// gamma (2): direct positive parameter, no log-transform
+real<lower=0> sigma_jrc_direct[(lflag_family == 2) ? K_sigmas : 0];
+
+// partial-pooling hyperparameters, additive families
+real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0];
+vector[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0] sigma_c_mu;
+
+// partial-pooling hyperparameters, gamma (mean + shape/concentration parameterization)
+real<lower=0> sigma_c_mu_gamma[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
+real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
+
+  // real sigma_jrc_raw[K_sigmas];
+  // real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2) ? 1 : 0];
+  // vector[(lflag_vary_sd == 2) ? 1 : 0] sigma_c_mu;
   real LLrep_raw[n_areas, R_ll, C_ll];
   vector[n_areas * R_ll] row_effect_raw;
   real mu_re;
@@ -634,25 +651,46 @@ transformed parameters{
 
   // array[lflag_rawscw == 0 ? n_areas: 0, R - 1, C - 1] real lambda_dev = rep_array(0.0, n_areas, R - 1, C - 1);
   // matrix[lflag_rawscw == 0 ? R_ll: 0, C_ll] E_rc_baseline;
-
 if(lflag_fix_sigma_jrc==1){
   sigma_jrc = sigma_jrc_fixed;
-    } else if(lflag_rawscw==1||lflag_rawscw==0){
-      int s = 0;
-      for(r in 1:R_ll){
-          for(c in 1:C_ll){
-              s += 1;
-              if(lflag_vary_sd == 0){
-                sigma_jrc = rep_matrix(sigma_jrc_raw[1], R_ll, C_ll);
-              } else if(lflag_vary_sd==1){
-                sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
-              } else if(lflag_vary_sd == 2){
-                sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
-              }
-          }
+} else if(lflag_rawscw==1||lflag_rawscw==0){
+  if(lflag_vary_sd == 0){
+    // single shared value, broadcast to every cell
+    real shared_val = (lflag_family == 2) ? sigma_jrc_direct[1] : exp(sigma_jrc_raw[1]);
+    sigma_jrc = rep_matrix(shared_val, R_ll, C_ll);
+  } else {
+    int s = 0;
+    for(r in 1:R_ll){
+      for(c in 1:C_ll){
+        s += 1;
+        if(lflag_family == 2){
+          sigma_jrc[r,c] = sigma_jrc_direct[s];
+        } else {
+          sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
+        }
       }
+    }
   }
+}
 
+// if(lflag_fix_sigma_jrc==1){
+//   sigma_jrc = sigma_jrc_fixed;
+//     } else if(lflag_rawscw==1||lflag_rawscw==0){
+//       int s = 0;
+//       for(r in 1:R_ll){
+//           for(c in 1:C_ll){
+//               s += 1;
+//               if(lflag_vary_sd == 0){
+//                 sigma_jrc = rep_matrix(exp(sigma_jrc_raw[1]), R_ll, C_ll);
+//               } else if(lflag_vary_sd==1){
+//                 sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
+//               } else if(lflag_vary_sd == 2){
+//                 sigma_jrc[r,c] = exp(sigma_jrc_raw[s]);
+//               }
+//           }
+//       }
+//   }
+//
 if(lflag_rawscw == 1||lflag_rawscw==0){
     for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
@@ -846,20 +884,61 @@ if(lflag_rawscw == 1){
     lambda_mu_rc[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
   }
 }
-
 if(lflag_fix_sigma_jrc == 1){
-
-}  else if(lflag_vary_sd == 2){
+  // nothing
+} else if(lflag_vary_sd == 0){
+  // single shared parameter, straightforward prior regardless of family
+  if(lflag_family == 2){
+    sigma_jrc_direct[1] ~ gamma(prior_gamma_shape, prior_gamma_rate);
+  } else if(lflag_family == 0){
+    sigma_jrc_raw[1] ~ normal(prior_sigma_mu, prior_sigma_c_scale);
+  } else {
+    sigma_jrc_raw[1] ~ cauchy(prior_sigma_mu, prior_sigma_c_scale);
+  }
+} else if(lflag_family == 2){
+  // --- Gamma family, vary (1) or partial (2) ---
+  if(lflag_vary_sd == 2){
+    sigma_c_mu_gamma ~ normal(0, prior_sigma_c_mu_scale) T[0,];
+    sigma_c_shape ~ normal(0, prior_sigma_c_scale) T[0,];
+    for(s in 1:K_sigmas){
+      sigma_jrc_direct[s] ~ gamma(sigma_c_shape[1], sigma_c_shape[1] / sigma_c_mu_gamma[1]);
+    }
+  } else {  // vary_sd == 1
+    to_vector(sigma_jrc_direct) ~ gamma(prior_gamma_shape, prior_gamma_rate);
+  }
+} else {
+  // --- lognormal (0) or cauchy (1), vary (1) or partial (2) ---
+  if(lflag_vary_sd == 2){
     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    // to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
-    for(s in 1:R_ll*C_ll){
+    for(s in 1:K_sigmas){
+      if(lflag_family == 0){
         sigma_jrc_raw[s] ~ normal(sigma_c_mu[1], sigma_c_sigma[1]);
+      } else {
+        sigma_jrc_raw[s] ~ cauchy(sigma_c_mu[1], sigma_c_sigma[1]);
+      }
     }
-} else {
-    to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
-    // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
+  } else {  // vary_sd == 1
+    if(lflag_family == 0){
+      to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
+    } else {
+      to_vector(sigma_jrc_raw) ~ cauchy(prior_sigma_mu, prior_sigma_c_scale);
+    }
+  }
 }
+// if(lflag_fix_sigma_jrc == 1){
+//
+// }  else if(lflag_vary_sd == 2){
+//     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
+//     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
+//     // to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
+//     for(s in 1:R_ll*C_ll){
+//         sigma_jrc_raw[s] ~ normal(sigma_c_mu[1], sigma_c_sigma[1]);
+//     }
+// } else {
+//     to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
+//     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
+// }
 
     // hinge_delta_floor ~ normal(0, .1);
     // hinge_delta_min ~ normal(0, .1);

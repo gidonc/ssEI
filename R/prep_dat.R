@@ -87,7 +87,8 @@ prep_options_stan <- function(use_dist,
                               predictors_cm,
                               noncentred,
                               noncentred_mat,
-                              raw_seq_cell_weights
+                              raw_seq_cell_weights,
+                              family
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -125,7 +126,9 @@ prep_options_stan <- function(use_dist,
   if(!raw_seq_cell_weights %in% c(TRUE, FALSE)){
     stop("raw_seq_cell_weight must be one of: TRUE, FALSE")
   }
-
+  if(!family %in% c("lognormal", "cauchy", "Gamma")) {
+    stop("family must be one of: lognormal, cauchy, Gamma")
+  }
   list(
     lflag_dist = dplyr::case_when(
       use_dist == "pois" ~ 0,
@@ -179,6 +182,11 @@ prep_options_stan <- function(use_dist,
     lflag_llmod_omit_jrc = dplyr::case_when(
       llmod_omit_jrc == TRUE ~ 1,
       llmod_omit_jrc == FALSE ~ 0
+    ),
+    lflag_family = dplyr::case_when(
+      family == "lognormal" ~ 0,
+      family == "cauchy" ~ 1,
+      family == "Gamma" ~ 2
     )
   )
 }
