@@ -710,9 +710,11 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
   } else if (lflag_E_rc_hier==1){
-      E_rc = E_rc_mu[1] + E_rc_raw;
+      // E_rc = E_rc_mu[1] + E_rc_raw;
+       E_rc = E_rc_raw;
   } else {
-    E_rc = E_rc_prior + E_rc_raw;
+    // E_rc = E_rc_prior + E_rc_raw;
+     E_rc = E_rc_raw;
   }
 
   for (j in 1:n_areas) {
@@ -886,11 +888,11 @@ if(lflag_rawscw == 1){
     E_rc_mu ~ normal(0, prior_mu_re_scale);
     E_rc_sigma ~ gamma(prior_gamma_shape, prior_gamma_rate);
     for(r in 1:R_ll){
-      E_rc_raw[r, 1:C_ll] ~ normal(0, E_rc_sigma[1]);
+      E_rc_raw[r, 1:C_ll] ~ normal(rep_vector(E_rc_mu[1], C_ll), E_rc_sigma[1]);
     }
   } else{
     for(r in 1:R_ll){
-        E_rc_raw[r, 1:C_ll] ~ normal(0, prior_mu_re_scale);
+        E_rc_raw[r, 1:C_ll] ~ normal(E_rc_prior[r, 1:C_ll], prior_mu_re_scale);
     }
 
 
