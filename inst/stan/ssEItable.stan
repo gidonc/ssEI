@@ -46,6 +46,7 @@ data{
  int<lower=0, upper=1> lflag_E_rc_hier; // does E_rc have hyperparameters (1) or is it based on E_rc_prior (0)
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
+ int<lower = 0, upper=2> lflag_neutral_logit; // flag indicating the neutral_logit for the allocation process when sequential weights are all zero. (0) gives equality across the rows [-log(cols_remaining)] (1) gives the independent table logit(col_margin/sum_remaining_col_margins) (2) gives the current composition implied by LLrep structure.
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
@@ -61,6 +62,7 @@ data{
   int<lower=0, upper=1> lflag_fix_sigma_jrc;   // 1 = use fixed values, 0 = estimate
   matrix[R_ll, C_ll] E_rc_fixed;         // fixed values, ignored if fix_E_rc=0
   matrix<lower=0>[R_ll, C_ll] sigma_jrc_fixed;  // fixed values, ignored if fix_sigma_jrc=0
+  int<lower = 0, upper = 1> lflag_lambda_raw_offset; // prior on lambda_raw (0) or lambda + neutral_logit (1)
   real<lower=0> sigma_floor; //minimum value for all sigma
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
  real<lower=0> prior_mu_ce_scale; // prior for scale of col_effect (mean column effect)
@@ -385,18 +387,6 @@ for(j in 1:n_areas){
     }
   }
 
-  // Param offset tracker
-  real neutral_logit_offset[n_param];
-
-  int count = 0;
-  for(j in 1:n_areas){
-    for(r in 1:(free_R[j] - 1)){
-      for(c in 1:(free_C[j] - 1)){
-        count += 1;
-        neutral_logit_offset[count] = log(free_C[j] - c);
-      }
-    }
-  }
   array[n_areas, R] int active_row_map = rep_array(0, n_areas, R);
   array[n_areas, C] int active_col_map = rep_array(0, n_areas, C);
 
@@ -416,6 +406,33 @@ for(j in 1:n_areas){
         }
       }
     }
+
+
+  // Param offset tracker
+  real neutral_logit_flat[n_param];
+  array[n_areas, R - 1, C - 1] real neutral_logit_array = rep_array(0.0, n_areas, R - 1, C - 1);
+
+  {
+  int count = 0;
+  for(j in 1:n_areas){
+    for(r in 1:(free_R[j] - 1)){
+      for(c in 1:(free_C[j] - 1)){
+        count += 1;
+        if(lflag_neutral_logit == 1){
+          real col_sum_active = col_margins[j, active_col_map[j, c]];
+          real remaining_sum = 0;
+          for (k in c:free_C[j]) remaining_sum += col_margins[j, active_col_map[j, k]];
+          real this_share = fmin(fmax(col_sum_active/fmax(remaining_sum, slack_tol), slack_tol), 1 - slack_tol);
+          neutral_logit_flat[count] = logit(this_share);
+          neutral_logit_array[j, r, c] = neutral_logit_flat[count];
+        } else{
+          neutral_logit_flat[count] = -log(free_C[j] - c);
+          neutral_logit_array[j, r, c] = neutral_logit_flat[count];
+        }
+      }
+    }
+  }
+  }
 
 
 
@@ -737,11 +754,13 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
         log_expected_cell_values[j, r, c] = row_effect[j, r] + log_composition[c];
     }
   }
-if(lflag_noncentred == 1){
-  cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, hinge_delta_floor, hinge_delta_min, slack_tol);
-} else if(lflag_noncentred == 0){
-  cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min, slack_tol);
-}
+    cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
+
+// if(lflag_noncentred == 1){
+//   cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, hinge_delta_floor, hinge_delta_min, slack_tol);
+// } else if(lflag_noncentred == 0){
+//   cell_values = ss_assign_cvals_wzeros_hinge_lp(n_areas, R, C, row_margins, col_margins, lambda, hinge_delta_floor, hinge_delta_min, slack_tol);
+// }
   for(j in 1:n_areas){
     for (r in 1:R){
       for(c in 1:C){
@@ -960,9 +979,10 @@ if(lflag_fix_sigma_jrc == 1){
 
     // hinge_delta_floor ~ normal(0, .1);
     // hinge_delta_min ~ normal(0, .1);
-    if(lflag_noncentred == 0){
-      lambda_raw ~ normal(neutral_logit_offset, prior_lambda_raw_scale);
-    } else if(lflag_noncentred==1){
+    if(lflag_lambda_raw_offset==1){
+          if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
+      lambda_raw ~ normal(-neutral_logit_flat, prior_lambda_raw_scale);
+    } else if(lflag_neutral_logit==2){
       real comp_logit_offset[n_param];
       int counter = 0;
       for(j in 1:n_areas){
@@ -982,6 +1002,10 @@ if(lflag_fix_sigma_jrc == 1){
         }
       }
       lambda_raw ~ normal(comp_logit_offset, prior_lambda_raw_scale);
+    }
+
+    } else if(lflag_lambda_raw_offset == 0){
+      lambda_raw ~ normal(0, prior_lambda_raw_scale);
     }
     // lambda_raw ~ normal(lambda_raw_mu, 1);
     // lambda_raw_sigma ~ normal(0, prior_sigma_c_scale);

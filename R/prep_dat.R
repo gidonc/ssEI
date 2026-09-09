@@ -89,7 +89,9 @@ prep_options_stan <- function(use_dist,
                               noncentred_mat,
                               raw_seq_cell_weights,
                               family,
-                              E_rc_hier
+                              E_rc_hier,
+                              neutral_logit,
+                              lambda_raw_offset
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -132,6 +134,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!E_rc_hier %in% c(TRUE, FALSE)){
     stop("E_rc_heir must be one of: TRUE, FALSE")
+  }
+  if(!neutral_logit %in% c("row", "table", "llrep")){
+    stop("neutral logit must be one of: row, table, llrep")
   }
   list(
     lflag_dist = dplyr::case_when(
@@ -195,7 +200,18 @@ prep_options_stan <- function(use_dist,
     lflag_E_rc_hier = dplyr::case_when(
       E_rc_hier == TRUE ~ 1,
       E_rc_hier == FALSE ~ 0
+    ),
+    lflag_neutral_logit = dplyr::case_when(
+      neutral_logit == "row" ~ 0,
+      neutral_logit == "table" ~ 1,
+      neutral_logit == "llrep" ~ 2
+    ),
+    lflag_lambda_raw_offset = dplyr::case_when(
+      lambda_raw_offset == TRUE ~ 1,
+      lambda_raw_offset == FALSE ~ 0
     )
+
+
   )
 }
 

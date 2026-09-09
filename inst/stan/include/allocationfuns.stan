@@ -146,7 +146,8 @@
         matrix row_margins, matrix col_margins,
         real[,,] lambda,
         real[,,] composition,
-        real delta_floor, real delta_min, real slack_tol){
+        real[,,] neutral_logit_array,
+        real delta_floor, real delta_min, real slack_tol, int lflag_neutral_logit){
     // constrains using sequential sampling approach described in Chen et. al 2005
     // function to transform unconstrained (R-1)*(C-1) unconstrained parameters (lambda) into an RxC matrix with fixed row and column margins. The function completes the internal structure  across matrices from n_areas regions
     // The function completes cell_value (which is n_area R*C matricies) because indexing errors are easier to spot with this structure. The function returns a flattened version of this information, together with an additional value, which is the contains the log determinant of the transform from the unconstrained lambda parameter to the cell values.
@@ -217,15 +218,19 @@
            upper_bound=robust_hinge_min(upper_pos, delta_min);
            if (upper_bound - lower_bound < -slack_tol) reject("Negative cell width:", upper_bound - lower_bound);
 
-           int cols_remaining = free_C - c;
-           real remaining_comp_sum = sum(comp_row[c:free_C]);
-           real this_share = comp_row[c]/fmax(remaining_comp_sum, 1e-10);
-           // real neutral_logit = -log(cols_remaining);
-           real neutral_logit = logit(this_share);
-           real x = neutral_logit + lambda[j, r, c];
+           real neutral_logit;
 
+           if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
+             neutral_logit = neutral_logit_array[j, r, c];
+           } else if(lflag_neutral_logit == 2){
+             real remaining_comp_sum = sum(comp_row[c:free_C]);
+             real this_share = comp_row[c]/fmax(remaining_comp_sum, 1e-10);
+             neutral_logit = logit(this_share);
+           }
+
+           real x = neutral_logit + lambda[j, r, c];
            real width = robust_hinge_floor_zero(upper_bound - lower_bound, delta_min);
-           this_inv_logit = inv_logit(neutral_logit + lambda[j,r,c]);
+           this_inv_logit = inv_logit(x);
 
            tmp_cell_value[r,c]= lower_bound + this_inv_logit*width;
 
