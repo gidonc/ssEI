@@ -91,7 +91,9 @@ prep_options_stan <- function(use_dist,
                               family,
                               E_rc_hier,
                               neutral_logit,
-                              lambda_raw_offset
+                              lambda_raw_offset,
+                              rotate_llrep,
+                              rotate_E_rc
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -137,6 +139,12 @@ prep_options_stan <- function(use_dist,
   }
   if(!neutral_logit %in% c("row", "table", "llrep")){
     stop("neutral logit must be one of: row, table, llrep")
+  }
+  if(!rotate_llrep %in% c(TRUE, FALSE)){
+    stop("rotate llrep must be one of: TRUE, FALSE")
+  }
+  if(!rotate_E_rc %in% c(TRUE, FALSE)){
+    stop("rotate E_rc must be one of: TRUE, FALSE")
   }
   list(
     lflag_dist = dplyr::case_when(
@@ -209,7 +217,16 @@ prep_options_stan <- function(use_dist,
     lflag_lambda_raw_offset = dplyr::case_when(
       lambda_raw_offset == TRUE ~ 1,
       lambda_raw_offset == FALSE ~ 0
+    ),
+    lflag_rot_llrep = dplyr::case_when(
+      rotate_llrep == TRUE ~ 1,
+      rotate_llrep == FALSE ~ 0
+    ),
+    lflag_rot_E_rc = dplyr::case_when(
+      rotate_E_rc == TRUE ~ 1,
+      rotate_E_rc == FALSE ~ 0
     )
+
 
 
   )
@@ -271,6 +288,80 @@ prep_gq <- function(rm, cm){
 }
 
 #' @export
+#'
+mk_row_priority_V_ilr <- function(R, C, byrow = TRUE) {
+  N <- R * C
+  D <- N - 1
+  S <- matrix(0, nrow = N, ncol = D)
+
+  # Helper to map 2D cell coordinate (r, c) to 1D vector index
+  get_idx <- function(r, c) {
+    if (byrow) {
+      return((r - 1) * C + c)  # Row-major (Stan style)
+    } else {
+      return(r + (c - 1) * R)  # Column-major (R default as.vector)
+    }
+  }
+
+  k <- 1
+
+  # 1. Row splits: (R - 1) balances
+  for (r_split in 1:(R - 1)) {
+    pos_cells <- c()
+    neg_cells <- c()
+
+    # Positive group: row r_split across all columns
+    for (c in 1:C) pos_cells <- c(pos_cells, get_idx(r_split, c))
+
+    # Negative group: remaining rows (r_split + 1):R across all columns
+    for (r_rem in (r_split + 1):R) {
+      for (c in 1:C) neg_cells <- c(neg_cells, get_idx(r_rem, c))
+    }
+
+    S[pos_cells, k] <- 1
+    S[neg_cells, k] <- -1
+    k <- k + 1
+  }
+
+  # 2. Column splits within each row: R * (C - 1) balances
+  for (r in 1:R) {
+    # First column split isolating the last column (C)
+    pos_cells <- get_idx(r, C)
+    neg_cells <- sapply(1:(C - 1), function(c) get_idx(r, c))
+
+    S[pos_cells, k] <- 1
+    S[neg_cells, k] <- -1
+    k <- k + 1
+
+    # Subsequent splits on remaining columns 1..(C-1)
+    if (C > 2) {
+      for (c_split in 1:(C - 2)) {
+        pos_c <- get_idx(r, c_split)
+        neg_c <- sapply((c_split + 1):(C - 1), function(c) get_idx(r, c))
+
+        S[pos_c, k] <- 1
+        S[neg_c, k] <- -1
+        k <- k + 1
+      }
+    }
+  }
+
+  # Normalize sign matrix S into orthonormal ILR basis matrix V_ilr
+  V_ilr <- matrix(0, nrow = N, ncol = D)
+  for (col in 1:D) {
+    pos <- S[, col] == 1
+    neg <- S[, col] == -1
+    n_pos <- sum(pos)
+    n_neg <- sum(neg)
+
+    V_ilr[pos, col] <-  sqrt(n_neg / (n_pos * (n_pos + n_neg)))
+    V_ilr[neg, col] <- -sqrt(n_pos / (n_neg * (n_pos + n_neg)))
+  }
+
+  return(V_ilr)
+}
+
+#' @export
 build_gm_ilr_basis <- function(C, ref_col = C) {
   # Reorder so reference category is last
   cat_order <- c(setdiff(1:C, ref_col), ref_col)
@@ -299,34 +390,37 @@ build_gm_ilr_basis <- function(C, ref_col = C) {
 
 #' @export
 #'
-mk_E_rc <- function(known_cell_values, V_ilr){
+mk_E_rc <- function(known_cell_values, V_ilr, near_zero = 1e-2){
   J <- dim(known_cell_values)[1]
   R <- dim(known_cell_values)[2]
   C <- dim(known_cell_values)[3]
-  D <- C - 1
-  Y <- array(NA, dim = c(J, R, D))
-  E_rc <- matrix(NA, nrow = R, ncol = D)
-  sigma_jrc <- matrix(NA, nrow=R, ncol = D)
+  D <- R * C - 1
+  Y <- array(NA, dim = c(J, D))
+  E_rc <- vector("numeric", length = D)
+  sigma_jrc <- vector("numeric", length = D)
   for (j in 1:J){
+    idx <- 0
+    comp <- vector("numeric", length = D + 1)
     for(r in 1:R){
-      comp <- known_cell_values[j, r, ]
-      if(any(comp<= 0)){
-        comp[comp<=0] <- 1e-3
+      for(c in 1:C){
+        idx <- idx + 1
+        comp[idx] <- known_cell_values[j, r, c]
       }
-      comp <- comp/sum(comp)
-      Y[j,r, ] <- log(comp) %*% V_ilr
     }
+    if(any(comp<= 0)){
+      comp[comp<=0] <- near_zero
+    }
+    comp <- comp/sum(comp)
+    Y[j,] <- log(comp) %*% V_ilr
   }
-  for(r in 1:R){
-    for(d in 1:D){
-      E_rc[r, d] <- mean(Y[,r, d])
-      sigma_jrc[r, d] <- sd(Y[,r, d])
-    }
+  for(d in 1:D){
+    E_rc[d] <- mean(Y[,d])
+    sigma_jrc[d] <- sd(Y[,d])
   }
   return(
     list(
       E_rc = E_rc,
-      simga_jrc = sigma_jrc
+      sigma_jrc = sigma_jrc
     )
   )
 }

@@ -7,6 +7,37 @@
         return(delta*log1p_exp(x/delta));
       }
 
+  matrix make_helmert_basis(int N) {
+    matrix[N, N - 1] V = rep_matrix(0.0, N, N - 1);
+    for (k in 1:(N - 1)) {
+      real r_k = k;
+      real norm_const = sqrt(r_k * (r_k + 1.0));
+      for (i in 1:k) {
+        V[i, k] = 1.0 / norm_const;
+      }
+      V[k + 1, k] = -r_k / norm_const;
+    }
+    return V;
+  }
+  matrix kronecker_prod(matrix A, matrix B) {
+    int rA = rows(A);
+    int cA = cols(A);
+    int rB = rows(B);
+    int cB = cols(B);
+    matrix[rA * rB, cA * cB] C;
+
+    for (i in 1:rA) {
+      for (j in 1:cA) {
+        for (k in 1:rB) {
+          for (l in 1:cB) {
+            C[(i - 1) * rB + k, (j - 1) * cB + l] = A[i, j] * B[k, l];
+          }
+        }
+      }
+    }
+    return C;
+  }
+
 
       real[,,] ss_assign_cvals_wzeros_hinge_lp (int n_areas, int R, int C, matrix row_margins, matrix col_margins, real[,,] lambda, real delta_floor, real delta_min, real slack_tol){
     // constrains using sequential sampling approach described in Chen et. al 2005
