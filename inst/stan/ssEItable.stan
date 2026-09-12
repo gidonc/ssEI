@@ -37,7 +37,7 @@ data{
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
   matrix[(R * C), (R * C) - 1] V_ilr; // basis matrix for ILR transformation
-  matrix[(R * C) - 1, (R * C) - 1] ROT; //ilr rotation from raw to model basis
+ // matrix[(R * C) - 1, (R * C) - 1] ROT; //ilr rotation from raw to model basis
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
  // vector[(R * C) - 1] mu_llrep;
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
@@ -538,28 +538,31 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     K_sigma_c_sigma = 1;
   }
 
-  // int D = R * C;
-  //
-  // // 1. Generate Helmert bases inside Stan
-  // matrix[R, R - 1] Vll_helmert_R = make_helmert_basis(R);
-  // matrix[C, C - 1] Vll_helmert_C = make_helmert_basis(C);
-  //
-  // // 2. Column vectors for grand total scaling
-  // matrix[R, 1] j_R = rep_matrix(1.0 / sqrt(R), R, 1);
-  // matrix[C, 1] j_C = rep_matrix(1.0 / sqrt(C), C, 1);
-  //
-  // // 3. Kronecker blocks
-  // matrix[D, R - 1] V_row_block = kronecker_prod(Vll_helmert_R, j_C);
-  // matrix[D, C - 1] V_col_block = kronecker_prod(j_R, Vll_helmert_C);
-  // matrix[D, (R - 1) * (C - 1)] V_resid_block = kronecker_prod(Vll_helmert_R, Vll_helmert_C);
-  //
-  // // 4. Combine into full space basis and build rotation matrix
-  // matrix[D, D - 1] V_row_col = append_col(
-  //   append_col(V_row_block, V_col_block),
-  //   V_resid_block
-  // );
-  //
-  // matrix[D - 1, D - 1] ROT = V_row_col' * V_ilr;
+  int D = R * C;
+  int Dm1 = D - 1;
+  int Dtot = n_areas * D;
+  int Dtot_m1 = Dtot - 1;
+
+  matrix[n_areas, n_areas - 1] V_area = make_helmert_basis(n_areas);
+  matrix[D, 1] j_cell = rep_matrix(1.0 / sqrt(D), D, 1);
+  matrix[n_areas, 1] j_area = rep_matrix(1.0 / sqrt(n_areas), n_areas, 1);
+
+  // Nested/raw basis: aggregate shape, area-volume allocation, area-shape deviations
+  matrix[Dtot, Dm1] B_agg = kronecker_prod(j_area, V_ilr);
+  matrix[Dtot, n_areas - 1] B_vol = kronecker_prod(V_area, j_cell);
+  matrix[Dtot, (n_areas - 1) * Dm1] B_dev = kronecker_prod(V_area, V_ilr);
+  matrix[Dtot, Dtot_m1] V_nested = append_col(append_col(B_agg, B_vol), B_dev);
+
+  // Flat/target basis: each area's own V_ilr block-diagonal, same volume block
+  matrix[Dtot, n_areas * Dm1] V_block_diag = rep_matrix(0.0, Dtot, n_areas * Dm1);
+  for (j in 1:n_areas) {
+    V_block_diag[((j-1)*D+1):(j*D), ((j-1)*Dm1+1):(j*Dm1)] = V_ilr;
+  }
+  matrix[Dtot, Dtot_m1] V_flat = append_col(V_block_diag, B_vol);
+
+  matrix[Dtot_m1, Dtot_m1] ROT = V_flat' * V_nested;   // built once
+
+
 
 }
 parameters{
@@ -581,14 +584,18 @@ vector[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0] sigma_c_mu;
 real<lower=0> sigma_c_mu_gamma[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
 real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
 
-  real LLrep_raw[n_areas, (R * C) - 1];
-  vector[n_areas] log_volume;
+  // real LLrep_raw[n_areas, (R * C) - 1];
+  // vector[n_areas] log_volume;
+  vector[Dtot_m1] LLrep_plus_log_volume_raw;
+  real log_volume_raw;
 
   vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
-  matrix[n_areas, (R * C) - 1] LLrep_jrc;
+  matrix[n_areas, Dm1] LLrep_jrc;
+  real log_grand_volume;
+  vector[n_areas] log_volume;
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
@@ -638,19 +645,27 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
     E_rc = E_rc_raw;
   }
 
+  {
+  vector[Dtot_m1] LLrep_plus_log_volume = ROT * LLrep_plus_log_volume_raw;
+  vector[n_areas - 1] vol_coeffs;
+  vector[n_areas] vol_dev = rep_vector(0, n_areas);
+  if(lflag_rot_llrep == 1){
+    log_grand_volume = log_volume_raw;
+    vol_coeffs = LLrep_plus_log_volume[(n_areas*Dm1 + 1):Dtot_m1];
+    vol_dev = V_area * vol_coeffs;   // sum-zero deviations from grand mean
+  } else {
+    vol_coeffs = LLrep_plus_log_volume_raw[(n_areas*Dm1 + 1):Dtot_m1];
+    log_volume = append_row(log_volume_raw, vol_coeffs);
+    log_grand_volume = log_sum_exp(log_volume);
+  }
+
   for (j in 1:n_areas) {
-    vector[(R * C) - 1] rowcol_val;
-    for(s in 1:((R * C) - 1)){
-      if(lflag_noncentred_mat[j, s] == 1){
-        rowcol_val[s] = E_rc[s] + sigma_jrc[s] * LLrep_raw[j, s];
-      } else {
-        rowcol_val[s] = LLrep_raw[j, s];
-      }
-    }
+
     if(lflag_rot_llrep == 1){
-      LLrep_jrc[j] = to_row_vector(ROT' * rowcol_val);
+      LLrep_jrc[j] = to_row_vector(LLrep_plus_log_volume[((j-1)*Dm1+1):(j*Dm1)]);
+      log_volume[j] = log_grand_volume + vol_dev[j];
     } else {
-      LLrep_jrc[j] = to_row_vector(rowcol_val);
+      LLrep_jrc[j] = to_row_vector(LLrep_plus_log_volume_raw[((j-1)*Dm1+1):(j*Dm1)]);
     }
 
       row_vector[R * C] clr_table = to_row_vector(LLrep_jrc[j]) * V_ilr';
@@ -665,6 +680,9 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
       }
 
   }
+  }
+
+
     cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
 
   for(j in 1:n_areas){
@@ -808,11 +826,11 @@ for(r in 1:R){
 // }
 for(j in 1:n_areas){
   for(k in 1:((R * C) - 1)){
-      if(lflag_noncentred_mat[j, k]==1){
-        LLrep_raw[j, k] ~ std_normal();
-      } else {
-        LLrep_raw[j,k] ~ normal(E_rc[k], sigma_jrc[k]);
-      }
+      // if(lflag_noncentred_mat[j, k]==1){
+      //   LLrep_raw[j, k] ~ std_normal();
+      // } else {
+        LLrep_jrc[j,k] ~ normal(E_rc[k], sigma_jrc[k]);
+      // }
   }
 }
 if(lflag_rawscw == 1){
