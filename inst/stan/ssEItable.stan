@@ -52,7 +52,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower =0, upper = 1> lflag_pin_row_effect; // flag indicating the model on row effects
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
-  int<lower =0, upper = 1> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
+  int<lower =0, upper = 2> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
   int<lower=0, upper = 1> lflag_noncentred_mat[n_areas, (R * C) - 1]; //flag indicated whether cell is centred (0) or non-centred (1)
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
@@ -650,6 +650,19 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
   vector[n_areas - 1] vol_coeffs;
   vector[n_areas] vol_dev = rep_vector(0, n_areas);
   if(lflag_rot_llrep == 1){
+    vector[Dtot_m1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
+    if(lflag_noncentred !=0){ // 1 = fully noncentred, 2 = aggregate-decentred
+      LLrep_plus_log_volume_xform[1:Dm1] = sqrt(n_areas)*E_rc + sigma_jrc .* LLrep_plus_log_volume_raw[1:Dm1];
+    }
+    if(lflag_noncentred == 1){
+      int dev_start = Dm1 + (n_areas - 1);
+      for (k in 1:(n_areas - 1)){
+        int base = dev_start + (k - 1) * Dm1;
+        LLrep_plus_log_volume_xform[(base + 1):(base + Dm1)] = sigma_jrc .* LLrep_plus_log_volume_raw[(base + 1):(base + Dm1)];
+      }
+    }
+    LLrep_plus_log_volume = ROT * LLrep_plus_log_volume_xform;
+
     log_grand_volume = log_volume_raw;
     vol_coeffs = LLrep_plus_log_volume[(n_areas*Dm1 + 1):Dtot_m1];
     vol_dev = V_area * vol_coeffs;   // sum-zero deviations from grand mean
@@ -778,60 +791,30 @@ for(r in 1:R){
     target += realpoisson_lograte_lpdf(obs_flat | log_rate_flat);
   }
   log_volume ~ normal(0, 10);
-//
-// for (r in 1:R_ll){
-//   for(k in 1:C_ll){
-//     real ss = 0;
-//     for (j in 1:n_areas){
-//       if(row_margins[j, r]>0 && structural_zeros[j, r, k] == 0){
-//         real extra_var = 0;
-//         for (c in 1:C){
-//           if(col_margins[j, c]>0){
-//             extra_var += square(V_ilr[c, k])/fmax(cell_values[j, r, c], 1e-6);
-//           }
-//         }
-//         real total_var = square(sigma_jrc[r, k]) + extra_var;
-//         ss += normal_lpdf(LLrep_jrc[j, r, k] | E_rc[r, k], sqrt(total_var));
-//       }
-//     }
-//     target += ss;
-//   }
-// }
-// if(lflag_rawscw == 1||lflag_rawscw == 0){
-//   for(r in 1:R_ll){
-//       for(c in 1:C_ll){
-//         if(ilr_n[r,c] > 1){
-//           real n  = ilr_n[r,c];
-//           real mu = ilr_mean[r,c];
-//           real v  = ilr_var[r,c];
-//           // Sufficient statistic normal log likelihood
-//           target += -n * log(sigma_jrc[r,c])
-//                     - n * v / (2 * square(sigma_jrc[r,c]))
-//                     - n * square(mu - E_rc[r,c]) / (2 * square(sigma_jrc[r,c]));
-//           }
-//         }
-//     }
-// }
-// if(lflag_rawscw == 0){
-//   for(r in 1:R_ll){
-//     for(c in 1:C_ll){
-//       real n = dev_n[r,c];
-//       real v = dev_var[r, c];
-//       if(dev_n[r, c] > 1){
-//         target += -(n - 1) * log(sigma_jrc[r, c])
-//                   -(n - 1) * dev_ss[r, c]/(2*square(sigma_jrc[r, c]));
-//       }
-//     }
-//   }
-// }
-for(j in 1:n_areas){
-  for(k in 1:((R * C) - 1)){
-      // if(lflag_noncentred_mat[j, k]==1){
-      //   LLrep_raw[j, k] ~ std_normal();
-      // } else {
-        LLrep_jrc[j,k] ~ normal(E_rc[k], sigma_jrc[k]);
-      // }
+
+if(lflag_rot_llrep == 0){
+  for(j in 1:n_areas){
+    LLrep_jrc[j,1:(R*C - 1)] ~ normal(E_rc, sigma_jrc);
   }
+} else if(lflag_rot_llrep == 1){
+  if (lflag_noncentred == 0){
+  LLrep_plus_log_volume_raw[1:Dm1] ~ normal(sqrt(n_areas)*E_rc, sigma_jrc);
+  } else {
+  LLrep_plus_log_volume_raw[1:Dm1] ~ std_normal();
+  }
+  {
+    int dev_start = Dm1 + (n_areas - 1);
+    for (k in 1:(n_areas - 1)){
+      int base = dev_start + (k - 1) * Dm1;
+      if (lflag_noncentred == 1){
+        LLrep_plus_log_volume_raw[(base + 1):(base + Dm1)] ~ std_normal();
+      } else {
+        LLrep_plus_log_volume_raw[(base + 1):(base + Dm1)] ~ normal(0, sigma_jrc);
+      }
+    }
+  }
+
+
 }
 if(lflag_rawscw == 1){
   if(lflag_E_rc_hier == 1){

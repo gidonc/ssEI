@@ -125,8 +125,8 @@ prep_options_stan <- function(use_dist,
   if(!predictors_cm %in% c(TRUE, FALSE)){
     stop("predictors_cm must be one of: TRUE, FALSE")
   }
-  if(!noncentred %in% c(TRUE, FALSE)){
-    stop("noncentred must be one of: TRUE, FALSE")
+  if(!noncentred %in% c("centred", "noncentred", "agg noncentred")){
+    stop("noncentred must be one of: centred, noncentred, agg noncentred")
   }
   if(!raw_seq_cell_weights %in% c(TRUE, FALSE)){
     stop("raw_seq_cell_weight must be one of: TRUE, FALSE")
@@ -168,8 +168,9 @@ prep_options_stan <- function(use_dist,
       predictors_cm == TRUE ~ 1
     ),
     lflag_noncentred = dplyr::case_when(
-      noncentred == FALSE ~ 0,
-      noncentred == TRUE ~ 1
+      noncentred == "centred" ~ 0,
+      noncentred ==  "noncentred" ~ 1,
+      noncentred == "agg noncentred" ~ 2
     ),
     lflag_noncentred_mat = noncentred_mat,
     lflag_rawscw = dplyr::case_when(
