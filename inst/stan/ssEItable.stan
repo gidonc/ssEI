@@ -148,6 +148,8 @@ transformed data{
   // real hinge_delta_floor = 1e-10;
   // real hinge_delta_min = 1e-10;
   prior_phi_scale = 100;
+  array[R * C - 1] int<lower=0, upper =1> lflag_agg_noncent = lflag_noncentred_mat[1, 1:(R * C - 1)];
+  array[n_areas - 1, R * C - 1] int<lower=0, upper =1> lflag_dev_noncent = lflag_noncentred_mat[2:n_areas, 1:(R * C - 1)];
   int n_active_cells = 0;
   for (j in 1:n_areas)
     for (r in 1:R)
@@ -604,6 +606,8 @@ transformed parameters{
   matrix[n_areas, Dm1] LLrep_jrc;
   real log_grand_volume;
   vector[n_areas] log_volume;
+  vector[Dtot_m1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
+
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
@@ -648,15 +652,21 @@ if(lflag_fix_sigma_jrc==1){
   vector[n_areas - 1] vol_coeffs;
   vector[n_areas] vol_dev = rep_vector(0, n_areas);
   if(lflag_rot_llrep == 1){
-    vector[Dtot_m1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
-    if(lflag_noncentred !=0){ // 1 = fully noncentred, 2 = aggregate-decentred
-      LLrep_plus_log_volume_xform[1:Dm1] = sqrt(n_areas)*E_rc + sigma_jrc .* LLrep_plus_log_volume_raw[1:Dm1];
+    for(s in 1:Dm1){
+      if(lflag_agg_noncent[s]==1){
+        LLrep_plus_log_volume_xform[s] = sqrt(n_areas)*E_rc[s] + sigma_jrc[s] * LLrep_plus_log_volume_raw[s];
+      }
     }
-    if(lflag_noncentred == 1){
+    {
       int dev_start = Dm1 + (n_areas - 1);
-      for (k in 1:(n_areas - 1)){
+      for(k in 1:(n_areas - 1)){
         int base = dev_start + (k - 1) * Dm1;
-        LLrep_plus_log_volume_xform[(base + 1):(base + Dm1)] = sigma_jrc .* LLrep_plus_log_volume_raw[(base + 1):(base + Dm1)];
+        for(s in 1:Dm1){
+          if(lflag_dev_noncent[k, s] == 1){
+            int idx = base + s;
+            LLrep_plus_log_volume_xform[idx] = sigma_jrc[s]*LLrep_plus_log_volume_raw[idx];
+          }
+        }
       }
     }
     LLrep_plus_log_volume = ROT * LLrep_plus_log_volume_xform;
@@ -767,41 +777,7 @@ for(r in 1:R){
     global_prop[r,c] = overall_values[r,c] / fmax(global_rm[1, r], 1e-10);
   }
 }
-// for(j in 1:n_areas){
-//     for(c in 1:C){
-//         implied_col_var[j,c] = 0;
-//         for(r in 1:R_ll){
-//             for(c_ll in 1:C_ll){
-//                 real J = row_margins[j,r] * global_prop[r,c] *
-//                          (V_ilr[c,c_ll] -
-//                           dot_product(global_prop[r,:], col(V_ilr,c_ll)));
-//                 implied_col_var[j,c] += square(J) * square(sigma_jrc[r,c_ll]);
-//             }
-//         }
-//     }
-// }
-//
-// if(lflag_predictors_cm){
-//   for(j in 1:n_areas){
-//     for(c in 1:C){
-//         real implied = dot_product(row_margins[j,:], col(global_prop,c));
-//         col_margins[j,c] ~ normal(implied, sqrt(fmax(implied_col_var[j,c], 1e-10)));
-//     }
-//   }
-// }
-//
 
-
-
-// {
-//     row_vector[n_active_cells] obs_flat;
-//     vector[n_active_cells] log_rate_flat;
-//     for (idx in 1:n_active_cells) {
-//       obs_flat[idx]  = cell_values[active_j[idx], active_r[idx], active_c[idx]];
-//       log_rate_flat[idx] = log_expected_cell_values[active_j[idx], active_r[idx], active_c[idx]];
-//     }
-//     target += realpoisson_lograte_lpdf(obs_flat | log_rate_flat);
-//   }
   log_volume ~ normal(0, 10);
 
 if(lflag_rot_llrep == 0){
@@ -809,23 +785,27 @@ if(lflag_rot_llrep == 0){
     LLrep_jrc[j,1:(R*C - 1)] ~ normal(E_rc, sigma_jrc);
   }
 } else if(lflag_rot_llrep == 1){
-  if (lflag_noncentred == 0){
-  LLrep_plus_log_volume_raw[1:Dm1] ~ normal(sqrt(n_areas)*E_rc, sigma_jrc);
-  } else {
-  LLrep_plus_log_volume_raw[1:Dm1] ~ std_normal();
+  for (s in 1:Dm1){
+    if(lflag_agg_noncent[s]==1){
+      LLrep_plus_log_volume_raw[s] ~ std_normal();
+    } else {
+      LLrep_plus_log_volume_raw[s] ~ normal(sqrt(n_areas)*E_rc[s], sigma_jrc[s]);
+    }
   }
   {
     int dev_start = Dm1 + (n_areas - 1);
     for (k in 1:(n_areas - 1)){
       int base = dev_start + (k - 1) * Dm1;
-      if (lflag_noncentred == 1){
-        LLrep_plus_log_volume_raw[(base + 1):(base + Dm1)] ~ std_normal();
-      } else {
-        LLrep_plus_log_volume_raw[(base + 1):(base + Dm1)] ~ normal(0, sigma_jrc);
+      for (s in  1:Dm1){
+        int idx = base + s;
+        if (lflag_dev_noncent[k, s] == 1){
+          LLrep_plus_log_volume_raw[idx] ~ std_normal();
+        } else {
+          LLrep_plus_log_volume_raw[idx] ~ normal(0, sigma_jrc[s]);
+        }
       }
     }
   }
-
 
 }
   if(lflag_E_rc_hier == 1){
