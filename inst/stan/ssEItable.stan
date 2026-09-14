@@ -34,8 +34,8 @@ data{
  int<lower=0> n_areas;
  int<lower=0> R;  // number of rows
  int<lower=0> C;  // number of columns
- matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
- matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
+ int<lower=0> row_margins[n_areas, R]; // the row margins in each area
+ int<lower=0> col_margins[n_areas, C]; // the column margins in each area
   matrix[(R * C), (R * C) - 1] V_ilr; // basis matrix for ILR transformation
  // matrix[(R * C) - 1, (R * C) - 1] ROT; //ilr rotation from raw to model basis
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
@@ -127,6 +127,8 @@ transformed data{
   int param_map[n_areas, R - 1, C - 1];
   matrix[n_areas, R - 1] row_margins_lr;
   matrix[n_areas, C - 1] col_margins_lr;
+  int row_margins_flat[n_areas * R];
+  int col_margins_flat[n_areas * C];
   matrix[n_areas, R] rm_prop;
   matrix[n_areas, R] rm_log;
   matrix[n_areas, C] cm_prop;
@@ -460,6 +462,15 @@ for(j in 1:n_areas){
             dev_idx += max(0, n_free_areas_rc[r,c] - 1);
         }
     }
+  for(j in 1:n_areas){
+    for(c in 1:C){
+      col_margins_flat[(j - 1)*C + c] = col_margins[j, c];
+      }
+  for(r in 1:R){
+    row_margins_flat[(j - 1)*R + r] = row_margins[j, r];
+    }
+  }
+
 
   for (j in 1:n_areas){
     tot_log[j] = log(sum(row_margins[j, 1:R]));
@@ -566,8 +577,6 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
 
 }
 parameters{
-  vector[n_param] lambda_raw;
-  matrix[lflag_rawscw == 0 ? (R - 1):0, (C - 1)] lambda_mu_rc;
   vector[(lflag_family != 2) ? K_sigmas : 0] sigma_jrc_raw;
 
 // gamma (2): direct positive parameter, no log-transform
@@ -592,7 +601,6 @@ real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
   vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
 }
 transformed parameters{
-  real lambda[n_areas, R - 1, C -1]; // sequential cell weights
   matrix[n_areas, Dm1] LLrep_jrc;
   real log_grand_volume;
   vector[n_areas] log_volume;
@@ -625,17 +633,7 @@ if(lflag_fix_sigma_jrc==1){
   }
   }
 
-if(lflag_rawscw == 1||lflag_rawscw==0){
-    for (j in 1:n_areas){
-    lambda[j] = rep_array(0, R - 1, C - 1);
-    for (r in 1:(free_R[j]-1)){
-      for (c in 1:(free_C[j] - 1)){
-        // lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
-        lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
-        }
-      }
-    }
-   }
+
 
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
@@ -696,11 +694,11 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
   }
 
 
-    cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
 
   for(j in 1:n_areas){
     for (r in 1:R){
       for(c in 1:C){
+        cell_values[j, r, c] = exp(log_expected_cell_values[j, r, c]);
         log_cv[j, r, c] = log(robust_hinge_floor_zero(cell_values[j, r, c], hinge_delta_min));
       }
     }
@@ -748,9 +746,21 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
 model{
 matrix[R, C] overall_values;
 matrix[R, C] global_prop;
+vector[n_areas*C] expected_col_margins;
+vector[n_areas*R] expected_row_margins;
 matrix[n_areas, C] implied_col_var;
 
+for(j in 1:n_areas){
+  for(c in 1:C){
+      expected_col_margins[(j - 1)*C + c] = sum(cell_values[j, 1:R, c]);
+  }
+  for(r in 1:R){
+      expected_row_margins[(j - 1)*R + r] = sum(cell_values[j, r, 1:C]);
+  }
+}
 
+col_margins_flat ~ poisson(expected_col_margins);
+row_margins_flat ~ poisson(expected_row_margins);
 for(r in 1:R){
   for(c in 1:C){
     overall_values[r, c] = sum(cell_values[1:n_areas, r, c]);
@@ -781,15 +791,17 @@ for(r in 1:R){
 // }
 //
 
-{
-    row_vector[n_active_cells] obs_flat;
-    vector[n_active_cells] log_rate_flat;
-    for (idx in 1:n_active_cells) {
-      obs_flat[idx]  = cell_values[active_j[idx], active_r[idx], active_c[idx]];
-      log_rate_flat[idx] = log_expected_cell_values[active_j[idx], active_r[idx], active_c[idx]];
-    }
-    target += realpoisson_lograte_lpdf(obs_flat | log_rate_flat);
-  }
+
+
+// {
+//     row_vector[n_active_cells] obs_flat;
+//     vector[n_active_cells] log_rate_flat;
+//     for (idx in 1:n_active_cells) {
+//       obs_flat[idx]  = cell_values[active_j[idx], active_r[idx], active_c[idx]];
+//       log_rate_flat[idx] = log_expected_cell_values[active_j[idx], active_r[idx], active_c[idx]];
+//     }
+//     target += realpoisson_lograte_lpdf(obs_flat | log_rate_flat);
+//   }
   log_volume ~ normal(0, 10);
 
 if(lflag_rot_llrep == 0){
@@ -816,7 +828,6 @@ if(lflag_rot_llrep == 0){
 
 
 }
-if(lflag_rawscw == 1){
   if(lflag_E_rc_hier == 1){
     E_rc_mu ~ normal(0, prior_mu_re_scale);
     E_rc_sigma ~ gamma(prior_gamma_shape, prior_gamma_rate);
@@ -826,11 +837,7 @@ if(lflag_rawscw == 1){
 
 
   }
-} else if(lflag_rawscw == 0){
-  for(r in 1:(R - 1)){
-    lambda_mu_rc[r, 1:(C - 1)] ~ normal(0, prior_mu_re_scale);
-  }
-}
+
 if(lflag_fix_sigma_jrc == 1){
   // nothing
 } else if(lflag_vary_sd == 0){
@@ -873,53 +880,6 @@ if(lflag_fix_sigma_jrc == 1){
     }
   }
 }
-// if(lflag_fix_sigma_jrc == 1){
-//
-// }  else if(lflag_vary_sd == 2){
-//     sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
-//     sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-//     // to_vector(sigma_jrc_raw) ~ normal(0, prior_sigma_c_scale);
-//     for(s in 1:R_ll*C_ll){
-//         sigma_jrc_raw[s] ~ normal(sigma_c_mu[1], sigma_c_sigma[1]);
-//     }
-// } else {
-//     to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
-//     // sigma_jrc_raw ~ normal(0, prior_sigma_c_scale);
-// }
-
-    // hinge_delta_floor ~ normal(0, .1);
-    // hinge_delta_min ~ normal(0, .1);
-    if(lflag_lambda_raw_offset==1){
-          if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
-      lambda_raw ~ normal(-neutral_logit_flat, prior_lambda_raw_scale);
-    } else if(lflag_neutral_logit==2){
-      real comp_logit_offset[n_param];
-      int counter = 0;
-      for(j in 1:n_areas){
-        for(r in 1:(free_R[j] - 1)){
-          vector[free_C[j]] comp_row;
-          for(k in 1:free_C[j]) {
-           comp_row[k] = composition_arr[j, active_row_map[j, r], active_col_map[j, k]];
-         }
-
-          for(c in 1:(free_C[j] - 1)){
-            counter += 1;
-           real remaining_comp_sum = sum(comp_row[c:free_C[j]]);
-           real this_share = comp_row[c]/remaining_comp_sum;
-           // real neutral_logit = -log(cols_remaining);
-           comp_logit_offset[counter] = -1 * logit(this_share);
-          }
-        }
-      }
-      lambda_raw ~ normal(comp_logit_offset, prior_lambda_raw_scale);
-    }
-
-    } else if(lflag_lambda_raw_offset == 0){
-      lambda_raw ~ normal(0, prior_lambda_raw_scale);
-    }
-    // lambda_raw ~ normal(lambda_raw_mu, 1);
-    // lambda_raw_sigma ~ normal(0, prior_sigma_c_scale);
-    // lambda_raw_mu ~ normal(0, prior_sigma_c_mu_scale);
 
 
 
