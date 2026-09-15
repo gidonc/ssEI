@@ -19,3 +19,7 @@ build_flags <- function(Dm1, n_areas,
   lflag_noncent_mat[2:n_areas, 1:Dm1] <- lflag_dev
   list(lflag_agg = lflag_agg, lflag_dev = lflag_dev, lflag_noncent_mat = lflag_noncent_mat)
 }
+
+
+#' @export
+#'

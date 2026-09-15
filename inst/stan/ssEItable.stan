@@ -37,7 +37,7 @@ data{
  int<lower=0> row_margins[n_areas, R]; // the row margins in each area
  int<lower=0> col_margins[n_areas, C]; // the column margins in each area
   matrix[(R * C), (R * C) - 1] V_ilr; // basis matrix for ILR transformation
- // matrix[(R * C) - 1, (R * C) - 1] ROT; //ilr rotation from raw to model basis
+  matrix[n_areas*(R * C) - 1, n_areas*(R * C) - 1] ROT; //ilr rotation from raw to model basis
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
  // vector[(R * C) - 1] mu_llrep;
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
@@ -573,7 +573,7 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   }
   matrix[Dtot, Dtot_m1] V_flat = append_col(V_block_diag, B_vol);
 
-  matrix[Dtot_m1, Dtot_m1] ROT = V_flat' * V_nested;   // built once
+  // matrix[Dtot_m1, Dtot_m1] ROT = V_flat' * V_nested;   // built once
 
 
 
