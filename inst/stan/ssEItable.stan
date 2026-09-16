@@ -38,6 +38,8 @@ data{
  int<lower=0> col_margins[n_areas, C]; // the column margins in each area
   matrix[(R * C), (R * C) - 1] V_ilr; // basis matrix for ILR transformation
   matrix[n_areas*(R * C) - 1, n_areas*(R * C) - 1] ROT; //ilr rotation from raw to model basis
+  matrix[(R * C) - 1, (R * C) - 1] ROT_E_rc; //ilr rotation from raw to E_rc in V_ilr basis
+
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
  // vector[(R * C) - 1] mu_llrep;
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
@@ -642,7 +644,7 @@ if(lflag_fix_sigma_jrc==1){
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
   } else if (lflag_rot_E_rc == 1){
-    E_rc = ROT' * E_rc_raw;
+    E_rc = ROT_E_rc' * E_rc_raw;
   } else{
     E_rc = E_rc_raw;
   }

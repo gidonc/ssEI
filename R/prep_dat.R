@@ -390,6 +390,75 @@ build_gm_ilr_basis <- function(C, ref_col = C) {
 }
 
 #' @export
+make_helmert_basis <- function(N) {
+  V <- matrix(0, N, N - 1)
+  for (k in 1:(N - 1)) {
+    r_k <- k
+    norm_const <- sqrt(r_k * (r_k + 1))
+    V[1:k, k] <- 1 / norm_const
+    V[k + 1, k] <- -r_k / norm_const
+  }
+  V
+}
+
+
+make_row_basis <- function(R, C) {
+
+  H_R <- make_helmert_basis(R)
+
+  U <- matrix(0, R * C, R - 1)
+
+  for (k in 1:(R - 1)) {
+    U[, k] <- rep(H_R[, k] / sqrt(C), each = C)
+  }
+
+  U
+}
+
+
+make_col_basis <- function(R, C) {
+
+  H_C <- make_helmert_basis(C)
+
+  U <- matrix(0, R * C, C - 1)
+
+  for (k in 1:(C - 1)) {
+    U[, k] <- rep(H_C[, k] / sqrt(R), times = R)
+  }
+
+  U
+}
+
+#'@export
+make_tensor_fm_basis <- function(R, C) {
+
+  H_R <- make_helmert_basis(R)
+  H_C <- make_helmert_basis(C)
+
+  V <- matrix(
+    0,
+    nrow = R * C,
+    ncol = (R - 1) * (C - 1)
+  )
+
+  k <- 1
+
+  for (a in 1:(R - 1)) {
+    for (b in 1:(C - 1)) {
+
+      M <- outer(H_R[, a], H_C[, b])
+
+      V[, k] <- as.vector(t(M))
+
+      k <- k + 1
+    }
+  }
+
+  V
+}
+
+
+#' @export
 #'
 mk_E_rc <- function(known_cell_values, V_ilr, near_zero = 1e-2){
   J <- dim(known_cell_values)[1]
