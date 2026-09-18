@@ -36,8 +36,14 @@ data{
  int<lower=0> C;  // number of columns
  matrix<lower=0>[n_areas, R] row_margins; // the row margins in each area
  matrix<lower=0>[n_areas, C] col_margins; // the column margins in each area
-  matrix[(R * C), (R * C) - 1] V_ilr; // basis matrix for ILR transformation
-  matrix[n_areas*(R * C) - 1, n_areas*(R * C) - 1] ROT; //ilr rotation from raw to model basis
+  int<lower = 0> n_agg_derived;
+  array[n_agg_derived] int<lower = 1, upper=R*C - 1> agg_derived_dim;
+  int<lower = 0> n_agg_free;
+  array[n_agg_free] int<lower = 1, upper=R * C - 1> agg_free_dim;
+  int<lower=1> Dm1_model;
+  matrix[(R * C), (R * C) - 1] V_ilr_full; // basis matrix for ILR transformation
+  matrix[(R * C), Dm1_model] V_ilr_model;
+  matrix[n_areas*Dm1_model + n_areas - 1, n_areas*Dm1_model + n_areas - 1] ROT_red; //rebuilt for reduced dimensions
   matrix[(R * C) - 1, (R * C) - 1] ROT_E_rc; //ilr rotation from raw to E_rc in V_ilr basis
 
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
@@ -55,7 +61,7 @@ data{
   int<lower =0, upper = 1> lflag_pin_row_effect; // flag indicating the model on row effects
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower =0, upper = 2> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
-  int<lower=0, upper = 1> lflag_noncentred_mat[n_areas, (R * C) - 1]; //flag indicated whether cell is centred (0) or non-centred (1)
+  int<lower=0, upper = 1> lflag_noncentred_mat[n_areas, Dm1_model]; //flag indicated whether cell is centred (0) or non-centred (1)
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   int<lower=0, upper = 1> lflag_rot_llrep;
@@ -137,6 +143,7 @@ transformed data{
   matrix[n_areas, C] cm_log;
   matrix[1, R] global_rm;
   matrix[1, C] global_cm;
+  vector[R] global_rm_prop;
   vector[n_areas] tot_log;
   real<lower=0> prior_phi_scale;
   int n_margin_sigmas;
@@ -150,8 +157,8 @@ transformed data{
   // real hinge_delta_floor = 1e-10;
   // real hinge_delta_min = 1e-10;
   prior_phi_scale = 100;
-  array[R * C - 1] int<lower=0, upper =1> lflag_agg_noncent = lflag_noncentred_mat[1, 1:(R * C - 1)];
-  array[n_areas - 1, R * C - 1] int<lower=0, upper =1> lflag_dev_noncent = lflag_noncentred_mat[2:n_areas, 1:(R * C - 1)];
+  array[Dm1_model] int<lower=0, upper =1> lflag_agg_noncent = lflag_noncentred_mat[1, 1:(Dm1_model)];
+  array[n_areas - 1, Dm1_model] int<lower=0, upper =1> lflag_dev_noncent = lflag_noncentred_mat[2:n_areas, 1:(Dm1_model)];
   int n_active_cells = 0;
   for (j in 1:n_areas)
     for (r in 1:R)
@@ -507,6 +514,7 @@ for(j in 1:n_areas){
   for(c in 1:C) global_cm[1, c] = sum(col_margins[1:n_areas, c]);
 
 
+
 if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   print("paramater map mismatch");
   print(n_param);
@@ -539,16 +547,16 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     K_sigma_c_sigma = 0;
   } else if(lflag_vary_sd == 1){
     if(lflag_rawscw==1){
-      K_sigmas = (R * C) - 1;
+      K_sigmas = Dm1_model;
     } else{
-      K_sigmas = (R * C) - 1;
+      K_sigmas = Dm1_model;
     }
     K_sigma_c_sigma = 0;
   } else if(lflag_vary_sd == 2){
       if(lflag_rawscw==1){
-      K_sigmas = (R * C) - 1;
+      K_sigmas = Dm1_model;
     } else{
-      K_sigmas = (R * C) - 1;
+      K_sigmas = Dm1_model;
     }
     K_sigma_c_sigma = 1;
   }
@@ -557,26 +565,10 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   int Dm1 = D - 1;
   int Dtot = n_areas * D;
   int Dtot_m1 = Dtot - 1;
+  int D_reduced = Dm1_model + 1;
+  int Dtot_m1_reduced = n_areas*D_reduced - 1;
 
   matrix[n_areas, n_areas - 1] V_area = make_helmert_basis(n_areas);
-  matrix[D, 1] j_cell = rep_matrix(1.0 / sqrt(D), D, 1);
-  matrix[n_areas, 1] j_area = rep_matrix(1.0 / sqrt(n_areas), n_areas, 1);
-
-  // Nested/raw basis: aggregate shape, area-volume allocation, area-shape deviations
-  matrix[Dtot, Dm1] B_agg = kronecker_prod(j_area, V_ilr);
-  matrix[Dtot, n_areas - 1] B_vol = kronecker_prod(V_area, j_cell);
-  matrix[Dtot, (n_areas - 1) * Dm1] B_dev = kronecker_prod(V_area, V_ilr);
-  matrix[Dtot, Dtot_m1] V_nested = append_col(append_col(B_agg, B_vol), B_dev);
-
-  // Flat/target basis: each area's own V_ilr block-diagonal, same volume block
-  matrix[Dtot, n_areas * Dm1] V_block_diag = rep_matrix(0.0, Dtot, n_areas * Dm1);
-  for (j in 1:n_areas) {
-    V_block_diag[((j-1)*D+1):(j*D), ((j-1)*Dm1+1):(j*Dm1)] = V_ilr;
-  }
-  matrix[Dtot, Dtot_m1] V_flat = append_col(V_block_diag, B_vol);
-
-  // matrix[Dtot_m1, Dtot_m1] ROT = V_flat' * V_nested;   // built once
-
 
 
 }
@@ -601,27 +593,31 @@ real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
 
   // real LLrep_raw[n_areas, (R * C) - 1];
   // vector[n_areas] log_volume;
-  vector[Dtot_m1] LLrep_plus_log_volume_raw;
+  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_raw;
   real log_volume_raw;
 
-  vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
+  // vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
+  vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : n_agg_free] E_rc_raw;
 }
 transformed parameters{
   real lambda[n_areas, R - 1, C -1]; // sequential cell weights
+  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_reduced= ROT_red * LLrep_plus_log_volume_raw;
+  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume;
   matrix[n_areas, Dm1] LLrep_jrc;
   real log_grand_volume;
   vector[n_areas] log_volume;
-  vector[Dtot_m1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
+  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
   real log_cv[n_areas, R, C] ;
-  vector<lower=0>[(R * C) - 1] sigma_jrc;
+  vector<lower=0>[Dm1_model] sigma_jrc;
   real composition_arr[n_areas, R, C] = rep_array(0.0, n_areas, R, C);
   vector[(R * C) - 1] ilr_mean;
   vector[(R * C) - 1] ilr_var;
   vector[(R * C) - 1] ilr_n;
-  vector[(R * C) - 1] E_rc;
+  // vector[(R * C) - 1] E_rc;
+  vector[Dm1_model] E_rc;
   real det_J_raw = 0;
   real sigma_scale[lflag_rawscw==0?n_areas:0, R - 1, C - 1];
   real sigma_sq_row_out[lflag_rawscw==0?n_areas:0, (R * C) - 1];
@@ -658,67 +654,110 @@ if(lflag_fix_sigma_jrc==1){
 
   if(lflag_fix_E_rc==1){
       E_rc = E_rc_fixed;
-  } else if (lflag_rot_E_rc == 1){
-    E_rc = ROT_E_rc' * E_rc_raw;
-  } else{
+  } else {
     E_rc = E_rc_raw;
   }
 
+
   {
-  vector[Dtot_m1] LLrep_plus_log_volume = ROT * LLrep_plus_log_volume_raw;
   vector[n_areas - 1] vol_coeffs;
   vector[n_areas] vol_dev = rep_vector(0, n_areas);
-  if(lflag_rot_llrep == 1){
-    for(s in 1:Dm1){
-      if(lflag_agg_noncent[s]==1){
-        LLrep_plus_log_volume_xform[s] = sqrt(n_areas)*E_rc[s] + sigma_jrc[s] * LLrep_plus_log_volume_raw[s];
+
+  if (lflag_rot_llrep == 1) {
+
+    // --- centring/noncentring transform on raw vector ---
+    // agg block: indices 1:Dm1_model
+    for (s in 1:Dm1_model) {
+      if (lflag_agg_noncent[s] == 1) {
+        LLrep_plus_log_volume_xform[s] =
+          sqrt(n_areas) * E_rc[s] + sigma_jrc[s] * LLrep_plus_log_volume_raw[s];
       }
+      // centred: xform already initialised to raw (identity), nothing to do
     }
+
+    // dev block: indices after vol block
     {
-      int dev_start = Dm1 + (n_areas - 1);
-      for(k in 1:(n_areas - 1)){
-        int base = dev_start + (k - 1) * Dm1;
-        for(s in 1:Dm1){
-          if(lflag_dev_noncent[k, s] == 1){
+      int dev_start = Dm1_model + (n_areas - 1);
+      for (k in 1:(n_areas - 1)) {
+        int base = dev_start + (k - 1) * Dm1_model;
+        for (s in 1:Dm1_model) {
+          if (lflag_dev_noncent[k, s] == 1) {
             int idx = base + s;
-            LLrep_plus_log_volume_xform[idx] = sigma_jrc[s]*LLrep_plus_log_volume_raw[idx];
+            LLrep_plus_log_volume_xform[idx] =
+              sigma_jrc[s] * LLrep_plus_log_volume_raw[idx];
           }
         }
       }
     }
-    LLrep_plus_log_volume = ROT * LLrep_plus_log_volume_xform;
+
+    // single rotation
+    LLrep_plus_log_volume = ROT_red * LLrep_plus_log_volume_xform;
 
     log_grand_volume = log_volume_raw;
-    vol_coeffs = LLrep_plus_log_volume[(n_areas*Dm1 + 1):Dtot_m1];
-    vol_dev = V_area * vol_coeffs;   // sum-zero deviations from grand mean
+    vol_coeffs = LLrep_plus_log_volume[(n_areas * Dm1_model + 1):Dtot_m1_reduced];
+    vol_dev    = V_area * vol_coeffs;
+
   } else {
-    vol_coeffs = LLrep_plus_log_volume_raw[(n_areas*Dm1 + 1):Dtot_m1];
+
+    vol_coeffs = LLrep_plus_log_volume_raw[(n_areas * Dm1_model + 1):Dtot_m1_reduced];
     log_volume = append_row(log_volume_raw, vol_coeffs);
     log_grand_volume = log_sum_exp(log_volume);
+
   }
 
+  // --- per-area reconstruction ---
   for (j in 1:n_areas) {
 
-    if(lflag_rot_llrep == 1){
-      LLrep_jrc[j] = to_row_vector(LLrep_plus_log_volume[((j-1)*Dm1+1):(j*Dm1)]);
+    // 1. get free (within-row) ILR coordinates for this area
+    row_vector[Dm1_model] llrep_model_j;
+    if (lflag_rot_llrep == 1) {
+      llrep_model_j = to_row_vector(
+        LLrep_plus_log_volume[((j-1)*Dm1_model + 1):(j*Dm1_model)]);
       log_volume[j] = log_grand_volume + vol_dev[j];
     } else {
-      LLrep_jrc[j] = to_row_vector(LLrep_plus_log_volume_raw[((j-1)*Dm1+1):(j*Dm1)]);
+      llrep_model_j = to_row_vector(
+        LLrep_plus_log_volume_raw[((j-1)*Dm1_model + 1):(j*Dm1_model)]);
     }
 
-      row_vector[R * C] clr_table = to_row_vector(LLrep_jrc[j]) * V_ilr';
-      vector[R * C] log_composition = log_softmax(to_vector(clr_table));
+    // 2. reconstruct full log-composition via p[r,c] = agg_row_prop[j,r] * q[r,c]
+    row_vector[R*C] clr_model = llrep_model_j * V_ilr_model';
+    vector[R*C] log_p_vec;
+    {
       int idx = 0;
-      for(r in 1:R){
-        for(c in 1:C){
+      for (r in 1:R) {
+        vector[C] log_q_r;
+        for (c in 1:C) {
           idx += 1;
-          composition_arr[j, r, c] = exp(log_composition[idx]);
-          log_expected_cell_values[j, r, c] = log_volume[j] + log_composition[idx];
+          log_q_r[c] = clr_model[idx];
+        }
+        real log_norm = log_sum_exp(log_q_r);
+        for (c in 1:C) {
+          log_p_vec[(r-1)*C + c] =
+            log(rm_prop[j, r]) + log_q_r[c] - log_norm;
         }
       }
+    }
 
-  }
-  }
+    // 3. project to full Dm1 ILR coordinates (derived dims populated automatically)
+    LLrep_jrc[j] = to_row_vector(V_ilr_full' * log_p_vec);
+
+    // 4. downstream — unchanged
+    row_vector[R*C] clr_table    = LLrep_jrc[j] * V_ilr_full';
+    vector[R*C]     log_composition = log_softmax(to_vector(clr_table));
+    {
+      int idx = 0;
+      for (r in 1:R) {
+        for (c in 1:C) {
+          idx += 1;
+          composition_arr[j, r, c]         = exp(log_composition[idx]);
+          log_expected_cell_values[j, r, c] =
+            log_volume[j] + log_composition[idx];
+        }
+      }
+    }
+
+  } // end per-area loop
+}
 
    cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
 
@@ -811,10 +850,10 @@ for(r in 1:R){
 
 if(lflag_rot_llrep == 0){
   for(j in 1:n_areas){
-    LLrep_jrc[j,1:(R*C - 1)] ~ normal(E_rc, sigma_jrc);
+    LLrep_jrc[j, agg_free_dim] ~ normal(E_rc, sigma_jrc);
   }
 } else if(lflag_rot_llrep == 1){
-  for (s in 1:Dm1){
+  for (s in 1:Dm1_model){
     if(lflag_agg_noncent[s]==1){
       LLrep_plus_log_volume_raw[s] ~ std_normal();
     } else {
@@ -822,10 +861,10 @@ if(lflag_rot_llrep == 0){
     }
   }
   {
-    int dev_start = Dm1 + (n_areas - 1);
+    int dev_start = Dm1_model + (n_areas - 1);
     for (k in 1:(n_areas - 1)){
-      int base = dev_start + (k - 1) * Dm1;
-      for (s in  1:Dm1){
+      int base = dev_start + (k - 1) * Dm1_model;
+      for (s in  1:Dm1_model){
         int idx = base + s;
         if (lflag_dev_noncent[k, s] == 1){
           LLrep_plus_log_volume_raw[idx] ~ std_normal();
@@ -842,7 +881,8 @@ if(lflag_rot_llrep == 0){
     E_rc_sigma ~ gamma(prior_gamma_shape, prior_gamma_rate);
     E_rc ~ normal(E_rc_mu[1], E_rc_sigma[1]);
   } else{
-    E_rc ~ normal(E_rc_prior, prior_mu_re_scale);
+    // E_rc ~ normal(E_rc_prior, prior_mu_re_scale);
+    E_rc ~ normal(0, prior_mu_re_scale);
 
 
   }

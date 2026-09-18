@@ -494,3 +494,19 @@ mk_E_rc <- function(known_cell_values, V_ilr, near_zero = 1e-2){
     )
   )
 }
+
+# Detect which V_ilr columns are row-margin-type (constant within each row)
+#' @export
+detect_margin_columns <- function(V_ilr, R, C, tol = 1e-8) {
+  Dm1 <- ncol(V_ilr)
+  is_row_type <- logical(Dm1)
+  for (s in 1:Dm1) {
+    M <- matrix(V_ilr[, s], nrow = R, ncol = C, byrow = TRUE)
+    # constant across columns within each row = row-margin direction
+    is_row_type[s] <- all(apply(M, 1, function(row) diff(range(row)) < tol))
+  }
+  list(
+    derived = which(is_row_type),
+    free    = which(!is_row_type)
+  )
+}

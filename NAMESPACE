@@ -2,6 +2,8 @@
 
 export(build_flags)
 export(build_gm_ilr_basis)
+export(build_margin_reduction)
+export(detect_margin_columns)
 export(ei_cv_summary)
 export(ei_error_index)
 export(ei_estimate)

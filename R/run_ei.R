@@ -49,6 +49,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         pin_row_effect = FALSE,
                         predictors_cm = FALSE,
                         noncentred = "noncentred",
+                        margin_reduction = NULL,
                         E_rc_hier = FALSE,
                         lambda_raw_offset = TRUE,
                         noncentred_mat = matrix(1, nrow=3, ncol=2),
@@ -154,6 +155,9 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
       V_dcorr_mat[[j]] <- diag((standata$R - 1)*(standata$C - 1))
     }
   }
+  if(!is.null(margin_reduction)){
+    standata <- modifyList(standata, margin_reduction)
+  }
 
   standata <- modifyList(standata,
                          list(
@@ -163,6 +167,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            prior_gamma_rate = prior_gamma_rate,
                            lflag_pin_row_effect = pin_row_effect,
                            ROT = ROT,
+                           ROT_red = margin_reduction$ROT,
                            ROT_E_rc = ROT_E_rc,
                            V_dcorr_mat = V_dcorr_mat,
                            hinge_delta_floor = hinge_delta_floor,
@@ -196,4 +201,73 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     out <- rstan::sampling(mod, data = standata, cores = cores, chains = chains, ...)
   }
   out
+}
+
+#' @export
+build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
+                                   noncentred_mat = NULL) {
+  margin_structure <- detect_margin_columns(V_ilr, R, C)
+  free_dims        <- margin_structure$free
+  Dm1_model        <- length(free_dims)
+  n_areas          <- nrow(row_margins)
+  D                <- R * C
+
+  V_ilr_full  <- V_ilr
+  V_ilr_model <- V_ilr[, free_dims]
+
+  senc_smooth  <- as.matrix(row_margins) + eps
+  agg_row_prop <- senc_smooth / rowSums(senc_smooth)
+
+  # rebuild ROT for reduced dimension
+  make_helmert_basis <- function(N) {
+    V <- matrix(0, N, N - 1)
+    for (k in 1:(N - 1)) {
+      norm_const <- sqrt(k * (k + 1))
+      V[1:k, k]  <-  1 / norm_const
+      V[k+1,  k] <- -k / norm_const
+    }
+    V
+  }
+
+  V_area <- make_helmert_basis(n_areas)
+  j_area <- matrix(1 / sqrt(n_areas), n_areas, 1)
+  j_cell <- matrix(1 / sqrt(D), D, 1)
+
+  B_agg <- kronecker(j_area, V_ilr_model)
+  B_vol <- kronecker(V_area, j_cell)
+  B_dev <- kronecker(V_area, V_ilr_model)
+  V_nested <- cbind(B_agg, B_vol, B_dev)
+
+  V_block_diag <- matrix(0, n_areas * D, n_areas * Dm1_model)
+  for (j in 1:n_areas) {
+    rows <- ((j-1)*D + 1):(j*D)
+    cols <- ((j-1)*Dm1_model + 1):(j*Dm1_model)
+    V_block_diag[rows, cols] <- V_ilr_model
+  }
+  V_flat   <- cbind(V_block_diag, B_vol)
+  ROT_full <- t(V_flat) %*% V_nested
+
+  Dtot_m1_reduced <- n_areas * Dm1_model + (n_areas - 1)
+  stopifnot(all.equal(t(ROT_full) %*% ROT_full,
+                      diag(Dtot_m1_reduced), tolerance = 1e-6))
+
+  noncentred_mat_model <- if (!is.null(noncentred_mat)) {
+    stopifnot(ncol(noncentred_mat) >= max(free_dims))
+    noncentred_mat[, free_dims, drop = FALSE]
+  } else {
+    matrix(1L, nrow = n_areas, ncol = Dm1_model)   # default: all noncentred
+  }
+
+  list(
+    n_agg_derived    = length(margin_structure$derived),
+    agg_derived_dim  = as.array(margin_structure$derived),
+    agg_free_dim     = as.array(free_dims),
+    Dm1_model        = Dm1_model,
+    n_agg_free       = Dm1_model,
+    agg_row_prop     = agg_row_prop,
+    V_ilr_full       = V_ilr_full,
+    V_ilr_model      = V_ilr_model,
+    ROT              = ROT_full,
+    lflag_noncentred_mat = noncentred_mat_model   # n_areas x Dm1_model
+  )
 }
