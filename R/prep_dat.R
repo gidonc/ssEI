@@ -81,6 +81,7 @@ prep_options_stan <- function(use_dist,
                               inc_rm,
                               vary_sd,
                               ll_rep,
+                              fit_type,
                               llmod_omit_jr,
                               llmod_omit_jc,
                               llmod_omit_jrc,
@@ -146,6 +147,9 @@ prep_options_stan <- function(use_dist,
   if(!rotate_E_rc %in% c(TRUE, FALSE)){
     stop("rotate E_rc must be one of: TRUE, FALSE")
   }
+  if(!fit_type %in% c("soft", "hybrid")){
+    stop("fit_type must be one of: hybrid, soft")
+  }
   list(
     lflag_dist = dplyr::case_when(
       use_dist == "pois" ~ 0,
@@ -162,6 +166,10 @@ prep_options_stan <- function(use_dist,
     lflag_inc_rm = dplyr::case_when(
       inc_rm == FALSE ~ 0,
       inc_rm == TRUE ~ 1
+    ),
+    lflag_fit_type = dplyr::case_when(
+      fit_type == "hybrid" ~ 0,
+      fit_type == "soft" ~ 1
     ),
     lflag_predictors_cm = dplyr::case_when(
       predictors_cm == FALSE ~ 0,

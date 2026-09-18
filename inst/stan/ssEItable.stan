@@ -65,6 +65,7 @@ data{
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   int<lower=0, upper = 1> lflag_rot_llrep;
+  int<lower=0, upper = 1> lflag_fit_type; // flag indicating whether model is (0) HYBRID of sequential sampling and soft ilr fit (0) or (1) SOFT ilr fit
   int<lower=0, upper = 1> lflag_rot_E_rc;
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
@@ -573,7 +574,7 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
 
 }
 parameters{
-  vector[n_param] lambda_raw;
+  vector[lflag_fit_type==0 ? n_param: 0] lambda_raw;
   matrix[lflag_rawscw == 0 ? (R - 1):0, (C - 1)] lambda_mu_rc;
   vector[(lflag_family != 2) ? K_sigmas : 0] sigma_jrc_raw;
 
@@ -600,7 +601,7 @@ real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
   vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : n_agg_free] E_rc_raw;
 }
 transformed parameters{
-  real lambda[n_areas, R - 1, C -1]; // sequential cell weights
+  real lambda[lflag_fit_type==0 ? n_areas : 0, R - 1, C -1]; // sequential cell weights
   vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_reduced= ROT_red * LLrep_plus_log_volume_raw;
   vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume;
   matrix[n_areas, Dm1] LLrep_jrc;
@@ -638,6 +639,7 @@ if(lflag_fix_sigma_jrc==1){
   }
   }
 
+if(lflag_fit_type == 0) {
   if(lflag_rawscw == 1||lflag_rawscw==0){
     for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
@@ -649,6 +651,7 @@ if(lflag_fix_sigma_jrc==1){
       }
     }
    }
+}
 
 
 
@@ -758,14 +761,19 @@ if(lflag_fix_sigma_jrc==1){
 
   } // end per-area loop
 }
-
+if(lflag_fit_type == 0){
    cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
+
+}
 
 
 
   for(j in 1:n_areas){
     for (r in 1:R){
       for(c in 1:C){
+        if(lflag_fit_type == 1){
+          cell_values[j, r, c] = exp(log_expected_cell_values[j, r, c]);
+        }
 
         log_cv[j, r, c] = log(robust_hinge_floor_zero(cell_values[j, r, c], hinge_delta_min));
       }
@@ -790,33 +798,12 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
         }
       }
 
-  // for(r in 1:R_ll){
-  //   for(c in 1:C_ll){
-  //       real s = 0;
-  //       real s2 = 0;
-  //       real n = 0;
-  //       for(j in 1:n_areas){
-  //           if(row_margins[j,r] > 0 && structural_zeros[j,r,c] == 0){
-  //               real ilr_val = LLrep_jrc[j,r,c];
-  //               s  += ilr_val;
-  //               s2 += square(ilr_val);
-  //               n  += 1;
-  //           }
-  //       }
-  //       ilr_n[r,c]    = n;
-  //       ilr_mean[r,c] = (n > 0) ? s / n : 0;
-  //       ilr_var[r,c]  = (n > 1) ? s2/n - square(ilr_mean[r,c]) : 0;
-  //   }
-  // }
-// }
-
 }
 model{
 matrix[R, C] overall_values;
 matrix[R, C] global_prop;
 vector[n_areas*C] expected_col_margins;
 vector[n_areas*R] expected_row_margins;
-matrix[n_areas, C] implied_col_var;
 
 for(j in 1:n_areas){
   for(c in 1:C){
@@ -826,10 +813,11 @@ for(j in 1:n_areas){
       expected_row_margins[(j - 1)*R + r] = sum(cell_values[j, r, 1:C]);
   }
 }
-//
-// col_margins_flat ~ poisson(expected_col_margins);
-// row_margins_flat ~ poisson(expected_row_margins);
-{
+
+if(lflag_fit_type == 1){
+  col_margins_flat ~ poisson(expected_col_margins);
+  row_margins_flat ~ poisson(expected_row_margins);
+} else if(lflag_fit_type == 0) {
     row_vector[n_active_cells] obs_flat;
     vector[n_active_cells] log_rate_flat;
     for (idx in 1:n_active_cells) {
@@ -929,6 +917,8 @@ if(lflag_fix_sigma_jrc == 1){
     }
   }
 }
+
+if(lflag_fit_type == 0){
     if(lflag_lambda_raw_offset==1){
           if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
       lambda_raw ~ normal(-neutral_logit_flat, prior_lambda_raw_scale);
@@ -957,6 +947,8 @@ if(lflag_fix_sigma_jrc == 1){
     } else if(lflag_lambda_raw_offset == 0){
       lambda_raw ~ normal(0, prior_lambda_raw_scale);
     }
+
+}
 
 
 
