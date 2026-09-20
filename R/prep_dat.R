@@ -147,8 +147,8 @@ prep_options_stan <- function(use_dist,
   if(!rotate_E_rc %in% c(TRUE, FALSE)){
     stop("rotate E_rc must be one of: TRUE, FALSE")
   }
-  if(!fit_type %in% c("soft", "hybrid")){
-    stop("fit_type must be one of: hybrid, soft")
+  if(!fit_type %in% c("soft", "hybrid", "soft multinom")){
+    stop("fit_type must be one of: hybrid, soft, soft multinom")
   }
   list(
     lflag_dist = dplyr::case_when(
@@ -169,7 +169,8 @@ prep_options_stan <- function(use_dist,
     ),
     lflag_fit_type = dplyr::case_when(
       fit_type == "hybrid" ~ 0,
-      fit_type == "soft" ~ 1
+      fit_type == "soft" ~ 1,
+      fit_type == "soft multinom" ~ 2,
     ),
     lflag_predictors_cm = dplyr::case_when(
       predictors_cm == FALSE ~ 0,

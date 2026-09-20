@@ -65,7 +65,7 @@ data{
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   int<lower=0, upper = 1> lflag_rot_llrep;
-  int<lower=0, upper = 1> lflag_fit_type; // flag indicating whether model is (0) HYBRID of sequential sampling and soft ilr fit (0) or (1) SOFT ilr fit
+  int<lower=0, upper = 2> lflag_fit_type; // flag indicating whether model is (0) HYBRID of sequential sampling and soft ilr fit (0) or (1) SOFT ilr fit
   int<lower=0, upper = 1> lflag_rot_E_rc;
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
@@ -631,7 +631,7 @@ if(lflag_fix_sigma_jrc==1){
   if(lflag_vary_sd == 0){
     // single shared value, broadcast to every cell
     real shared_val = (lflag_family == 2) ? sigma_jrc_direct[1] : exp(sigma_jrc_raw[1]);
-    sigma_jrc = rep_vector(shared_val, (R * C) - 1);
+    sigma_jrc = rep_vector(shared_val, Dm1_model);
   } else if(lflag_family == 2){
     sigma_jrc = sigma_jrc_direct;
   } else {
@@ -771,7 +771,7 @@ if(lflag_fit_type == 0){
   for(j in 1:n_areas){
     for (r in 1:R){
       for(c in 1:C){
-        if(lflag_fit_type == 1){
+        if(lflag_fit_type == 1||lflag_fit_type==2){
           cell_values[j, r, c] = exp(log_expected_cell_values[j, r, c]);
         }
 
@@ -817,6 +817,30 @@ for(j in 1:n_areas){
 if(lflag_fit_type == 1){
   col_margins_flat ~ poisson(expected_col_margins);
   row_margins_flat ~ poisson(expected_row_margins);
+} else if(lflag_fit_type == 2){
+  row_margins_flat ~ poisson(expected_row_margins);   // scale anchor only
+  for(j in 1:n_areas){
+  vector[C] mu_j = rep_vector(0, C);
+  matrix[C, C] Sigma_j = rep_matrix(0, C, C);
+  for(r in 1:R){
+    real R_jr = row_margins[j, r];
+    if (R_jr > 0){
+      vector[C] q_jr;
+      for (c in 1:C){
+        q_jr[c] = composition_arr[j, r, c]/rm_prop[j, r];
+      }
+      mu_j += R_jr *q_jr;
+      Sigma_j += R_jr * (diag_matrix(q_jr) - q_jr * q_jr');
+
+    }
+  }
+
+  // drop the last column: totals sum to the known area total, so the
+  // full C-dim covariance is singular by exactly one dimension
+  col_margins[j, 1:(C-1)]' ~ multi_normal(mu_j[1:(C-1)], Sigma_j[1:(C-1), 1:(C-1)]);
+
+
+  }
 } else if(lflag_fit_type == 0) {
     row_vector[n_active_cells] obs_flat;
     vector[n_active_cells] log_rate_flat;
