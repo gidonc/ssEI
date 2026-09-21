@@ -42,6 +42,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         mod_cols = TRUE,
                         rotate_llrep = TRUE,
                         rotate_E_rc = FALSE,
+                        rotate_lambda = "none",
+                        ROT_lambda = NULL,
                         fit_type = "soft multinom",
                         neutral_logit = "table",
                         llmod_omit_jr = FALSE,
@@ -108,7 +110,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            neutral_logit = neutral_logit,
                            lambda_raw_offset = lambda_raw_offset,
                            rotate_llrep = rotate_llrep,
-                           rotate_E_rc = rotate_E_rc
+                           rotate_E_rc = rotate_E_rc,
+                           rotate_lambda = rotate_lambda
                          ))
   standata <- modifyList(standata,
                          prep_priors_stan(
@@ -123,6 +126,22 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            prior_cell_effect_scale = prior_cell_effect_scale,
                            prior_lambda_raw_scale = prior_lambda_raw_scale
                          ))
+
+  if (rotate_lambda != "none") {
+    if (is.null(ROT_lambda)) stop("ROT_lambda required when rotate_lambda is not 'none'")
+    st <- attr(ROT_lambda, "stage")
+    if (!is.null(st) && st != rotate_lambda)
+      stop("ROT_lambda was built with stage '", st, "' but rotate_lambda is '",
+           rotate_lambda, "'")
+    nl <- attr(ROT_lambda, "neutral_logit_mode")
+    if (!is.null(nl) && nl != standata$lflag_neutral_logit)
+      stop("ROT_lambda was built for neutral_logit mode ", nl,
+           " but this run uses ", standata$lflag_neutral_logit)
+    n_rot_lam <- ncol(ROT_lambda)
+  } else {
+    n_rot_lam  <- 0
+    ROT_lambda <- matrix(0, 0, 0)
+  }
   if(zeros_structural == TRUE){
     zero_rm <- row_margins
     zero_cm <- col_margins
@@ -160,6 +179,14 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
   if(!is.null(margin_reduction)){
     standata <- modifyList(standata, margin_reduction)
   }
+  if (rotate_lambda != "none") {
+    if (is.null(ROT_lambda)) stop("ROT_lambda required when rotate_lambda is not 'none'")
+    if (nrow(ROT_lambda) != ncol(ROT_lambda)) stop("ROT_lambda must be square")
+    n_rot_lam <- ncol(ROT_lambda)
+  } else {
+    n_rot_lam  <- 0
+    ROT_lambda <- matrix(0, 0, 0)
+  }
 
   standata <- modifyList(standata,
                          list(
@@ -171,6 +198,8 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            ROT = ROT,
                            ROT_red = margin_reduction$ROT,
                            ROT_E_rc = ROT_E_rc,
+                           ROT_lambda = ROT_lambda,
+                           n_rot_lam = n_rot_lam,
                            V_dcorr_mat = V_dcorr_mat,
                            hinge_delta_floor = hinge_delta_floor,
                            hinge_delta_min = hinge_delta_min,

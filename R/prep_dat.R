@@ -8,10 +8,9 @@
 #'
 #' @examples
 prep_data_stan <- function(row_margins, col_margins, V_ilr, n_ilr_rows){
+  row_margins <- as.matrix(row_margins); storage.mode(row_margins) <- "double"
+  col_margins <- as.matrix(col_margins); storage.mode(col_margins) <- "double"
   R <- ncol(row_margins)
-  C <- ncol(col_margins)
-  n_areas <- nrow(row_margins)
-
   if(is.null(V_ilr)){
     V_ilr = matrix(0, C, C -1)
     n_ilr_rows = 0;
@@ -94,7 +93,8 @@ prep_options_stan <- function(use_dist,
                               neutral_logit,
                               lambda_raw_offset,
                               rotate_llrep,
-                              rotate_E_rc
+                              rotate_E_rc,
+                              rotate_lambda
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -149,6 +149,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!fit_type %in% c("soft", "hybrid", "soft multinom")){
     stop("fit_type must be one of: hybrid, soft, soft multinom")
+  }
+  if(!rotate_lambda %in% c("none", "per-area", "full")){
+    stop("rotate_lambda must be one of: none, per-area, full")
   }
   list(
     lflag_dist = dplyr::case_when(
@@ -235,6 +238,11 @@ prep_options_stan <- function(use_dist,
     lflag_rot_E_rc = dplyr::case_when(
       rotate_E_rc == TRUE ~ 1,
       rotate_E_rc == FALSE ~ 0
+    ),
+    lflag_rot_lambda = dplyr::case_when(
+      rotate_lambda == "none" ~ 0,
+      rotate_lambda == "per-area" ~ 1,
+      rotate_lambda == "full" ~ 2
     )
 
 
