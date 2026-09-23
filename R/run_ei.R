@@ -42,10 +42,13 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         mod_cols = TRUE,
                         rotate_llrep = TRUE,
                         rotate_E_rc = FALSE,
+                        link_E_rc = "none",
+                        rm_ref = NULL,
                         rotate_lambda = "none",
                         ROT_lambda = NULL,
-                        fit_type = "soft multinom",
-                        neutral_logit = "table",
+                        row_decompose = FALSE,
+                        fit_type = "cell-poisson",
+                        neutral_logit = "llrep",
                         llmod_omit_jr = FALSE,
                         llmod_omit_jc = FALSE,
                         llmod_omit_jrc = FALSE,
@@ -87,8 +90,19 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
       stop("n_ilr_rows is required if for the ILR 3 representation of the log-linear model and must be less or equal to the number of rows in the V_ilr basis matrix.")
     }
   }
+  if (fit_type == "cell-poisson" && neutral_logit != "llrep") {
+    stop("fit_type = 'cell-poisson' requires neutral_logit = 'llrep'")
+  }
 
-
+  if (neutral_logit == "llrep" && lambda_raw_offset) {
+    stop("neutral_logit = 'llrep' requires lambda_raw_offset = FALSE ",
+         "(the offset would cancel the anchor)")
+  }
+  if (!row_decompose && standata$Dm1_model != standata$R * standata$C - 1)
+    stop("row_decompose = FALSE requires a full basis (Dm1_model == R*C - 1); ",
+         "a margin-reduced basis has no coordinates for row proportions")
+  if (row_decompose && standata$Dm1_model != standata$R * (standata$C - 1))
+    stop("row_decompose = TRUE requires within-row dimensions only (Dm1_model == R*(C-1))")
   standata <- prep_data_stan(row_margins, col_margins, V_ilr, n_ilr_rows)
   standata <- modifyList(standata,
                          prep_options_stan(
@@ -111,7 +125,9 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            lambda_raw_offset = lambda_raw_offset,
                            rotate_llrep = rotate_llrep,
                            rotate_E_rc = rotate_E_rc,
-                           rotate_lambda = rotate_lambda
+                           rotate_lambda = rotate_lambda,
+                           link_E_rc = link_E_rc,
+                           row_decompose = row_decompose
                          ))
   standata <- modifyList(standata,
                          prep_priors_stan(
@@ -187,6 +203,32 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     n_rot_lam  <- 0
     ROT_lambda <- matrix(0, 0, 0)
   }
+  ## --- E_rc link ------------------------------------------------------------
+  ## rm_ref is declared unconditionally in the Stan data block, so always pass it
+  if (is.null(rm_ref)) {
+    rm_mat <- as.matrix(standata$row_margins)
+    rm_ref <- colSums(rm_mat) / sum(rm_mat)          # population row shares
+  }
+  rm_ref <- as.numeric(rm_ref)
+  if (length(rm_ref) != standata$R || any(rm_ref <= 0))
+    stop("rm_ref must be a length-R vector of strictly positive row shares")
+  rm_ref <- rm_ref / sum(rm_ref)
+
+  if (link_E_rc != "none") {
+    if (standata$Dm1_model != standata$R * (standata$C - 1))
+      stop("link_E_rc requires within-row dimensions only: Dm1_model must equal R*(C-1)")
+    if (fix_E_rc == 1)
+      stop("link_E_rc has no effect with fix_E_rc")
+  }
+  if (link_E_rc == "link") {
+    if (fit_type != "hybrid")
+      stop("link_E_rc = 'link' requires fit_type = 'hybrid'")
+    if (!neutral_logit %in% c("row", "table"))
+      stop("link_E_rc = 'link' requires neutral_logit 'row' or 'table'")
+    if (rotate_lambda == "full")
+      stop("link_E_rc = 'link' is incompatible with rotate_lambda = 'full'")
+  }
+  standata$rm_ref <- rm_ref
 
   standata <- modifyList(standata,
                          list(

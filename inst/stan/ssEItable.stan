@@ -54,12 +54,15 @@ data{
  int<lower=0, upper=1> lflag_E_rc_hier; // does E_rc have hyperparameters (1) or is it based on E_rc_prior (0)
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
- int<lower = 0, upper=2> lflag_neutral_logit; // flag indicating the neutral_logit for the allocation process when sequential weights are all zero. (0) gives equality across the rows [-log(cols_remaining)] (1) gives the independent table logit(col_margin/sum_remaining_col_margins) (2) gives the current composition implied by LLrep structure.
+ int<lower = 0, upper=2> lflag_neutral_logit; // flag indicating the neutral_logit for the allocation process when sequential weights are all zero. (0) gives equality across the rows [-log(cols_remaining)] (1) gives the independent table logit(col_margin/sum_remaining_col_margins) (2) lambda implied by LLrep structure.
+ int<lower=0, upper=3> lflag_link_E_rc;
+ row_vector[R] rm_ref;                 // reference row shares; used when link > 0
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
   int<lower =0, upper = 1> lflag_pin_row_effect; // flag indicating the model on row effects
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
+  int<lower=0, upper=1> lflag_row_decompose;
   int<lower =0, upper = 2> lflag_noncentred; //flag indicating whether to use a centred (0) or non-centred parameterization;
   int<lower=0, upper = 1> lflag_noncentred_mat[n_areas, Dm1_model]; //flag indicated whether cell is centred (0) or non-centred (1)
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
@@ -68,7 +71,7 @@ data{
   int<lower = 0, upper = 2> lflag_rot_lambda; // 0 - none, 1 - per area, 2 - per area plus cross area
   int<lower = 0> n_rot_lam;
   matrix[n_rot_lam, n_rot_lam] ROT_lambda;
-  int<lower=0, upper = 2> lflag_fit_type; // flag indicating whether model is (0) HYBRID of sequential sampling and soft ilr fit (0) or (1) SOFT ilr fit
+  int<lower=0, upper = 3> lflag_fit_type; // flag indicating whether model is (0) HYBRID of sampling and ILR with cell resolution (Poisson) (1) ILR margin resolution (Poisson) (2) ILR margin resolution (multinomial) (3) ILR cell resolution (Poisson)
   int<lower=0, upper = 1> lflag_rot_E_rc;
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
@@ -517,6 +520,27 @@ for(j in 1:n_areas){
   for(r in 1:R) global_rm[1, r] = sum(row_margins[1:n_areas, r]);
   for(c in 1:C) global_cm[1, c] = sum(col_margins[1:n_areas, c]);
 
+    int n_full_lam = 0;
+  for (j in 1:n_areas)
+    if (free_R[j] == R && free_C[j] == C) n_full_lam += (R - 1) * (C - 1);
+  array[n_full_lam] int full_lam_idx;
+  array[n_full_lam] int full_lam_r;
+  array[n_full_lam] int full_lam_c;
+  array[n_param - n_full_lam] int part_lam_idx;
+  {
+    int a = 0; int b = 0;
+    for (j in 1:n_areas)
+      for (r in 1:(free_R[j] - 1))
+        for (c in 1:(free_C[j] - 1)) {
+          int idx = param_count_from[j] + (r - 1) * (free_C[j] - 1) + c;
+          if (free_R[j] == R && free_C[j] == C) {
+            a += 1; full_lam_idx[a] = idx; full_lam_r[a] = r; full_lam_c[a] = c;
+          } else {
+            b += 1; part_lam_idx[b] = idx;
+          }
+        }
+  }
+
 
 
 if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
@@ -578,7 +602,6 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
 }
 parameters{
   vector[lflag_fit_type==0 ? n_param: 0] lambda_raw;
-  matrix[lflag_rawscw == 0 ? (R - 1):0, (C - 1)] lambda_mu_rc;
   vector[(lflag_family != 2) ? K_sigmas : 0] sigma_jrc_raw;
 
 // gamma (2): direct positive parameter, no log-transform
@@ -601,16 +624,19 @@ real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
   real log_volume_raw;
 
   // vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
-  vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : n_agg_free] E_rc_raw;
+  vector[(lflag_fix_E_rc || lflag_rawscw == 0 || lflag_link_E_rc > 0) ? 0 : n_agg_free] E_rc_raw;
+  matrix[lflag_link_E_rc > 0 ? R - 1 : 0, lflag_link_E_rc > 0 ? C - 1 : 0] lambda_offset;
+  simplex[lflag_link_E_rc > 0 ? C : 1] cm_ref;     // simplex[1] = no free parameters when unused
 }
 transformed parameters{
   vector[lflag_fit_type==0 ? n_param : 0] lambda_vec;
-  real lambda[lflag_fit_type==0 ? n_areas : 0, R - 1, C -1]; // sequential cell weights
+  real lambda[lflag_fit_type==0||lflag_fit_type==3 ? n_areas : 0, R - 1, C -1]; // sequential cell weights
   vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume;
   matrix[n_areas, Dm1] LLrep_jrc;
   real log_grand_volume;
   vector[n_areas] log_volume;
   vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
+  real log_jac_link = 0; // Jacobian accumulator to lambda_offset to E_rc transform
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
@@ -624,6 +650,8 @@ transformed parameters{
   real sigma_sq_row_out[lflag_rawscw==0?n_areas:0, (R * C) - 1];
   real sens_sq_out[lflag_rawscw==0?n_areas:0, (R * C) - 1];
   real tmp_J_mu_out[lflag_rawscw==0?n_areas:0, (R * C) - 1];
+  array[lflag_neutral_logit==2?n_areas:0, R - 1, C - 1] real anchor_lambda = rep_array(0.0, lflag_neutral_logit==2?n_areas:0, R - 1, C - 1);
+
 
 if(lflag_fix_sigma_jrc==1){
   sigma_jrc = sigma_jrc_fixed;
@@ -644,10 +672,20 @@ if(lflag_fit_type == 0) {
     lambda_vec = (lflag_rot_lambda > 0) ? ROT_lambda * lambda_raw : lambda_raw;
     for (j in 1:n_areas){
     lambda[j] = rep_array(0, R - 1, C - 1);
+
+
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
-        // lambda[j, r, c] = lambda_raw[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c]*sigma_scale_r[r];
-        lambda[j, r, c] = lambda_vec[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
+        real shift = 0;
+        if (lflag_link_E_rc == 2) {
+          shift = (free_R[j] == R && free_C[j] == C)
+                    ? lambda_offset[r, c] - neutral_logit_array[j, r, c]
+                    : -neutral_logit_array[j, r, c];
+        } else if (lflag_link_E_rc == 3) {
+          shift = -neutral_logit_array[j, r, c];          // centred: lambda_vec = x
+        }
+        lambda[j, r, c] = lambda_vec[param_count_from[j] + (r - 1) * (free_C[j] - 1) + c] + shift;
+        // lambda[j, r, c] = lambda_vec[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
         }
       }
     }
@@ -656,12 +694,16 @@ if(lflag_fit_type == 0) {
 
 
 
-  if(lflag_fix_E_rc==1){
-      E_rc = E_rc_fixed;
+  if (lflag_fix_E_rc == 1) {
+    E_rc = E_rc_fixed;
+  } else if (lflag_link_E_rc > 0) {
+    vector[R * C + 1] pt = push_through(rm_ref, cm_ref', lambda_offset,
+                                        hinge_delta_floor, hinge_delta_min);
+    E_rc = V_ilr_model' * log(pt[1:(R * C)]);
+    log_jac_link = pt[R * C + 1] - sum(log(pt[1:(R * C)]));
   } else {
     E_rc = E_rc_raw;
   }
-
 
   {
   vector[n_areas - 1] vol_coeffs;
@@ -726,21 +768,21 @@ if(lflag_fit_type == 0) {
     // 2. reconstruct full log-composition via p[r,c] = agg_row_prop[j,r] * q[r,c]
     row_vector[R*C] clr_model = llrep_model_j * V_ilr_model';
     vector[R*C] log_p_vec;
-    {
+
+    if (lflag_row_decompose == 1) {
+      // existing senc-style row-block loop, using rm_prop, unchanged
       int idx = 0;
       for (r in 1:R) {
         vector[C] log_q_r;
-        for (c in 1:C) {
-          idx += 1;
-          log_q_r[c] = clr_model[idx];
-        }
+        for (c in 1:C) { idx += 1; log_q_r[c] = clr_model[idx]; }
         real log_norm = log_sum_exp(log_q_r);
-        for (c in 1:C) {
-          log_p_vec[(r-1)*C + c] =
-            log(rm_prop[j, r]) + log_q_r[c] - log_norm;
+        for (c in 1:C) log_p_vec[(r-1)*C + c] = log(rm_prop[j, r]) + log_q_r[c] - log_norm;
         }
+      } else {
+        // Scotland-style: whole-table softmax, no row split, rm_prop unused
+        vector[R*C] lp = log_softmax(to_vector(clr_model));
+        for (k in 1:(R*C)) log_p_vec[k] = lp[k];
       }
-    }
 
     // 3. project to full Dm1 ILR coordinates (derived dims populated automatically)
     LLrep_jrc[j] = to_row_vector(V_ilr_full' * log_p_vec);
@@ -759,11 +801,25 @@ if(lflag_fit_type == 0) {
         }
       }
     }
+      if(lflag_fit_type==3) {
+          lambda[j] = rep_array(0.0, R - 1, C - 1);
+        }
+      if (lflag_neutral_logit == 2) {
+
+        matrix[R, C] comp_j;
+        for (r in 1:R) for (c in 1:C) comp_j[r, c] = composition_arr[j, r, c];
+        matrix[R - 1, C - 1] full_anchor = inverse_alloc(comp_j, hinge_delta_floor, hinge_delta_min);
+        for (r in 1:R - 1) {
+          for (c in 1:C - 1) {
+            anchor_lambda[j, r, c] = full_anchor[r, c];
+          }
+        }
+      }
 
   } // end per-area loop
 }
-if(lflag_fit_type == 0){
-   cell_values = ss_assign_cvals_cpanchor_lp(n_areas, R, C, row_margins, col_margins, lambda, composition_arr, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
+if(lflag_fit_type == 0||lflag_fit_type==3){
+   cell_values = ss_assign_cvals_lam_anchor_lp(n_areas, R, C, row_margins, col_margins, lambda, anchor_lambda, neutral_logit_array, hinge_delta_floor, hinge_delta_min, slack_tol, lflag_neutral_logit);
 
 }
 
@@ -789,7 +845,7 @@ model{
 // matrix[R, C] global_prop;
 
 
-if(lflag_fit_type == 0) {
+if(lflag_fit_type == 0||lflag_fit_type == 3) {
     row_vector[n_active_cells] obs_flat;
     vector[n_active_cells] log_rate_flat;
     for (idx in 1:n_active_cells) {
@@ -933,29 +989,19 @@ if(lflag_fix_sigma_jrc == 1){
 }
 
 if(lflag_fit_type == 0){
-    if(lflag_lambda_raw_offset==1){
+
+  if (lflag_link_E_rc == 3) {
+    vector[n_full_lam] off_mean;
+    for (i in 1:n_full_lam) off_mean[i] = lambda_offset[full_lam_r[i], full_lam_c[i]];
+  lambda_vec[full_lam_idx] ~ normal(off_mean, prior_lambda_raw_scale);
+  lambda_vec[part_lam_idx] ~ normal(0, prior_lambda_raw_scale);
+} else if (lflag_link_E_rc == 2) {
+  lambda_vec ~ normal(0, prior_lambda_raw_scale);
+} else if(lflag_lambda_raw_offset==1){
           if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
       lambda_vec ~ normal(-neutral_logit_flat, prior_lambda_raw_scale);
     } else if(lflag_neutral_logit==2){
-      real comp_logit_offset[n_param];
-      int counter = 0;
-      for(j in 1:n_areas){
-        for(r in 1:(free_R[j] - 1)){
-          vector[free_C[j]] comp_row;
-          for(k in 1:free_C[j]) {
-           comp_row[k] = composition_arr[j, active_row_map[j, r], active_col_map[j, k]];
-         }
-
-          for(c in 1:(free_C[j] - 1)){
-            counter += 1;
-           real remaining_comp_sum = sum(comp_row[c:free_C[j]]);
-           real this_share = comp_row[c]/remaining_comp_sum;
-           // real neutral_logit = -log(cols_remaining);
-           comp_logit_offset[counter] = -1 * logit(this_share);
-          }
-        }
-      }
-      lambda_vec ~ normal(comp_logit_offset, prior_lambda_raw_scale);
+      reject("should be here - incompatible option selected offset with neutral logit at composition.");
     }
 
     } else if(lflag_lambda_raw_offset == 0){

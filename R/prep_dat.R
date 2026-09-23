@@ -94,7 +94,9 @@ prep_options_stan <- function(use_dist,
                               lambda_raw_offset,
                               rotate_llrep,
                               rotate_E_rc,
-                              rotate_lambda
+                              link_E_rc,
+                              rotate_lambda,
+                              row_decompose
                               ){
   if(!use_dist %in% c("pois", "multinom", "negbinom", "multinomdirich")){
     stop("use_dist must be one of: pois, multinom, negbinom, multinomdirich")
@@ -147,12 +149,19 @@ prep_options_stan <- function(use_dist,
   if(!rotate_E_rc %in% c(TRUE, FALSE)){
     stop("rotate E_rc must be one of: TRUE, FALSE")
   }
-  if(!fit_type %in% c("soft", "hybrid", "soft multinom")){
-    stop("fit_type must be one of: hybrid, soft, soft multinom")
+  if(!fit_type %in% c("soft", "hybrid", "soft multinom", "cell-poisson")){
+    stop("fit_type must be one of: hybrid, soft, soft multinom, cell-poisson")
   }
   if(!rotate_lambda %in% c("none", "per-area", "full")){
     stop("rotate_lambda must be one of: none, per-area, full")
   }
+  if(!link_E_rc %in% c("none", "reparam", "link", "link cent")){
+    stop("link_E_rc must be one of: none, reparam, link, link cent")
+  }
+  if(!row_decompose %in% c(TRUE, FALSE)){
+    stop("row_decompose must be one of: TRUE, FALSE")
+  }
+
   list(
     lflag_dist = dplyr::case_when(
       use_dist == "pois" ~ 0,
@@ -174,6 +183,7 @@ prep_options_stan <- function(use_dist,
       fit_type == "hybrid" ~ 0,
       fit_type == "soft" ~ 1,
       fit_type == "soft multinom" ~ 2,
+      fit_type == "cell-poisson" ~ 3
     ),
     lflag_predictors_cm = dplyr::case_when(
       predictors_cm == FALSE ~ 0,
@@ -239,10 +249,20 @@ prep_options_stan <- function(use_dist,
       rotate_E_rc == TRUE ~ 1,
       rotate_E_rc == FALSE ~ 0
     ),
+    lflag_link_E_rc = dplyr::case_when(
+      link_E_rc == "none"    ~ 0,
+      link_E_rc == "reparam" ~ 1,
+      link_E_rc == "link"    ~ 2,
+      link_E_rc == "link cent" ~ 3
+    ),
     lflag_rot_lambda = dplyr::case_when(
       rotate_lambda == "none" ~ 0,
       rotate_lambda == "per-area" ~ 1,
       rotate_lambda == "full" ~ 2
+    ),
+    lflag_row_decompose = dplyr::case_when(
+      row_decompose == FALSE ~ 0,
+      row_decompose == TRUE ~ 1
     )
 
 

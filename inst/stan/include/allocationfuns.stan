@@ -172,11 +172,11 @@
 
   }
 
-      real[,,] ss_assign_cvals_cpanchor_lp (
+      real[,,] ss_assign_cvals_lam_anchor_lp (
         int n_areas, int R, int C,
         matrix row_margins, matrix col_margins,
         real[,,] lambda,
-        real[,,] composition,
+        real[,,] anchor_lambda,
         real[,,] neutral_logit_array,
         real delta_floor, real delta_min, real slack_tol, int lflag_neutral_logit){
     // constrains using sequential sampling approach described in Chen et. al 2005
@@ -237,10 +237,6 @@
       matrix[free_R, free_C] tmp_cell_value;
 
        for (r in 1:(free_R - 1)){
-         vector[free_C] comp_row;
-         for(k in 1:free_C) {
-           comp_row[k] = composition[j, active_row_map[r], active_col_map[k]];
-         }
          for (c in 1:(free_C -1 )){
            lower_pos[2]=slack_row[r]-sum(tail(slack_col, free_C-c));
            lower_bound=robust_hinge_floor_zero(lower_pos[2], delta_floor);
@@ -254,9 +250,7 @@
            if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
              neutral_logit = neutral_logit_array[j, r, c];
            } else if(lflag_neutral_logit == 2){
-             real remaining_comp_sum = sum(comp_row[c:free_C]);
-             real this_share = comp_row[c]/fmax(remaining_comp_sum, 1e-10);
-             neutral_logit = logit(this_share);
+             neutral_logit = anchor_lambda[j, active_row_map[r], active_col_map[c]];
            }
 
            real x = neutral_logit + lambda[j, r, c];
@@ -451,3 +445,54 @@
 
   }
 
+vector push_through(row_vector rm, row_vector cm, matrix x, real dfloor, real dmin) {
+  int R = num_elements(rm);  int C = num_elements(cm);
+  row_vector[R] sr = rm;  row_vector[C] sc = cm;
+  real rt = sum(sr);
+  real log_det = 0;
+  matrix[R, C] t = rep_matrix(0, R, C);
+  for (r in 1:(R - 1)) {
+    for (c in 1:(C - 1)) {
+      real lower = robust_hinge_floor_zero(sr[r] - sum(sc[(c + 1):C]), dfloor);
+      real upper = robust_hinge_min([sc[c], sr[r]]', dmin);
+      real width = robust_hinge_floor_zero(upper - lower, dmin);
+      t[r, c] = lower + inv_logit(x[r, c]) * width;
+      log_det += log(width) + log_inv_logit(x[r, c]) + log1m_inv_logit(x[r, c]);
+      sc[c] = fmax(sc[c] - t[r, c], 0);
+      sr[r] = fmax(sr[r] - t[r, c], 0);
+      rt    = fmax(rt - t[r, c], 0);
+    }
+    t[r, C] = sr[r];
+    rt = fmax(rt - t[r, C], 0);
+    sc[C] = fmax(sc[C] - t[r, C], 0);
+    sr[r] = 0;
+  }
+  for (c in 1:(C - 1)) { t[R, c] = sc[c]; rt = fmax(rt - sc[c], 0); }
+  t[R, C] = rt;
+  return append_row(to_vector(t'), log_det);     // cells row-major, then log_det
+}
+
+matrix inverse_alloc(matrix T, real dfloor, real dmin) {
+  int R = rows(T);
+  int C = cols(T);
+  row_vector[R] sr;
+  row_vector[C] sc;
+  for (r in 1:R) sr[r] = sum(T[r]);
+  for (c in 1:C) sc[c] = sum(col(T, c));
+
+  matrix[R - 1, C - 1] lam;
+  for (r in 1:(R - 1)) {
+    for (c in 1:(C - 1)) {
+      real lower = robust_hinge_floor_zero(sr[r] - sum(sc[(c + 1):C]), dfloor);
+      real upper = robust_hinge_min([sc[c], sr[r]]', dmin);
+      real width = robust_hinge_floor_zero(upper - lower, dmin);
+      real p = fmin(fmax((T[r, c] - lower) / fmax(width, 1e-12), 1e-8), 1 - 1e-8);
+      lam[r, c] = logit(p);
+      sc[c] = fmax(sc[c] - T[r, c], 0);
+      sr[r] = fmax(sr[r] - T[r, c], 0);
+    }
+    sc[C] = fmax(sc[C] - sr[r], 0);
+    sr[r] = 0;
+  }
+  return lam;
+}
