@@ -445,33 +445,6 @@
 
   }
 
-vector push_through(row_vector rm, row_vector cm, matrix x, real dfloor, real dmin) {
-  int R = num_elements(rm);  int C = num_elements(cm);
-  row_vector[R] sr = rm;  row_vector[C] sc = cm;
-  real rt = sum(sr);
-  real log_det = 0;
-  matrix[R, C] t = rep_matrix(0, R, C);
-  for (r in 1:(R - 1)) {
-    for (c in 1:(C - 1)) {
-      real lower = robust_hinge_floor_zero(sr[r] - sum(sc[(c + 1):C]), dfloor);
-      real upper = robust_hinge_min([sc[c], sr[r]]', dmin);
-      real width = robust_hinge_floor_zero(upper - lower, dmin);
-      t[r, c] = lower + inv_logit(x[r, c]) * width;
-      log_det += log(width) + log_inv_logit(x[r, c]) + log1m_inv_logit(x[r, c]);
-      sc[c] = fmax(sc[c] - t[r, c], 0);
-      sr[r] = fmax(sr[r] - t[r, c], 0);
-      rt    = fmax(rt - t[r, c], 0);
-    }
-    t[r, C] = sr[r];
-    rt = fmax(rt - t[r, C], 0);
-    sc[C] = fmax(sc[C] - t[r, C], 0);
-    sr[r] = 0;
-  }
-  for (c in 1:(C - 1)) { t[R, c] = sc[c]; rt = fmax(rt - sc[c], 0); }
-  t[R, C] = rt;
-  return append_row(to_vector(t'), log_det);     // cells row-major, then log_det
-}
-
 matrix inverse_alloc(matrix T, real dfloor, real dmin) {
   int R = rows(T);
   int C = cols(T);

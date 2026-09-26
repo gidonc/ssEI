@@ -11,6 +11,8 @@ prep_data_stan <- function(row_margins, col_margins, V_ilr, n_ilr_rows){
   row_margins <- as.matrix(row_margins); storage.mode(row_margins) <- "double"
   col_margins <- as.matrix(col_margins); storage.mode(col_margins) <- "double"
   R <- ncol(row_margins)
+  C <- ncol(col_margins)
+  n_areas <- nrow(row_margins)
   if(is.null(V_ilr)){
     V_ilr = matrix(0, C, C -1)
     n_ilr_rows = 0;
@@ -155,9 +157,7 @@ prep_options_stan <- function(use_dist,
   if(!rotate_lambda %in% c("none", "per-area", "full")){
     stop("rotate_lambda must be one of: none, per-area, full")
   }
-  if(!link_E_rc %in% c("none", "reparam", "link", "link cent")){
-    stop("link_E_rc must be one of: none, reparam, link, link cent")
-  }
+
   if(!row_decompose %in% c(TRUE, FALSE)){
     stop("row_decompose must be one of: TRUE, FALSE")
   }
@@ -248,12 +248,6 @@ prep_options_stan <- function(use_dist,
     lflag_rot_E_rc = dplyr::case_when(
       rotate_E_rc == TRUE ~ 1,
       rotate_E_rc == FALSE ~ 0
-    ),
-    lflag_link_E_rc = dplyr::case_when(
-      link_E_rc == "none"    ~ 0,
-      link_E_rc == "reparam" ~ 1,
-      link_E_rc == "link"    ~ 2,
-      link_E_rc == "link cent" ~ 3
     ),
     lflag_rot_lambda = dplyr::case_when(
       rotate_lambda == "none" ~ 0,

@@ -44,7 +44,7 @@ data{
   matrix[(R * C), (R * C) - 1] V_ilr_full; // basis matrix for ILR transformation
   matrix[(R * C), Dm1_model] V_ilr_model;
   matrix[n_areas*Dm1_model + n_areas - 1, n_areas*Dm1_model + n_areas - 1] ROT_red; //rebuilt for reduced dimensions
-  matrix[(R * C) - 1, (R * C) - 1] ROT_E_rc; //ilr rotation from raw to E_rc in V_ilr basis
+  matrix[n_agg_free, n_agg_free] ROT_E_rc; //ilr rotation from raw to E_rc in V_ilr basis
 
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
  // vector[(R * C) - 1] mu_llrep;
@@ -55,8 +55,6 @@ data{
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
  int<lower = 0, upper=2> lflag_neutral_logit; // flag indicating the neutral_logit for the allocation process when sequential weights are all zero. (0) gives equality across the rows [-log(cols_remaining)] (1) gives the independent table logit(col_margin/sum_remaining_col_margins) (2) lambda implied by LLrep structure.
- int<lower=0, upper=3> lflag_link_E_rc;
- row_vector[R] rm_ref;                 // reference row shares; used when link > 0
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
@@ -624,9 +622,8 @@ real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
   real log_volume_raw;
 
   // vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
-  vector[(lflag_fix_E_rc || lflag_rawscw == 0 || lflag_link_E_rc > 0) ? 0 : n_agg_free] E_rc_raw;
-  matrix[lflag_link_E_rc > 0 ? R - 1 : 0, lflag_link_E_rc > 0 ? C - 1 : 0] lambda_offset;
-  simplex[lflag_link_E_rc > 0 ? C : 1] cm_ref;     // simplex[1] = no free parameters when unused
+  vector[(lflag_fix_E_rc || lflag_rawscw == 0) ? 0 : n_agg_free] E_rc_raw;
+
 }
 transformed parameters{
   vector[lflag_fit_type==0 ? n_param : 0] lambda_vec;
@@ -636,7 +633,6 @@ transformed parameters{
   real log_grand_volume;
   vector[n_areas] log_volume;
   vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
-  real log_jac_link = 0; // Jacobian accumulator to lambda_offset to E_rc transform
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
@@ -676,16 +672,7 @@ if(lflag_fit_type == 0) {
 
     for (r in 1:(free_R[j]-1)){
       for (c in 1:(free_C[j] - 1)){
-        real shift = 0;
-        if (lflag_link_E_rc == 2) {
-          shift = (free_R[j] == R && free_C[j] == C)
-                    ? lambda_offset[r, c] - neutral_logit_array[j, r, c]
-                    : -neutral_logit_array[j, r, c];
-        } else if (lflag_link_E_rc == 3) {
-          shift = -neutral_logit_array[j, r, c];          // centred: lambda_vec = x
-        }
-        lambda[j, r, c] = lambda_vec[param_count_from[j] + (r - 1) * (free_C[j] - 1) + c] + shift;
-        // lambda[j, r, c] = lambda_vec[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
+        lambda[j, r, c] = lambda_vec[param_count_from[j] + ((r - 1) * (free_C[j] - 1)) + c];
         }
       }
     }
@@ -696,14 +683,12 @@ if(lflag_fit_type == 0) {
 
   if (lflag_fix_E_rc == 1) {
     E_rc = E_rc_fixed;
-  } else if (lflag_link_E_rc > 0) {
-    vector[R * C + 1] pt = push_through(rm_ref, cm_ref', lambda_offset,
-                                        hinge_delta_floor, hinge_delta_min);
-    E_rc = V_ilr_model' * log(pt[1:(R * C)]);
-    log_jac_link = pt[R * C + 1] - sum(log(pt[1:(R * C)]));
+  } else if (lflag_rot_E_rc == 1) {
+    E_rc = ROT_E_rc * E_rc_raw;
   } else {
     E_rc = E_rc_raw;
   }
+
 
   {
   vector[n_areas - 1] vol_coeffs;
@@ -990,14 +975,7 @@ if(lflag_fix_sigma_jrc == 1){
 
 if(lflag_fit_type == 0){
 
-  if (lflag_link_E_rc == 3) {
-    vector[n_full_lam] off_mean;
-    for (i in 1:n_full_lam) off_mean[i] = lambda_offset[full_lam_r[i], full_lam_c[i]];
-  lambda_vec[full_lam_idx] ~ normal(off_mean, prior_lambda_raw_scale);
-  lambda_vec[part_lam_idx] ~ normal(0, prior_lambda_raw_scale);
-} else if (lflag_link_E_rc == 2) {
-  lambda_vec ~ normal(0, prior_lambda_raw_scale);
-} else if(lflag_lambda_raw_offset==1){
+   if(lflag_lambda_raw_offset==1){
           if(lflag_neutral_logit == 0||lflag_neutral_logit == 1){
       lambda_vec ~ normal(-neutral_logit_flat, prior_lambda_raw_scale);
     } else if(lflag_neutral_logit==2){

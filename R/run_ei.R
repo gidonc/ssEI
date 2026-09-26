@@ -42,12 +42,12 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         mod_cols = TRUE,
                         rotate_llrep = TRUE,
                         rotate_E_rc = FALSE,
-                        link_E_rc = "none",
+                        link_E_rc = NULL,
                         rm_ref = NULL,
                         rotate_lambda = "none",
                         ROT_lambda = NULL,
                         row_decompose = FALSE,
-                        fit_type = "cell-poisson",
+                        fit_type = "hybrid",
                         neutral_logit = "llrep",
                         llmod_omit_jr = FALSE,
                         llmod_omit_jc = FALSE,
@@ -94,15 +94,6 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     stop("fit_type = 'cell-poisson' requires neutral_logit = 'llrep'")
   }
 
-  if (neutral_logit == "llrep" && lambda_raw_offset) {
-    stop("neutral_logit = 'llrep' requires lambda_raw_offset = FALSE ",
-         "(the offset would cancel the anchor)")
-  }
-  if (!row_decompose && standata$Dm1_model != standata$R * standata$C - 1)
-    stop("row_decompose = FALSE requires a full basis (Dm1_model == R*C - 1); ",
-         "a margin-reduced basis has no coordinates for row proportions")
-  if (row_decompose && standata$Dm1_model != standata$R * (standata$C - 1))
-    stop("row_decompose = TRUE requires within-row dimensions only (Dm1_model == R*(C-1))")
   standata <- prep_data_stan(row_margins, col_margins, V_ilr, n_ilr_rows)
   standata <- modifyList(standata,
                          prep_options_stan(
@@ -126,7 +117,6 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            rotate_llrep = rotate_llrep,
                            rotate_E_rc = rotate_E_rc,
                            rotate_lambda = rotate_lambda,
-                           link_E_rc = link_E_rc,
                            row_decompose = row_decompose
                          ))
   standata <- modifyList(standata,
@@ -142,6 +132,11 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            prior_cell_effect_scale = prior_cell_effect_scale,
                            prior_lambda_raw_scale = prior_lambda_raw_scale
                          ))
+
+  if (neutral_logit == "llrep" && lambda_raw_offset) {
+    stop("neutral_logit = 'llrep' requires lambda_raw_offset = FALSE ",
+         "(the offset would cancel the anchor)")
+  }
 
   if (rotate_lambda != "none") {
     if (is.null(ROT_lambda)) stop("ROT_lambda required when rotate_lambda is not 'none'")
@@ -195,40 +190,37 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
   if(!is.null(margin_reduction)){
     standata <- modifyList(standata, margin_reduction)
   }
-  if (rotate_lambda != "none") {
-    if (is.null(ROT_lambda)) stop("ROT_lambda required when rotate_lambda is not 'none'")
-    if (nrow(ROT_lambda) != ncol(ROT_lambda)) stop("ROT_lambda must be square")
-    n_rot_lam <- ncol(ROT_lambda)
-  } else {
-    n_rot_lam  <- 0
-    ROT_lambda <- matrix(0, 0, 0)
-  }
-  ## --- E_rc link ------------------------------------------------------------
-  ## rm_ref is declared unconditionally in the Stan data block, so always pass it
-  if (is.null(rm_ref)) {
-    rm_mat <- as.matrix(standata$row_margins)
-    rm_ref <- colSums(rm_mat) / sum(rm_mat)          # population row shares
-  }
-  rm_ref <- as.numeric(rm_ref)
-  if (length(rm_ref) != standata$R || any(rm_ref <= 0))
-    stop("rm_ref must be a length-R vector of strictly positive row shares")
-  rm_ref <- rm_ref / sum(rm_ref)
+  if (!row_decompose && standata$Dm1_model != standata$R * standata$C - 1)
+    stop("row_decompose = FALSE requires a full basis (Dm1_model == R*C - 1); ",
+         "a margin-reduced basis has no coordinates for row proportions")
+  if (row_decompose && standata$Dm1_model != standata$R * (standata$C - 1))
+    stop("row_decompose = TRUE requires within-row dimensions only (Dm1_model == R*(C-1))")
 
-  if (link_E_rc != "none") {
-    if (standata$Dm1_model != standata$R * (standata$C - 1))
-      stop("link_E_rc requires within-row dimensions only: Dm1_model must equal R*(C-1)")
-    if (fix_E_rc == 1)
-      stop("link_E_rc has no effect with fix_E_rc")
+  ## --- E_rc link ------------------------------------------------------------
+
+  lflag_link_E_rc <- rep(0L, standata$Dm1_model)
+  if (!is.null(link_E_rc)) {
+    if (!all(link_E_rc %in% seq_len(standata$Dm1_model)))
+      stop("link_E_rc must be indices between 1 and Dm1_model (", standata$Dm1_model, ")")
+    lflag_link_E_rc[link_E_rc] <- 1L
   }
-  if (link_E_rc == "link") {
-    if (fit_type != "hybrid")
-      stop("link_E_rc = 'link' requires fit_type = 'hybrid'")
-    if (!neutral_logit %in% c("row", "table"))
-      stop("link_E_rc = 'link' requires neutral_logit 'row' or 'table'")
-    if (rotate_lambda == "full")
-      stop("link_E_rc = 'link' is incompatible with rotate_lambda = 'full'")
+  standata$lflag_link_E_rc <- lflag_link_E_rc
+
+
+  if (rotate_E_rc) {
+    if (is.null(ROT_E_rc)) stop("ROT_E_rc required when rotate_E_rc = TRUE")
+    if (!all(dim(ROT_E_rc) == standata$n_agg_free))
+      stop("ROT_E_rc must be n_agg_free x n_agg_free (", standata$n_agg_free, "), got ",
+           paste(dim(ROT_E_rc), collapse = "x"))
+    if (!isTRUE(all.equal(t(ROT_E_rc) %*% ROT_E_rc, diag(ncol(ROT_E_rc)), tolerance = 1e-6)))
+      stop("ROT_E_rc is not orthonormal")
+  } else {
+    ROT_E_rc <- diag(standata$n_agg_free)   # identity default, so it's always well-sized even when unused
   }
-  standata$rm_ref <- rm_ref
+
+  standata$lflag_rot_E_rc <- as.integer(rotate_E_rc)
+  standata$ROT_E_rc <- ROT_E_rc
+
 
   standata <- modifyList(standata,
                          list(
@@ -343,4 +335,17 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     ROT              = ROT_full,
     lflag_noncentred_mat = noncentred_mat_model   # n_areas x Dm1_model
   )
+}
+
+#' @export
+build_rot_E_rc <- function(pilot_fit, n_agg_free) {
+  Er <- as.matrix(pilot_fit, pars = "E_rc_raw")
+  stopifnot(ncol(Er) == n_agg_free)
+  cv <- cov(Er)
+  ev <- eigen(cv)
+  stopifnot(all(ev$values > 1e-10))          # genuinely positive-definite, not near-singular
+  ROT <- ev$vectors
+  stopifnot(isTRUE(all.equal(t(ROT) %*% ROT, diag(n_agg_free), tolerance = 1e-6)))
+  attr(ROT, "n_agg_free") <- n_agg_free
+  ROT
 }
