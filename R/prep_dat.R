@@ -93,7 +93,7 @@ prep_options_stan <- function(use_dist,
                               family,
                               E_rc_hier,
                               neutral_logit,
-                              lambda_raw_offset,
+                              lambda_centred,
                               rotate_llrep,
                               rotate_E_rc,
                               link_E_rc,
@@ -142,8 +142,8 @@ prep_options_stan <- function(use_dist,
   if(!E_rc_hier %in% c(TRUE, FALSE)){
     stop("E_rc_heir must be one of: TRUE, FALSE")
   }
-  if(!neutral_logit %in% c("row", "table", "llrep")){
-    stop("neutral logit must be one of: row, table, llrep")
+  if(!neutral_logit %in% c("row", "table", "llrep", "E_rc")){
+    stop("neutral logit must be one of: row, table, llrep, E_rc")
   }
   if(!rotate_llrep %in% c(TRUE, FALSE)){
     stop("rotate llrep must be one of: TRUE, FALSE")
@@ -157,7 +157,9 @@ prep_options_stan <- function(use_dist,
   if(!rotate_lambda %in% c("none", "per-area", "full")){
     stop("rotate_lambda must be one of: none, per-area, full")
   }
-
+  if(!lambda_centred %in% c(TRUE, FALSE)){
+    stop("lambda_centred must be one of: TRUE, FALSE")
+  }
   if(!row_decompose %in% c(TRUE, FALSE)){
     stop("row_decompose must be one of: TRUE, FALSE")
   }
@@ -235,11 +237,12 @@ prep_options_stan <- function(use_dist,
     lflag_neutral_logit = dplyr::case_when(
       neutral_logit == "row" ~ 0,
       neutral_logit == "table" ~ 1,
-      neutral_logit == "llrep" ~ 2
+      neutral_logit == "llrep" ~ 2,
+      neutral_logit == "E_rc" ~ 3
     ),
-    lflag_lambda_raw_offset = dplyr::case_when(
-      lambda_raw_offset == TRUE ~ 1,
-      lambda_raw_offset == FALSE ~ 0
+    lflag_lambda_centred = dplyr::case_when(
+      lambda_centred == TRUE ~ 1,
+      lambda_centred == FALSE ~ 0
     ),
     lflag_rot_llrep = dplyr::case_when(
       rotate_llrep == TRUE ~ 1,

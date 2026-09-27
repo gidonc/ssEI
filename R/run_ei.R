@@ -48,7 +48,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         ROT_lambda = NULL,
                         row_decompose = FALSE,
                         fit_type = "hybrid",
-                        neutral_logit = "llrep",
+                        neutral_logit = "E_rc",
                         llmod_omit_jr = FALSE,
                         llmod_omit_jc = FALSE,
                         llmod_omit_jrc = FALSE,
@@ -57,7 +57,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         noncentred = "noncentred",
                         margin_reduction = NULL,
                         E_rc_hier = FALSE,
-                        lambda_raw_offset = TRUE,
+                        lambda_centred = TRUE,
                         noncentred_mat = matrix(1, nrow=3, ncol=2),
                         family = "lognormal",
                         raw_seq_cell_weights = FALSE,
@@ -113,7 +113,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            family = family,
                            E_rc_hier = E_rc_hier,
                            neutral_logit = neutral_logit,
-                           lambda_raw_offset = lambda_raw_offset,
+                           lambda_centred = lambda_centred,
                            rotate_llrep = rotate_llrep,
                            rotate_E_rc = rotate_E_rc,
                            rotate_lambda = rotate_lambda,
@@ -132,11 +132,6 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            prior_cell_effect_scale = prior_cell_effect_scale,
                            prior_lambda_raw_scale = prior_lambda_raw_scale
                          ))
-
-  if (neutral_logit == "llrep" && lambda_raw_offset) {
-    stop("neutral_logit = 'llrep' requires lambda_raw_offset = FALSE ",
-         "(the offset would cancel the anchor)")
-  }
 
   if (rotate_lambda != "none") {
     if (is.null(ROT_lambda)) stop("ROT_lambda required when rotate_lambda is not 'none'")
