@@ -51,7 +51,6 @@ data{
  int<lower=0, upper=1> structural_zeros[n_areas, R, C];  // an array indicating any structural zeros in the data (may include whole rows, whole columns and/or individual cells)
  int<lower=0, upper=2> lflag_dist; // flag indicating whether to use poisson (0), multinomial (1) or negative binomial (2)paramertization
  int<lower=0, upper=2> lflag_family; // flag indicating whether scale of LLrep distribution is based on log-normal (0), cauchy(1) or Gamma (2) family
- int<lower=0, upper=1> lflag_E_rc_hier; // does E_rc have hyperparameters (1) or is it based on E_rc_prior (0)
  int<lower=0, upper=3> lflag_area_re; // flag indicating whether the area mean simplex is uniform (0) or varies with area random effects which are normally distributed (1) or varies with area random effects which are multinormally distributed (non centred paramaterisation) (2) or varies with area random effects which are multinormally distributed (non centred LKJ Onion paramaterisation)
  int<lower  =0, upper=2> lflag_vary_sd; // flag indicating whether variance of area_cell parameters is: (0) shared across cells,  (1) varies by cell,  or (2) has a hierarchical model structure
  int<lower = 0, upper=3> lflag_neutral_logit; // flag indicating the neutral_logit for the allocation process when sequential weights are all zero. (0) gives equality across the rows [-log(cols_remaining)] (1) gives the independent table logit(col_margin/sum_remaining_col_margins) (2) lambda implied by LLrep structure (3) lambda implied by E_rc structure.
@@ -74,9 +73,7 @@ data{
   // 0 = Additive Log-Ratio 1 (C - 1) log-ratios representing the composition of the (R - 1) the free rows of the matrix
   // 3 = Log Odds Ratios of the
   int<lower=0, upper=1> lflag_fix_E_rc;        // 1 = use fixed values, 0 = estimate
-  int<lower=0, upper=1> lflag_fix_sigma_jrc;   // 1 = use fixed values, 0 = estimate
   vector[(R * C) - 1] E_rc_fixed;         // fixed values, ignored if fix_E_rc=0
-  vector<lower=0>[R*C - 1] sigma_jrc_fixed;  // fixed values, ignored if fix_sigma_jrc=0
   int<lower = 0, upper = 1> lflag_lambda_centred; // lambda = lambda_vec (1) or lambda = lambda_vec + neutral_logit (with different prior structures for each case)
   real<lower=0> sigma_floor; //minimum value for all sigma
  real<lower=0> prior_mu_re_scale; // prior for scale of mu_re (mean row effect)
@@ -96,6 +93,26 @@ data{
  real<lower = 0> hinge_delta_floor;
  real<lower = 0> hinge_delta_min;
  real<lower=0.0> slack_tol;
+  // E_rc grouping
+  array[n_agg_free] int<lower=1> E_rc_group_id;  // which group each dim belongs to
+
+
+  int<lower=1> E_rc_n_groups;
+  vector[E_rc_n_groups] E_rc_group_fixed_value;
+  array[E_rc_n_groups] int<lower=0,upper=4> E_rc_group_mode;  // 0 FIXED,1 SHARED,2 CP,3 NCP,4 PARTIAL_FIXED_SCALE
+  vector[E_rc_n_groups] E_rc_group_prior_a;
+  vector<lower=0>[E_rc_n_groups] E_rc_group_prior_b;
+  vector<lower=0>[E_rc_n_groups] E_rc_group_tau_a;
+  vector<lower=0>[E_rc_n_groups] E_rc_group_tau_b;
+
+  int<lower=1> sigma_n_groups;
+  array[Dm1_model] int<lower=1> sigma_group_id;
+  array[sigma_n_groups] int<lower=0,upper=4> sigma_group_mode;
+  vector[sigma_n_groups] sigma_group_prior_a;
+  vector<lower=0>[sigma_n_groups] sigma_group_prior_b;
+  vector<lower=0>[sigma_n_groups] sigma_group_tau_a;
+  vector<lower=0>[sigma_n_groups] sigma_group_tau_b;
+  vector[sigma_n_groups] sigma_group_fixed_value;
 }
 transformed data{
   int K;
@@ -108,8 +125,6 @@ transformed data{
   int K_jc_start;
   int K_jrc_start;
   int K_jrc_rstart[R - 1];
-  int K_sigmas;
-  int K_sigma_c_sigma;
   // int R_ll; // rows in the log-linear representation
   // int C_ll; // cols in the log-linear representation
   int has_area_cell_effects;
@@ -565,28 +580,6 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   int K_all = n_table_sigmas;
 
 
-  if(lflag_fix_sigma_jrc == 1){
-    K_sigmas = 0;
-    K_sigma_c_sigma = 0;
-  } else if(lflag_vary_sd == 0){
-    K_sigmas = 1;
-    K_sigma_c_sigma = 0;
-  } else if(lflag_vary_sd == 1){
-    if(lflag_rawscw==1){
-      K_sigmas = Dm1_model;
-    } else{
-      K_sigmas = Dm1_model;
-    }
-    K_sigma_c_sigma = 0;
-  } else if(lflag_vary_sd == 2){
-      if(lflag_rawscw==1){
-      K_sigmas = Dm1_model;
-    } else{
-      K_sigmas = Dm1_model;
-    }
-    K_sigma_c_sigma = 1;
-  }
-
   int D = R * C;
   int Dm1 = D - 1;
   int Dtot = n_areas * D;
@@ -596,33 +589,62 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
 
   matrix[n_areas, n_areas - 1] V_area = make_helmert_basis(n_areas);
 
+  // --- E_rc: compact hyperparameter index (only SHARED/CP/NCP groups need mu; only CP/NCP need sigma) ---
+  int E_rc_n_mu = 0;
+  int E_rc_n_sigma = 0;
+  array[E_rc_n_groups] int E_rc_mu_pos = rep_array(0, E_rc_n_groups);     // 0 = "no mu param"
+  array[E_rc_n_groups] int E_rc_sigma_pos = rep_array(0, E_rc_n_groups); // 0 = "no sigma param"
+
+   for (g in 1:E_rc_n_groups) {
+    if (E_rc_group_mode[g] >= 1) { E_rc_n_mu += 1; E_rc_mu_pos[g] = E_rc_n_mu; }
+    if (E_rc_group_mode[g] == 2 || E_rc_group_mode[g] == 3) { E_rc_n_sigma += 1; E_rc_sigma_pos[g] = E_rc_n_sigma; }
+  }
+  // --- E_rc: compact leaf index (only CP/NCP dims need their own raw leaf) ---
+  int E_rc_n_leaf = 0;
+  for (i in 1:n_agg_free) if (E_rc_group_mode[E_rc_group_id[i]] >= 2) E_rc_n_leaf += 1;
+  array[E_rc_n_leaf] int E_rc_leaf_idx;
+  {
+    int k = 0;
+    for (i in 1:n_agg_free)
+      if (E_rc_group_mode[E_rc_group_id[i]] >= 2) { k += 1; E_rc_leaf_idx[k] = i; }
+  }
+
+  // --- sigma_jrc: identical pattern ---
+  int sigma_n_mu = 0;
+  int sigma_n_sigma = 0;
+  array[sigma_n_groups] int sigma_mu_pos = rep_array(0, sigma_n_groups);
+  array[sigma_n_groups] int sigma_sigma_pos = rep_array(0, sigma_n_groups);
+  for (g in 1:sigma_n_groups) {
+    if (sigma_group_mode[g] >= 1) { sigma_n_mu += 1; sigma_mu_pos[g] = sigma_n_mu; }
+    if (sigma_group_mode[g] >= 2) { sigma_n_sigma += 1; sigma_sigma_pos[g] = sigma_n_sigma; }
+  }
+  int sigma_n_leaf = 0;
+  for (i in 1:Dm1_model) if (sigma_group_mode[sigma_group_id[i]] >= 2) sigma_n_leaf += 1;
+  array[sigma_n_leaf] int sigma_leaf_idx;
+  {
+    int k = 0;
+    for (i in 1:Dm1_model)
+      if (sigma_group_mode[sigma_group_id[i]] >= 2) { k += 1; sigma_leaf_idx[k] = i; }
+  }
+
 
 }
 parameters{
   vector[lflag_fit_type==0 ? n_param: 0] lambda_raw;
-  vector[(lflag_family != 2) ? K_sigmas : 0] sigma_jrc_raw;
 
-// gamma (2): direct positive parameter, no log-transform
-vector<lower=0>[(lflag_family == 2) ? K_sigmas : 0] sigma_jrc_direct;
-
-// partial-pooling hyperparameters, additive families
-real<lower=0> sigma_c_sigma[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0];
-vector[(lflag_vary_sd == 2 && lflag_family != 2) ? 1 : 0] sigma_c_mu;
-
-  real E_rc_mu[(lflag_E_rc_hier == 1) ? 1 : 0];       // shared centre across all cells
-  real<lower=0> E_rc_sigma[(lflag_E_rc_hier == 1) ? 1 : 0];
-
-// partial-pooling hyperparameters, gamma (mean + shape/concentration parameterization)
-real<lower=0> sigma_c_mu_gamma[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
-real<lower=0> sigma_c_shape[(lflag_vary_sd == 2 && lflag_family == 2) ? 1 : 0];
 
   // real LLrep_raw[n_areas, (R * C) - 1];
   // vector[n_areas] log_volume;
   vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_raw;
   real log_volume_raw;
+  vector[E_rc_n_leaf] E_rc_raw_leaf;
+  vector[E_rc_n_mu] E_rc_group_mu;
+  vector<lower=0>[E_rc_n_sigma] E_rc_group_sigma;
 
-  // vector[(lflag_fix_E_rc||lflag_rawscw==0) ? 0 : (R * C) - 1] E_rc_raw;
-  vector[(lflag_fix_E_rc || lflag_rawscw == 0) ? 0 : n_agg_free] E_rc_raw;
+  vector[sigma_n_leaf] sigma_raw_leaf;
+  vector[sigma_n_mu] sigma_group_mu;
+  vector<lower=0>[sigma_n_sigma] sigma_group_sigma;
+
 
 }
 transformed parameters{
@@ -650,21 +672,50 @@ transformed parameters{
   real tmp_J_mu_out[lflag_rawscw==0?n_areas:0, (R * C) - 1];
   array[(lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1] real anchor_lambda = rep_array(0.0, (lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1);
 
+  vector[n_agg_free] E_rc_raw;
+  {
+    int k = 0;   // walks E_rc_leaf_idx / E_rc_raw_leaf together
+    for (i in 1:n_agg_free) {
+      int g = E_rc_group_id[i];
+      int m = E_rc_group_mode[g];
+      if (m == 0) {
+        E_rc_raw[i] = E_rc_group_fixed_value[g];
+      } else if (m == 1) {
+        E_rc_raw[i] = E_rc_group_mu[E_rc_mu_pos[g]];
+      } else if (m == 2) {
+        k += 1;
+        E_rc_raw[i] = E_rc_raw_leaf[k];
+      } else if (m == 3) {
+        k += 1;
+        E_rc_raw[i] = E_rc_group_mu[E_rc_mu_pos[g]] + E_rc_group_sigma[E_rc_sigma_pos[g]] * E_rc_raw_leaf[k];
+      } else {   // m == 4
+        k += 1;
+        E_rc_raw[i] = E_rc_group_mu[E_rc_mu_pos[g]] + E_rc_group_fixed_value[g] * E_rc_raw_leaf[k];
+      }
+    }
+  }
 
-if(lflag_fix_sigma_jrc==1){
-  sigma_jrc = sigma_jrc_fixed;
-} else if(lflag_rawscw==1||lflag_rawscw==0){
-  if(lflag_vary_sd == 0){
-    // single shared value, broadcast to every cell
-    real shared_val = (lflag_family == 2) ? sigma_jrc_direct[1] : exp(sigma_jrc_raw[1]);
-    sigma_jrc = rep_vector(shared_val, Dm1_model);
-  } else if(lflag_family == 2){
-    sigma_jrc = sigma_jrc_direct;
-  } else {
+  vector[Dm1_model] sigma_jrc_raw;   // log-scale, feeds existing family branch below
+  {
+    int k = 0;
+    for (i in 1:Dm1_model) {
+      int g = sigma_group_id[i];
+      int m = sigma_group_mode[g];
+      if (m == 0) {
+        sigma_jrc_raw[i] = sigma_group_fixed_value[g];
+      } else if (m == 1) {
+        sigma_jrc_raw[i] = sigma_group_mu[sigma_mu_pos[g]];
+      } else if (m == 2) {
+        k += 1;
+        sigma_jrc_raw[i] = sigma_raw_leaf[k];
+      } else {
+        k += 1;
+        sigma_jrc_raw[i] = sigma_group_mu[sigma_mu_pos[g]] + sigma_group_sigma[sigma_sigma_pos[g]] * sigma_raw_leaf[k];
+      }
+    }
+  }
+
     sigma_jrc = exp(sigma_jrc_raw);
-  }
-  }
-
 
   if (lflag_fix_E_rc == 1) {
     E_rc = E_rc_fixed;
@@ -960,59 +1011,42 @@ if(lflag_rot_llrep == 0){
   }
 
 }
-  if(lflag_E_rc_hier == 1){
-    E_rc_mu ~ normal(0, prior_mu_re_scale);
-    E_rc_sigma ~ gamma(prior_gamma_shape, prior_gamma_rate);
-    E_rc ~ normal(E_rc_mu[1], E_rc_sigma[1]);
-  } else{
-    // E_rc ~ normal(E_rc_prior, prior_mu_re_scale);
-    E_rc ~ normal(0, prior_mu_re_scale);
 
-
+  // E_rc
+  for (g in 1:E_rc_n_groups) {
+    int m = E_rc_group_mode[g];
+    if (m >= 1) E_rc_group_mu[E_rc_mu_pos[g]] ~ normal(E_rc_group_prior_a[g], E_rc_group_prior_b[g]);
+    if (m == 2 || m == 3)
+      E_rc_group_sigma[E_rc_sigma_pos[g]] ~ gamma(E_rc_group_tau_a[g], E_rc_group_tau_b[g]);
+  }
+  for (k in 1:E_rc_n_leaf) {
+    int g = E_rc_group_id[E_rc_leaf_idx[k]];
+    if (E_rc_group_mode[g] == 2)
+      E_rc_raw_leaf[k] ~ normal(E_rc_group_mu[E_rc_mu_pos[g]], E_rc_group_sigma[E_rc_sigma_pos[g]]);
+    else
+      E_rc_raw_leaf[k] ~ std_normal();                       // modes 3 and 4
   }
 
-if(lflag_fix_sigma_jrc == 1){
-  // nothing
-} else if(lflag_vary_sd == 0){
-  // single shared parameter, straightforward prior regardless of family
-  if(lflag_family == 2){
-    sigma_jrc_direct[1] ~ gamma(prior_gamma_shape, prior_gamma_rate);
-  } else if(lflag_family == 0){
-    sigma_jrc_raw[1] ~ normal(prior_sigma_mu, prior_sigma_c_scale);
-  } else {
-    sigma_jrc_raw[1] ~ cauchy(prior_sigma_mu, prior_sigma_c_scale);
-  }
-} else if(lflag_family == 2){
-  // --- Gamma family, vary (1) or partial (2) ---
-  if(lflag_vary_sd == 2){
-    sigma_c_mu_gamma ~ normal(0, prior_sigma_c_mu_scale) T[0,];
-    sigma_c_shape ~ normal(0, prior_sigma_c_scale) T[0,];
-    for(s in 1:K_sigmas){
-      sigma_jrc_direct[s] ~ gamma(sigma_c_shape[1], sigma_c_shape[1] / sigma_c_mu_gamma[1]);
+  // sigma_jrc: family decides how the centre prior is expressed
+  for (g in 1:sigma_n_groups) {
+    int m = sigma_group_mode[g];
+    if (m >= 1) {
+      real lsig = sigma_group_mu[sigma_mu_pos[g]];
+      if (lflag_family == 2)
+        target += gamma_lpdf(exp(lsig) | sigma_group_prior_a[g], sigma_group_prior_b[g]) + lsig;
+      else
+        lsig ~ normal(sigma_group_prior_a[g], sigma_group_prior_b[g]);
     }
-  } else {  // vary_sd == 1
-    to_vector(sigma_jrc_direct) ~ gamma(prior_gamma_shape, prior_gamma_rate);
+    if (m == 2 || m == 3)
+      sigma_group_sigma[sigma_sigma_pos[g]] ~ gamma(sigma_group_tau_a[g], sigma_group_tau_b[g]);
   }
-} else {
-  // --- lognormal (0) or cauchy (1), vary (1) or partial (2) ---
-  if(lflag_vary_sd == 2){
-    sigma_c_mu ~ normal(0, prior_sigma_c_mu_scale);
-    sigma_c_sigma ~ normal(0, prior_sigma_c_scale);
-    for(s in 1:K_sigmas){
-      if(lflag_family == 0){
-        sigma_jrc_raw[s] ~ normal(sigma_c_mu[1], sigma_c_sigma[1]);
-      } else {
-        sigma_jrc_raw[s] ~ cauchy(sigma_c_mu[1], sigma_c_sigma[1]);
-      }
-    }
-  } else {  // vary_sd == 1
-    if(lflag_family == 0){
-      to_vector(sigma_jrc_raw) ~ normal(prior_sigma_mu, prior_sigma_c_scale);
-    } else {
-      to_vector(sigma_jrc_raw) ~ cauchy(prior_sigma_mu, prior_sigma_c_scale);
-    }
+  for (k in 1:sigma_n_leaf) {
+    int g = sigma_group_id[sigma_leaf_idx[k]];
+    if (sigma_group_mode[g] == 2)
+      sigma_raw_leaf[k] ~ normal(sigma_group_mu[sigma_mu_pos[g]], sigma_group_sigma[sigma_sigma_pos[g]]);
+    else
+      sigma_raw_leaf[k] ~ std_normal();
   }
-}
 
 if(lflag_fit_type == 0){
 

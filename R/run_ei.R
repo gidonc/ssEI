@@ -38,7 +38,6 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         V_dcorr_mat = NULL,
                         n_ilr_rows = NULL,
                         inc_rm = FALSE,
-                        vary_sd = FALSE,
                         mod_cols = TRUE,
                         rotate_llrep = TRUE,
                         rotate_E_rc = FALSE,
@@ -57,6 +56,19 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         noncentred = "noncentred",
                         margin_reduction = NULL,
                         E_rc_hier = FALSE,
+                        E_rc_ncp = FALSE,
+                        E_rc_group_id = NULL,      # if NULL, built from E_rc_hier/E_rc_ncp defaults
+                        E_rc_group_mode = NULL,
+                        E_rc_group_fixed_value = 0,
+                        E_rc_group_prior_a = NULL, E_rc_group_prior_b = NULL,
+                        E_rc_group_tau_a = NULL,   E_rc_group_tau_b = NULL,
+                        sigma_group_prior_a = NULL, sigma_group_prior_b = NULL,
+                        sigma_group_tau_a = NULL,   sigma_group_tau_b = NULL,
+                        vary_sd = FALSE,
+                        sigma_ncp = FALSE,
+                        sigma_group_id = NULL,
+                        sigma_group_mode = NULL,
+                        sigma_group_fixed_value = 0,
                         lambda_centred = TRUE,
                         noncentred_mat = matrix(1, nrow=3, ncol=2),
                         family = "lognormal",
@@ -215,6 +227,35 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
 
   standata$lflag_rot_E_rc <- as.integer(rotate_E_rc)
   standata$ROT_E_rc <- ROT_E_rc
+
+  if (is.null(E_rc_group_id)) {
+    d <- default_E_rc_groups(standata$n_agg_free, E_rc_hier, E_rc_ncp)
+    E_rc_group_id <- d$group_id; E_rc_group_mode <- d$group_mode; E_rc_group_fixed_value <- d$group_fixed_value
+  }
+  ## after margin_reduction is merged and groups have defaults:
+  erg <- resolve_groups(E_rc_group_id, E_rc_group_mode, E_rc_group_fixed_value,
+                        E_rc_group_prior_a %||% 0,
+                        E_rc_group_prior_b %||% prior_mu_re_scale,
+                        E_rc_group_tau_a   %||% prior_gamma_shape,
+                        E_rc_group_tau_b   %||% prior_gamma_rate,
+                        standata$n_agg_free, "E_rc")
+
+  lognormal <- family != "Gamma"
+  sg <- resolve_groups(sigma_group_id, sigma_group_mode, sigma_group_fixed_value,
+                       sigma_group_prior_a %||% (if (lognormal) prior_sigma_mu      else prior_gamma_shape),
+                       sigma_group_prior_b %||% (if (lognormal) prior_sigma_c_scale else prior_gamma_rate),
+                       sigma_group_tau_a   %||% prior_gamma_shape,
+                       sigma_group_tau_b   %||% prior_gamma_rate,
+                       standata$Dm1_model, "sigma_jrc")
+
+  standata[c("E_rc_group_id", "E_rc_n_groups", "E_rc_group_mode", "E_rc_group_fixed_value",
+             "E_rc_group_prior_a", "E_rc_group_prior_b", "E_rc_group_tau_a", "E_rc_group_tau_b")] <-
+    erg[c("group_id", "n_groups", "group_mode", "group_fixed_value",
+          "group_prior_a", "group_prior_b", "group_tau_a", "group_tau_b")]
+  standata[c("sigma_group_id", "sigma_n_groups", "sigma_group_mode", "sigma_group_fixed_value",
+             "sigma_group_prior_a", "sigma_group_prior_b", "sigma_group_tau_a", "sigma_group_tau_b")] <-
+    sg[c("group_id", "n_groups", "group_mode", "group_fixed_value",
+         "group_prior_a", "group_prior_b", "group_tau_a", "group_tau_b")]
 
 
   standata <- modifyList(standata,
