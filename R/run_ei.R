@@ -369,6 +369,8 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     V_ilr_full       = V_ilr_full,
     V_ilr_model      = V_ilr_model,
     ROT              = ROT_full,
+    lflag_rot_agg    = 0L,
+    ROT_agg          = diag(Dm1_model),
     lflag_noncentred_mat = noncentred_mat_model   # n_areas x Dm1_model
   )
 }

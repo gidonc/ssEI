@@ -66,6 +66,8 @@ data{
   int<lower = 0, upper = 1> lflag_rawscw; //flag indicating whether to use raw, or decentred version of sequential cell weights (lamdba coeffients)
   int<lower = 0, upper = 4> lflag_ll_rep; // flag indicating which log linear representation of the final tables should be used.
   int<lower = 0, upper = 1> lflag_rot_llrep;
+  int<lower=0, upper=1> lflag_rot_agg;
+  matrix[Dm1_model, Dm1_model] ROT_agg;          // orthogonal; identity = initial behaviour
   int<lower = 0, upper = 2> lflag_rot_lambda; // 0 - none, 1 - per area, 2 - per area plus cross area
   int<lower = 0> n_rot_lam;
   matrix[n_rot_lam, n_rot_lam] ROT_lambda;
@@ -181,6 +183,18 @@ transformed data{
   prior_phi_scale = 100;
   array[Dm1_model] int<lower=0, upper =1> lflag_agg_noncent = lflag_noncentred_mat[1, 1:(Dm1_model)];
   array[n_areas - 1, Dm1_model] int<lower=0, upper =1> lflag_dev_noncent = lflag_noncentred_mat[2:n_areas, 1:(Dm1_model)];
+
+  if (lflag_rot_agg == 1) {
+    if (lflag_rot_llrep != 1) reject("lflag_rot_agg requires lflag_rot_llrep == 1");
+    for (s in 1:Dm1_model)
+      if (lflag_agg_noncent[s] == 1) reject("lflag_rot_agg requires all agg dims centred");
+    {
+      matrix[Dm1_model, Dm1_model] chk = ROT_agg' * ROT_agg;
+      for (a in 1:Dm1_model) for (b in 1:Dm1_model)
+        if (abs(chk[a, b] - (a == b)) > 1e-8) reject("ROT_agg must be orthogonal");
+     }
+  }
+
   int n_active_cells = 0;
   for (j in 1:n_areas)
     for (r in 1:R)
@@ -777,6 +791,10 @@ vector[n_agg_free] E_rc_raw;
 
   if (lflag_rot_llrep == 1) {
 
+    if (lflag_rot_agg == 1){
+        LLrep_plus_log_volume_xform[1:Dm1_model] = ROT_agg * LLrep_plus_log_volume_raw[1:Dm1_model];
+    }
+
     // --- centring/noncentring transform on raw vector ---
     // agg block: indices 1:Dm1_model
     for (s in 1:Dm1_model) {
@@ -1011,7 +1029,7 @@ if(lflag_rot_llrep == 0){
     if(lflag_agg_noncent[s]==1){
       LLrep_plus_log_volume_raw[s] ~ std_normal();
     } else {
-      LLrep_plus_log_volume_raw[s] ~ normal(sqrt(n_areas)*E_rc[s], sigma_jrc[s]);
+      LLrep_plus_log_volume_xform[s] ~ normal(sqrt(n_areas)*E_rc[s], sigma_jrc[s]);
     }
   }
   {
