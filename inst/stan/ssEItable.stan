@@ -57,6 +57,7 @@ data{
  int<lower = 0, upper = 1> lflag_llmod_omit_jr; // flag indicating whether log-linear model should omit area * row interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jc; // flag indicating whether log-linear model should omit area * col interaction
  int<lower = 0, upper = 1> lflag_llmod_omit_jrc; // flag indicating whether log-linear model should omit area * row * column interaction
+ int<lower = 0, upper = 1> lflag_E_rc_node_logit; // (0) balance paramertisation (1) logit parameterisation
   int<lower =0, upper = 1> lflag_pin_row_effect; // flag indicating the model on row effects
   int<lower = 0, upper =1> lflag_predictors_cm; // flag indicating whether to model columns as well as rows
   int<lower=0, upper=1> lflag_row_decompose;
@@ -627,7 +628,14 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
       if (sigma_group_mode[sigma_group_id[i]] >= 2) { k += 1; sigma_leaf_idx[k] = i; }
   }
 
-
+  matrix[R*C, R*C - 1] S_plus_full;
+  matrix[R*C, R*C - 1] S_minus_full;
+  for (k in 1:(R*C - 1)) {
+    for (i in 1:(R*C)) {
+      S_plus_full[i, k]  = V_ilr_full[i, k] >  1e-10 ? 1 : 0;
+      S_minus_full[i, k] = V_ilr_full[i, k] < -1e-10 ? 1 : 0;
+    }
+  }
 }
 parameters{
   vector[lflag_fit_type==0 ? n_param: 0] lambda_raw;
@@ -672,29 +680,40 @@ transformed parameters{
   real tmp_J_mu_out[lflag_rawscw==0?n_areas:0, (R * C) - 1];
   array[(lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1] real anchor_lambda = rep_array(0.0, (lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1);
 
-  vector[n_agg_free] E_rc_raw;
+vector[n_agg_free] E_rc_raw;
   {
-    int k = 0;   // walks E_rc_leaf_idx / E_rc_raw_leaf together
+    vector[n_agg_free] u;
+    int k = 0;
     for (i in 1:n_agg_free) {
       int g = E_rc_group_id[i];
       int m = E_rc_group_mode[g];
       if (m == 0) {
-        E_rc_raw[i] = E_rc_group_fixed_value[g];
+        u[i] = E_rc_group_fixed_value[g];
       } else if (m == 1) {
-        E_rc_raw[i] = E_rc_group_mu[E_rc_mu_pos[g]];
+        u[i] = E_rc_group_mu[E_rc_mu_pos[g]];
       } else if (m == 2) {
         k += 1;
-        E_rc_raw[i] = E_rc_raw_leaf[k];
+        u[i] = E_rc_raw_leaf[k];
       } else if (m == 3) {
         k += 1;
-        E_rc_raw[i] = E_rc_group_mu[E_rc_mu_pos[g]] + E_rc_group_sigma[E_rc_sigma_pos[g]] * E_rc_raw_leaf[k];
-      } else {   // m == 4
+        u[i] = E_rc_group_mu[E_rc_mu_pos[g]] + E_rc_group_sigma[E_rc_sigma_pos[g]] * E_rc_raw_leaf[k];
+      } else {   // m == 4, partial_fixed
         k += 1;
-        E_rc_raw[i] = E_rc_group_mu[E_rc_mu_pos[g]] + E_rc_group_fixed_value[g] * E_rc_raw_leaf[k];
+        u[i] = E_rc_group_mu[E_rc_mu_pos[g]] + E_rc_group_fixed_value[g] * E_rc_raw_leaf[k];
       }
     }
-  }
 
+  if (lflag_E_rc_node_logit == 1) {
+      vector[R*C - 1] u_full = rep_vector(0, R*C - 1);
+      u_full[agg_free_dim] = u;           // derived positions stay at 0 -- annihilated by projection
+      vector[R*C] log_p = S_plus_full * log_inv_logit(u_full) + S_minus_full * log1m_inv_logit(u_full);
+      E_rc_raw = V_ilr_model' * log_p;
+    } else {
+      E_rc_raw = u;
+    }
+
+
+  }
   vector[Dm1_model] sigma_jrc_raw;   // log-scale, feeds existing family branch below
   {
     int k = 0;

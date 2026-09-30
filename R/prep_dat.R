@@ -97,6 +97,7 @@ prep_options_stan <- function(use_dist,
                               rotate_llrep,
                               rotate_E_rc,
                               link_E_rc,
+                              E_rc_node_logit,
                               rotate_lambda,
                               row_decompose
                               ){
@@ -162,6 +163,9 @@ prep_options_stan <- function(use_dist,
   }
   if(!row_decompose %in% c(TRUE, FALSE)){
     stop("row_decompose must be one of: TRUE, FALSE")
+  }
+  if(!E_rc_node_logit %in% c(TRUE, FALSE)){
+    stop("E_rc_node_logit must be one of: TRUE, FALSE")
   }
 
   list(
@@ -260,6 +264,10 @@ prep_options_stan <- function(use_dist,
     lflag_row_decompose = dplyr::case_when(
       row_decompose == FALSE ~ 0,
       row_decompose == TRUE ~ 1
+    ),
+    lflag_E_rc_node_logit = dplyr::case_when(
+      E_rc_node_logit == FALSE ~ 0,
+      E_rc_node_logit == TRUE ~ 1
     )
 
 

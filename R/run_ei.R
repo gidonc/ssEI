@@ -32,6 +32,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         use_dist = "pois",
                         area_re = "normal",
                         ll_rep = "ALR 1",
+                        E_rc_node_logit = FALSE,
                         V_ilr = NULL,
                         ROT = NULL,
                         ROT_E_rc = NULL,
@@ -124,6 +125,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            raw_seq_cell_weights = raw_seq_cell_weights,
                            family = family,
                            E_rc_hier = E_rc_hier,
+                           E_rc_node_logit = E_rc_node_logit,
                            neutral_logit = neutral_logit,
                            lambda_centred = lambda_centred,
                            rotate_llrep = rotate_llrep,
@@ -280,9 +282,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     print(standata$R)
     print(standata$C)
     print(standata$n_areas)
-    print(standata$V_ilr)
-    print(standata$n_ilr_rows)
-    print(standata$lflag_ll_rep)
+    print(standata$V_ilr_model)
 
   }
   if(mod_cols){
