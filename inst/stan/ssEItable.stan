@@ -8,7 +8,6 @@ functions{
   #include include/allocationfuns.stan
   #include include/realpdf.stan
 
-
   vector simplex_constrain_softmax_lp(vector v) {
      int K = size(v) + 1;
      vector[K] v0 = append_row(0, v);
@@ -68,6 +67,16 @@ data{
   int<lower = 0, upper = 1> lflag_rot_llrep;
   int<lower=0, upper=1> lflag_rot_agg;
   matrix[Dm1_model, Dm1_model] ROT_agg;          // orthogonal; identity = initial behaviour
+
+  // ---- margin parameterisation (per-area pinned coords beta + NCP interaction z) ----
+  // b_j = mp_b_ref[j] + mp_P[j] * beta_j + mp_N[j] * gamma_j      (b_j = llrep_model_j, V_ilr_model coords)
+  // mp_G[j] : n_pin x Dm1 gradient of pinned margin log-ratios at b_ref ; G*P = I, G*N = 0, N'N = I
+  int<lower=0, upper=1> lflag_margin_param;
+  int<lower=0> n_pin;
+  array[lflag_margin_param ? n_areas : 0] vector[Dm1_model] mp_b_ref;
+  array[lflag_margin_param ? n_areas : 0] matrix[n_pin, Dm1_model] mp_G;
+  array[lflag_margin_param ? n_areas : 0] matrix[Dm1_model, n_pin] mp_P;
+  array[lflag_margin_param ? n_areas : 0] matrix[Dm1_model, Dm1_model - n_pin] mp_N;
   int<lower = 0, upper = 2> lflag_rot_lambda; // 0 - none, 1 - per area, 2 - per area plus cross area
   int<lower = 0> n_rot_lam;
   matrix[n_rot_lam, n_rot_lam] ROT_lambda;
@@ -193,6 +202,25 @@ transformed data{
       for (a in 1:Dm1_model) for (b in 1:Dm1_model)
         if (abs(chk[a, b] - (a == b)) > 1e-8) reject("ROT_agg must be orthogonal");
      }
+  }
+
+  // margin parameterisation: size of the old stacked vector (0 when margin mode is on)
+  int N_llpv = (lflag_margin_param == 1) ? 0 : n_areas * Dm1_model + n_areas - 1;
+  if (lflag_margin_param == 1) {
+    if (n_pin < 1 || n_pin >= Dm1_model) reject("margin_param needs 1 <= n_pin < Dm1_model; n_pin = ", n_pin);
+    if (lflag_rot_agg == 1) reject("margin_param is incompatible with lflag_rot_agg == 1");
+    if (lflag_rot_llrep == 1) print("note: lflag_margin_param = 1 overrides lflag_rot_llrep / ROT_red / lflag_noncentred_mat");
+    for (j in 1:n_areas) {
+      matrix[n_pin, n_pin] gp = mp_G[j] * mp_P[j];
+      matrix[n_pin, Dm1_model - n_pin] gn = mp_G[j] * mp_N[j];
+      matrix[Dm1_model - n_pin, Dm1_model - n_pin] nn = mp_N[j]' * mp_N[j];
+      for (a in 1:n_pin) for (b in 1:n_pin)
+        if (abs(gp[a, b] - (a == b)) > 1e-6) reject("mp: G*P != I in area ", j);
+      for (a in 1:n_pin) for (b in 1:(Dm1_model - n_pin))
+        if (abs(gn[a, b]) > 1e-6) reject("mp: G*N != 0 in area ", j);
+      for (a in 1:(Dm1_model - n_pin)) for (b in 1:(Dm1_model - n_pin))
+        if (abs(nn[a, b] - (a == b)) > 1e-6) reject("mp: N'N != I in area ", j);
+    }
   }
 
   int n_active_cells = 0;
@@ -657,8 +685,12 @@ parameters{
 
   // real LLrep_raw[n_areas, (R * C) - 1];
   // vector[n_areas] log_volume;
-  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_raw;
+  vector[N_llpv] LLrep_plus_log_volume_raw;     // size 0 in margin mode
   real log_volume_raw;
+  // margin parameterisation
+  array[lflag_margin_param ? n_areas : 0] vector[n_pin] mp_beta;              // pinned margin coords (centred)
+  array[lflag_margin_param ? n_areas : 0] vector[Dm1_model - n_pin] mp_z;     // interaction coords (NCP | beta)
+  vector[lflag_margin_param ? n_areas - 1 : 0] log_volume_rest;              // log_volume[2:n_areas]
   vector[E_rc_n_leaf] E_rc_raw_leaf;
   vector[E_rc_n_mu] E_rc_group_mu;
   vector<lower=0>[E_rc_n_sigma] E_rc_group_sigma;
@@ -673,11 +705,12 @@ transformed parameters{
   vector[lflag_fit_type==0 ? n_param : 0] lambda_vec;
   vector[lflag_fit_type==0 ? n_param : 0] neutral_logit_flat;
   real lambda[lflag_fit_type==0||lflag_fit_type==3 ? n_areas : 0, R - 1, C -1]; // sequential cell weights
-  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume;
+  vector[N_llpv] LLrep_plus_log_volume;
   matrix[n_areas, Dm1] LLrep_jrc;
   real log_grand_volume;
   vector[n_areas] log_volume;
-  vector[n_areas*Dm1_model + n_areas - 1] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
+  vector[N_llpv] LLrep_plus_log_volume_xform = LLrep_plus_log_volume_raw;
+  real mp_beta_lp = 0;   // log prior of mp_beta given (E_rc, sigma_jrc); added to target in model block
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
@@ -788,8 +821,40 @@ vector[n_agg_free] E_rc_raw;
   {
   vector[n_areas - 1] vol_coeffs;
   vector[n_areas] vol_dev = rep_vector(0, n_areas);
+  array[lflag_margin_param ? n_areas : 0] row_vector[Dm1_model] b_mp;
 
-  if (lflag_rot_llrep == 1) {
+  if (lflag_margin_param == 1) {
+    // ---- margin parameterisation ----
+    // Prior is the existing hierarchy b_j ~ N(E_rc, diag(sigma_jrc^2)), written in the
+    // per-area coordinates (beta_j, gamma_j) = (G_j (b_j - b_ref_j), N_j' (b_j - b_ref_j)).
+    // beta_j is centred (data-pinned); gamma_j | beta_j is non-centred via z_j. Map is linear
+    // with constant Jacobian, so no adjustment is needed.
+    log_volume = append_row(log_volume_raw, log_volume_rest);
+    log_grand_volume = log_sum_exp(log_volume);
+    {
+      vector[Dm1_model] s2 = square(sigma_jrc);
+      for (j in 1:n_areas) {
+        vector[Dm1_model] d0 = E_rc - mp_b_ref[j];
+        matrix[n_pin, Dm1_model] GS = diag_post_multiply(mp_G[j], s2);                 // G Sigma
+        matrix[Dm1_model - n_pin, Dm1_model] NS = diag_post_multiply(mp_N[j]', s2);    // N' Sigma
+        matrix[n_pin, n_pin] Sbb = GS * mp_G[j]';
+        matrix[Dm1_model - n_pin, n_pin] Sgb = NS * mp_G[j]';
+        matrix[Dm1_model - n_pin, Dm1_model - n_pin] Sgg = NS * mp_N[j];
+        matrix[Dm1_model - n_pin, n_pin] Kg;
+        matrix[Dm1_model - n_pin, Dm1_model - n_pin] Cc;
+        vector[n_pin] mu_b = mp_G[j] * d0;
+        vector[Dm1_model - n_pin] gam;
+        Sbb = 0.5 * (Sbb + Sbb');
+        Kg = mdivide_right_spd(Sgb, Sbb);           // Sigma_gb Sigma_bb^-1
+        Cc = Sgg - Kg * Sgb';                       // Sigma_gg|b
+        Cc = 0.5 * (Cc + Cc');
+        gam = mp_N[j]' * d0 + Kg * (mp_beta[j] - mu_b) + cholesky_decompose(Cc) * mp_z[j];
+        b_mp[j] = (mp_b_ref[j] + mp_P[j] * mp_beta[j] + mp_N[j] * gam)';
+        mp_beta_lp += multi_normal_cholesky_lpdf(mp_beta[j] | mu_b, cholesky_decompose(Sbb));
+      }
+    }
+
+  } else if (lflag_rot_llrep == 1) {
 
     if (lflag_rot_agg == 1){
         LLrep_plus_log_volume_xform[1:Dm1_model] = ROT_agg * LLrep_plus_log_volume_raw[1:Dm1_model];
@@ -840,7 +905,9 @@ vector[n_agg_free] E_rc_raw;
 
     // 1. get free (within-row) ILR coordinates for this area
     row_vector[Dm1_model] llrep_model_j;
-    if (lflag_rot_llrep == 1) {
+    if (lflag_margin_param == 1) {
+      llrep_model_j = b_mp[j];                 // margin param: log_volume already set above
+    } else if (lflag_rot_llrep == 1) {
       llrep_model_j = to_row_vector(
         LLrep_plus_log_volume[((j-1)*Dm1_model + 1):(j*Dm1_model)]);
       log_volume[j] = log_grand_volume + vol_dev[j];
@@ -1020,7 +1087,11 @@ if(lflag_fit_type == 1){
 
   log_volume ~ normal(0, 10);
 
-if(lflag_rot_llrep == 0){
+if (lflag_margin_param == 1) {
+  // hierarchy b_j ~ N(E_rc, diag sigma^2) in (beta, z) coordinates
+  target += mp_beta_lp;
+  for (j in 1:n_areas) mp_z[j] ~ std_normal();
+} else if(lflag_rot_llrep == 0){
   for(j in 1:n_areas){
     LLrep_jrc[j, agg_free_dim] ~ normal(E_rc, sigma_jrc);
   }
@@ -1135,6 +1206,7 @@ if(lflag_rawscw == 1||lflag_rawscw==0){
           ilr_var[k] = (n > 1) ? s2/n - square(ilr_mean[k]) : 0;
         }
       }
-    #include include/generateratesandsummaries.stan
+
+      #include include/generateratesandsummaries.stan
 
 }

@@ -359,7 +359,7 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     matrix(1L, nrow = n_areas, ncol = Dm1_model)   # default: all noncentred
   }
 
-  list(
+  out <- list(
     n_agg_derived    = length(margin_structure$derived),
     agg_derived_dim  = as.array(margin_structure$derived),
     agg_free_dim     = as.array(free_dims),
@@ -373,6 +373,7 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     ROT_agg          = diag(Dm1_model),
     lflag_noncentred_mat = noncentred_mat_model   # n_areas x Dm1_model
   )
+  modifyList(out, margin_param_defaults(Dm1_model))
 }
 
 #' @export
@@ -386,4 +387,51 @@ build_rot_E_rc <- function(pilot_fit, n_agg_free) {
   stopifnot(isTRUE(all.equal(t(ROT) %*% ROT, diag(n_agg_free), tolerance = 1e-6)))
   attr(ROT, "n_agg_free") <- n_agg_free
   ROT
+}
+
+#'@export
+## 1. Defaults so that every existing call still supplies the new data fields.
+##    Add these to the list returned by build_margin_reduction() (same place
+##    ROT_agg / lflag_rot_agg are added), or merge them onto mr before ei_estimate().
+margin_param_defaults <- function(Dm1_model) {
+  list(
+    lflag_margin_param = 0L,
+    n_pin    = 0L,
+    mp_b_ref = array(0, c(0, Dm1_model)),
+    mp_G     = array(0, c(0, 0, Dm1_model)),
+    mp_P     = array(0, c(0, Dm1_model, 0)),
+    mp_N     = array(0, c(0, Dm1_model, Dm1_model))
+  )
+}
+
+#' @export
+## 2. Switch margin mode on, given per-area maps
+add_margin_param <- function(mr, maps) {
+  stopifnot(length(maps) == nrow(mr$lflag_noncentred_mat))   # one map per area
+  arr <- function(f) aperm(simplify2array(lapply(maps, `[[`, f)), c(3, 1, 2))
+  n_pin <- nrow(maps[[1]]$G)
+  mr$lflag_margin_param <- 1L
+  mr$n_pin    <- n_pin
+  mr$mp_b_ref <- t(sapply(maps, `[[`, "b_ref"))          # n_areas x Dm1
+  mr$mp_G     <- arr("G")                                 # n_areas x n_pin x Dm1
+  mr$mp_P     <- arr("P")                                 # n_areas x Dm1 x n_pin
+  mr$mp_N     <- arr("N")                                 # n_areas x Dm1 x (Dm1 - n_pin)
+  ## guard against n_pin == 1 collapsing a dim in simplify2array
+  stopifnot(identical(dim(mr$mp_G), c(length(maps), n_pin, mr$Dm1_model)),
+            identical(dim(mr$mp_P), c(length(maps), mr$Dm1_model, n_pin)),
+            identical(dim(mr$mp_N), c(length(maps), mr$Dm1_model, mr$Dm1_model - n_pin)))
+  mr
+}
+
+#'@export
+## 3. Inits: start each area at its raked reference (beta = 0 => b = b_ref, z = 0)
+make_mp_init <- function(row_margins, n_pin, Dm1_model) {
+  tot <- log(rowSums(as.matrix(row_margins)))
+  n_areas <- length(tot)
+  function() list(
+    log_volume_raw  = tot[1],
+    log_volume_rest = as.array(tot[-1]),
+    mp_beta = matrix(0, n_areas, n_pin),
+    mp_z    = matrix(0, n_areas, Dm1_model - n_pin)
+  )
 }
