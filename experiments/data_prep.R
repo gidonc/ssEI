@@ -299,6 +299,21 @@ build_collapsed_margins <- function(rm_full, cm_full, actual_full, collapse_map,
 bloc_7 <- c("Conservative and Unionist Party [The]" = 1, "Labour Party [The]" = 2, "Liberal Democrats" = 2, "Other" = 3,
             "spoilt" = 3, "Scottish Green Party" = 4, "Scottish National Party" = 4)
 
+## True cells as an areas x rows x columns array, built by category NAME (never by row_no / col_no).
+## In the uncollapsed s07actual the rows and columns are numbered in different orders (rows: Con, Lab, LD, SNP, spoilt, Other, Green;
+## columns: Con, Lab, LD, Other, Green, SNP, spoilt), so row_no / col_no only make sense against s07rm / s07cm as they come.
+## `area_col` is the area numbering in `actual` (area_no).
+known_cells <- function(actual, row_names, col_names, rm = NULL, cm = NULL) {
+  J <- max(actual$area_no)
+  k <- array(0, c(J, length(row_names), length(col_names)), dimnames = list(NULL, row_names, col_names))
+  ri <- match(actual$row_name, row_names); ci <- match(actual$col_name, col_names)
+  if (anyNA(ri) || anyNA(ci)) stop("category names in `actual` do not match row_names / col_names")
+  for (i in seq_len(nrow(actual))) k[actual$area_no[i], ri[i], ci[i]] <- k[actual$area_no[i], ri[i], ci[i]] + actual$actual_cell_value[i]
+  if (!is.null(rm)) stopifnot("row sums of the known cells differ from the row margins" = all(apply(k, c(1, 2), sum) == as.matrix(rm)))
+  if (!is.null(cm)) stopifnot("column sums of the known cells differ from the column margins" = all(apply(k, c(1, 3), sum) == as.matrix(cm)))
+  k
+}
+
 prep_scotland <- function(size = 5, n_areas = 30, seed = 1234) {
   stopifnot(size %in% c(3, 5, 7))
   ei_SCO_2007 <- NULL
@@ -313,7 +328,9 @@ prep_scotland <- function(size = 5, n_areas = 30, seed = 1234) {
   list(rm = as.matrix(s$rm), cm = as.matrix(s$cm), kc = s$known_cell_values,
        row_names = s$row_names, col_names = s$col_names, bloc = bloc, area_idx = area_idx,
        actual = s$actual_wide,          # the true cells in long form, collapsed to this size, areas renumbered 1..n_areas
-       s07actual = tb$s07actual)        # the same for all 73 areas and 7 x 7 categories, with the original district numbers
+       s07actual = tb$s07actual,        # the same for all 73 areas and 7 x 7 categories, with the original district numbers.
+                                        # NB its row_no / col_no refer to s07rm / s07cm below, whose orders differ: use known_cells().
+       s07rm = tb$s07rm, s07cm = tb$s07cm)
 }
 
 ## ---------------------------------------------------------------------------
