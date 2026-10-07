@@ -1,0 +1,235 @@
+## senc (eiPack), soft multinomial, row-by-row margin model.
+##
+## Reproduces the configuration used for the senc results in the findings notes:
+## rows conditioned on the data, expected table allocated row by row, whitened
+## column-margin parameters, volume scaling, interior parameters anchored on E_rc
+## and scaled by the hierarchy.
+##
+## The helper functions in section 1 build the extra model inputs. They are here so
+## this script runs against the package as it stands; they are meant to move into
+## the package.
+##
+## Usage: source("experiments/senc_rowwise.R")  (or Rscript), after installing ssEI and eiPack.
+
+library(ssEI)
+
+## ---------------------------------------------------------------------------
+## 1. Helpers for the row-by-row model
+## ---------------------------------------------------------------------------
+
+## within-row basis from a sign matrix (one column per split: +1 / -1 / 0)
+rw_sbp_to_v <- function(S) {
+  V <- matrix(0, nrow(S), ncol(S))
+  for (k in seq_len(ncol(S))) {
+    p <- which(S[, k] == 1); n <- which(S[, k] == -1)
+    nc <- sqrt(length(p) * length(n) / (length(p) + length(n)))
+    V[p, k] <- nc / length(p); V[n, k] <- -nc / length(n)
+  }
+  V
+}
+
+## Goodman regression pattern (R x C, rows sum to 1): reference table and starting point only
+rw_goodman <- function(rm, cm, floor = 0.02) {
+  X <- as.matrix(rm) / rowSums(rm); Y <- as.matrix(cm) / rowSums(cm)
+  B <- solve(crossprod(X), crossprod(X, Y))
+  B[] <- pmax(B, floor)
+  B / rowSums(B)
+}
+
+## row-by-row allocation, as in the Stan function seq_alloc_ordered (mode 3).
+##   w, m      row and column shares (same total)
+##   lam       (R - 1) * (C - 1) logits, laid out row by row in allocation order
+##   row_order allocation order of the rows (last = remainder row)
+##   rem_col   for each row, its reference column
+rw_alloc <- function(w, m, lam, row_order, rem_col) {
+  R <- length(w); C <- length(m); sc <- m; X <- matrix(0, R, C)
+  for (k in seq_len(R - 1)) {
+    r <- row_order[k]; eta <- numeric(C)
+    eta[-rem_col[r]] <- lam[(k - 1) * (C - 1) + seq_len(C - 1)]
+    lo <- -80; hi <- 80                                  # shift so that the row takes exactly w[r]
+    for (i in 1:120) { t <- (lo + hi) / 2; if (sum(sc * plogis(eta + t)) > w[r]) hi <- t else lo <- t }
+    X[r, ] <- sc * plogis(eta + (lo + hi) / 2); sc <- sc - X[r, ]
+  }
+  X[row_order[R], ] <- sc
+  X
+}
+
+## the logits that reproduce table X under rw_alloc
+rw_inv <- function(X, row_order, rem_col) {
+  C <- ncol(X); sc <- colSums(X); lam <- numeric(0)
+  for (r in row_order[-length(row_order)]) {
+    e <- log(X[r, ] / (sc - X[r, ]))
+    lam <- c(lam, (e - e[rem_col[r]])[-rem_col[r]]); sc <- sc - X[r, ]
+  }
+  lam
+}
+
+## cell-by-cell allocation with odds-ratio placement, as in the Stan function seq_alloc_ordered (mode 2).
+## Same layout of lam, row order and reference columns as rw_alloc; each cell is placed by the log odds ratio of its 2 x 2 table.
+rw_or_cell <- function(sr, sc, rest, lam) {
+  psi <- exp(lam); A <- psi - 1; B <- -(psi * (sr + sc) + rest - sr); Cq <- psi * sr * sc
+  disc <- sqrt(max(B * B - 4 * A * Cq, 0))
+  if (B <= 0) 2 * Cq / (-B + disc) else (-B - disc) / (2 * A)
+}
+rw_alloc_or <- function(w, m, lam, row_order, rem_col) {
+  R <- length(w); C <- length(m); sr <- w; sc <- m; X <- matrix(0, R, C)
+  for (k in seq_len(R - 1)) {
+    r <- row_order[k]; last <- rem_col[r]; rest <- sum(sc); i <- 0
+    for (c in seq_len(C)) if (c != last) {
+      i <- i + 1; rest <- rest - sc[c]
+      x <- rw_or_cell(sr[r], sc[c], rest, lam[(k - 1) * (C - 1) + i])
+      X[r, c] <- x; sc[c] <- sc[c] - x; sr[r] <- sr[r] - x
+    }
+    X[r, last] <- sr[r]; sc[last] <- sc[last] - sr[r]
+  }
+  X[row_order[R], ] <- sc
+  X
+}
+rw_inv_or <- function(X, row_order, rem_col) {
+  C <- ncol(X); sc <- colSums(X); sr <- rowSums(X); lam <- numeric(0)
+  for (r in row_order[-length(row_order)]) {
+    last <- rem_col[r]; rest <- sum(sc)
+    for (c in seq_len(C)) if (c != last) {
+      x <- X[r, c]; rest <- rest - sc[c]
+      lam <- c(lam, log(x) + log(rest - sr[r] + x) - log(sr[r] - x) - log(sc[c] - x))
+      sc[c] <- sc[c] - x; sr[r] <- sr[r] - x
+    }
+    sc[last] <- sc[last] - sr[r]
+  }
+  lam
+}
+
+## Inputs that switch on the row-by-row model with rows conditioned on the data.
+##   mr        list from build_margin_reduction()
+##   rm, cm    row and column margins (areas x R, areas x C)
+##   row_order allocation order; default smallest row first, largest row as remainder
+##   rem_col   reference column of each row
+##   alloc     3 = row by row, one adjustment per row ("adjusted row"); 2 = cell by cell, odds-ratio placement ("odds-ratio logit")
+rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1L, ncol(rm)),
+                     q_bar = rw_goodman(rm, cm), alloc = 3L) {
+  stopifnot(alloc %in% c(2L, 3L))
+  alloc_fun <- if (alloc == 3L) rw_alloc else rw_alloc_or
+  inv_fun   <- if (alloc == 3L) rw_inv else rw_inv_or
+  rm <- as.matrix(rm); cm <- as.matrix(cm)
+  J <- nrow(rm); R <- ncol(rm); C <- ncol(cm); Dm1 <- mr$Dm1_model; K <- (R - 1) * (C - 1)
+  V <- mr$V_ilr_model
+  stopifnot(Dm1 == R * (C - 1))                           # rows conditioned: within-row coordinates only
+  W <- (rm + 0.01) / (rowSums(rm) + R * 0.01)             # the model's smoothed shares (empty rows become very small rows)
+  M <- (cm + 0.01) / (rowSums(cm) + C * 0.01)
+  b_of <- function(X, w) as.vector(crossprod(V, as.vector(t(log(X / w)))))
+  ## reference matrix: d (hierarchy coordinates) / d (interior logits) at the Goodman pattern raked to each area's margins
+  mp_B <- array(0, c(J, Dm1, K)); h <- 1e-4
+  for (j in seq_len(J)) {
+    w <- W[j, ]; m <- M[j, ]; X <- w * q_bar
+    for (i in 1:1000) { X <- sweep(X, 2, m / colSums(X), "*"); X <- X * (w / rowSums(X)) }
+    l0 <- inv_fun(X, row_order, rem_col)
+    for (k in seq_len(K)) {
+      e <- numeric(K); e[k] <- h
+      mp_B[j, , k] <- (b_of(alloc_fun(w, m, l0 + e, row_order, rem_col), w) -
+                       b_of(alloc_fun(w, m, l0 - e, row_order, rem_col), w)) / (2 * h)
+    }
+  }
+  ## whitening of the column-margin parameters: factor of the covariance of the last-column log-ratios under the counts
+  mp_T <- array(0, c(J, C - 1, C - 1))
+  for (j in seq_len(J)) { n <- cm[j, ] + 0.01; mp_T[j, , ] <- t(chol(diag(1 / n[-C], C - 1) + 1 / n[C])) }
+  modifyList(mr, list(
+    lflag_margin_param = 1L, lflag_mp_seq = 1L, lflag_mp_seq_anchor = 1L, n_pin = C - 1L,
+    mp_b_ref = matrix(0, J, Dm1), mp_G = array(0, c(J, C - 1, Dm1)),      # not used by the sequential model
+    mp_P = array(0, c(J, Dm1, C - 1)), mp_N = array(0, c(J, Dm1, K)),
+    lflag_seq_or_expected = alloc, mp_row_order = as.array(as.integer(row_order)), mp_rem_col = as.array(as.integer(rem_col)),
+    mp_newton_iters = 10L,
+    lflag_mp_beta_whiten = 1L, mp_T = mp_T,
+    lflag_mp_vol_scale = 1L,
+    lflag_mp_seq_scale = 2L, mp_B = mp_B, mp_nc_w = rep(1, Dm1), mp_sigma0 = rep(0.5, Dm1),
+    lflag_mp_scale_fast = 0L
+  ))
+}
+
+## starting values: every area at E_rc's table, volume and margin parameters at 0
+rw_init <- function(J, n_pin, K, E_mean, n_sigma) {
+  function() list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
+                  mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
+                  E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log(0.3), n_sigma)))
+}
+
+## ---------------------------------------------------------------------------
+## 2. Data and basis
+## ---------------------------------------------------------------------------
+if (!exists("senc")) data(senc, package = "eiPack")
+rown <- c("white", "black", "natam"); coln <- c("dem", "rep", "non")
+rm <- senc[rown]; cm <- senc[coln]
+J <- nrow(rm); R <- 3; C <- 3
+kc <- array(0, c(J, R, C))                                # the true cells, used only to score the result
+cellnm <- outer(c("wh", "bl", "natam"), coln, paste0)
+for (r in 1:R) for (c in 1:C) kc[, r, c] <- senc[[cellnm[r, c]]]
+stopifnot(all(apply(kc, c(1, 2), sum) == as.matrix(rm)), all(apply(kc, c(1, 3), sum) == as.matrix(cm)))
+
+## within each row: {dem, rep} against {non}, then dem against rep; row margins first
+Vr <- rw_sbp_to_v(cbind(c(1, 1, -1), c(1, -1, 0)))
+V_within <- matrix(0, R * C, R * (C - 1))
+for (r in 1:R) V_within[(r - 1) * C + 1:C, (r - 1) * (C - 1) + 1:(C - 1)] <- Vr
+V_ilr <- cbind(kronecker(make_helmert_basis(R), matrix(1 / sqrt(C), C, 1)), V_within)
+stopifnot(all.equal(crossprod(V_ilr), diag(R * C - 1), tolerance = 1e-8))
+
+## ---------------------------------------------------------------------------
+## 3. Model inputs
+## ---------------------------------------------------------------------------
+mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C)    # row-margin coordinates removed: rows conditioned on the data
+ALLOC <- 3L                                               # 3 = adjusted row (default); 2 = odds-ratio logit
+mr  <- rw_setup(mr, rm, cm, row_order = order(colSums(rm)), rem_col = c(1L, 1L, 1L), alloc = ALLOC)
+Dm1 <- mr$Dm1_model
+
+## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
+m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)
+E_mean <- digamma(m_pos) - digamma(n_neg); E_sd <- sqrt(trigamma(m_pos) + trigamma(n_neg))
+
+SEED <- 1234; CHAINS <- 4; ITER <- 1000; WARMUP <- 500
+
+## ---------------------------------------------------------------------------
+## 4. Fit
+## ---------------------------------------------------------------------------
+fit <- ssEI::ei_estimate(
+  rm, cm,
+  E_rc_fixed = rep(0, R * C - 1), sigma_jrc_fixed = rep(.5, R * C - 1),
+  fix_E_rc = 0, fix_sigma_jrc = 0,
+  E_rc_prior = rep(0, R * C - 1),
+  known_cell_values = kc, use_known_cells = 0,
+  V_ilr = V_ilr, n_ilr_rows = R,
+  fit_type = "soft multinom",
+  row_decompose = TRUE,
+  rotate_llrep = TRUE,                                    # ignored by the margin model
+  margin_reduction = mr,
+  ROT_E_rc = diag(Dm1), rotate_E_rc = FALSE,
+  link_E_rc = NULL, rotate_lambda = "none",
+  sigma_group_id = 1:Dm1, sigma_group_mode = rep("shared", Dm1),          # one sigma per coordinate, shared by the areas
+  sigma_group_prior_a = rep(log(.3), Dm1), sigma_group_prior_b = rep(0.5, Dm1),
+  sigma_ncp = TRUE,
+  E_rc_group_id = 1:Dm1, E_rc_group_mode = rep("shared", Dm1),
+  E_rc_group_prior_a = unname(E_mean), E_rc_group_prior_b = unname(E_sd),
+  E_rc_node_logit = TRUE,
+  neutral_logit = "llrep", lambda_centred = FALSE,
+  sigma_floor = 0, prior_sigma_c_scale = 2, prior_lambda_raw_scale = 12,
+  prior_gamma_shape = 2, prior_gamma_rate = .5,
+  raw_seq_cell_weights = TRUE,
+  chains = CHAINS, cores = CHAINS, iter = ITER, warmup = WARMUP,
+  init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, Dm1), seed = SEED
+)
+
+## ---------------------------------------------------------------------------
+## 5. Summary (skipped when the fit is not a stanfit)
+## ---------------------------------------------------------------------------
+if (inherits(fit, "stanfit")) {
+  cv  <- rstan::extract(fit, "cell_values")$cell_values                  # draws x areas x R x C
+  est <- apply(cv, 2:4, mean)
+  lo  <- apply(cv, 2:4, quantile, 0.05); hi <- apply(cv, 2:4, quantile, 0.95)
+  big <- kc >= 50
+  cat(sprintf("error index %.2f | 90%% coverage of cells of 50+ %.2f\n",
+              50 * sum(abs(est - kc)) / sum(kc), mean((kc >= lo & kc <= hi)[big])))
+  s <- rstan::summary(fit, pars = c("E_rc", "sigma_group_mu"))$summary
+  print(round(s[, c("mean", "sd", "n_eff", "Rhat")], 3))
+  sp <- do.call(rbind, rstan::get_sampler_params(fit, inc_warmup = FALSE))
+  cat(sprintf("step size %.3f | leapfrogs per draw %.0f | divergences %d | draws at maximum tree depth %d\n",
+              mean(sp[, "stepsize__"]), mean(sp[, "n_leapfrog__"]), sum(sp[, "divergent__"]),
+              sum(sp[, "treedepth__"] >= 10)))
+  print(rstan::get_elapsed_time(fit))
+}
