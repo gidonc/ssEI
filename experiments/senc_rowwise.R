@@ -64,13 +64,52 @@ rw_inv <- function(X, row_order, rem_col) {
   lam
 }
 
+## cell-by-cell allocation with odds-ratio placement, as in the Stan function seq_alloc_ordered (mode 2).
+## Same layout of lam, row order and reference columns as rw_alloc; each cell is placed by the log odds ratio of its 2 x 2 table.
+rw_or_cell <- function(sr, sc, rest, lam) {
+  psi <- exp(lam); A <- psi - 1; B <- -(psi * (sr + sc) + rest - sr); Cq <- psi * sr * sc
+  disc <- sqrt(max(B * B - 4 * A * Cq, 0))
+  if (B <= 0) 2 * Cq / (-B + disc) else (-B - disc) / (2 * A)
+}
+rw_alloc_or <- function(w, m, lam, row_order, rem_col) {
+  R <- length(w); C <- length(m); sr <- w; sc <- m; X <- matrix(0, R, C)
+  for (k in seq_len(R - 1)) {
+    r <- row_order[k]; last <- rem_col[r]; rest <- sum(sc); i <- 0
+    for (c in seq_len(C)) if (c != last) {
+      i <- i + 1; rest <- rest - sc[c]
+      x <- rw_or_cell(sr[r], sc[c], rest, lam[(k - 1) * (C - 1) + i])
+      X[r, c] <- x; sc[c] <- sc[c] - x; sr[r] <- sr[r] - x
+    }
+    X[r, last] <- sr[r]; sc[last] <- sc[last] - sr[r]
+  }
+  X[row_order[R], ] <- sc
+  X
+}
+rw_inv_or <- function(X, row_order, rem_col) {
+  C <- ncol(X); sc <- colSums(X); sr <- rowSums(X); lam <- numeric(0)
+  for (r in row_order[-length(row_order)]) {
+    last <- rem_col[r]; rest <- sum(sc)
+    for (c in seq_len(C)) if (c != last) {
+      x <- X[r, c]; rest <- rest - sc[c]
+      lam <- c(lam, log(x) + log(rest - sr[r] + x) - log(sr[r] - x) - log(sc[c] - x))
+      sc[c] <- sc[c] - x; sr[r] <- sr[r] - x
+    }
+    sc[last] <- sc[last] - sr[r]
+  }
+  lam
+}
+
 ## Inputs that switch on the row-by-row model with rows conditioned on the data.
 ##   mr        list from build_margin_reduction()
 ##   rm, cm    row and column margins (areas x R, areas x C)
 ##   row_order allocation order; default smallest row first, largest row as remainder
 ##   rem_col   reference column of each row
+##   alloc     3 = row by row, one adjustment per row ("adjusted row"); 2 = cell by cell, odds-ratio placement ("odds-ratio logit")
 rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1L, ncol(rm)),
-                     q_bar = rw_goodman(rm, cm)) {
+                     q_bar = rw_goodman(rm, cm), alloc = 3L) {
+  stopifnot(alloc %in% c(2L, 3L))
+  alloc_fun <- if (alloc == 3L) rw_alloc else rw_alloc_or
+  inv_fun   <- if (alloc == 3L) rw_inv else rw_inv_or
   rm <- as.matrix(rm); cm <- as.matrix(cm)
   J <- nrow(rm); R <- ncol(rm); C <- ncol(cm); Dm1 <- mr$Dm1_model; K <- (R - 1) * (C - 1)
   V <- mr$V_ilr_model
@@ -83,11 +122,11 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
   for (j in seq_len(J)) {
     w <- W[j, ]; m <- M[j, ]; X <- w * q_bar
     for (i in 1:1000) { X <- sweep(X, 2, m / colSums(X), "*"); X <- X * (w / rowSums(X)) }
-    l0 <- rw_inv(X, row_order, rem_col)
+    l0 <- inv_fun(X, row_order, rem_col)
     for (k in seq_len(K)) {
       e <- numeric(K); e[k] <- h
-      mp_B[j, , k] <- (b_of(rw_alloc(w, m, l0 + e, row_order, rem_col), w) -
-                       b_of(rw_alloc(w, m, l0 - e, row_order, rem_col), w)) / (2 * h)
+      mp_B[j, , k] <- (b_of(alloc_fun(w, m, l0 + e, row_order, rem_col), w) -
+                       b_of(alloc_fun(w, m, l0 - e, row_order, rem_col), w)) / (2 * h)
     }
   }
   ## whitening of the column-margin parameters: factor of the covariance of the last-column log-ratios under the counts
@@ -97,7 +136,7 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
     lflag_margin_param = 1L, lflag_mp_seq = 1L, lflag_mp_seq_anchor = 1L, n_pin = C - 1L,
     mp_b_ref = matrix(0, J, Dm1), mp_G = array(0, c(J, C - 1, Dm1)),      # not used by the sequential model
     mp_P = array(0, c(J, Dm1, C - 1)), mp_N = array(0, c(J, Dm1, K)),
-    lflag_seq_or_expected = 3L, mp_row_order = as.array(as.integer(row_order)), mp_rem_col = as.array(as.integer(rem_col)),
+    lflag_seq_or_expected = alloc, mp_row_order = as.array(as.integer(row_order)), mp_rem_col = as.array(as.integer(rem_col)),
     mp_newton_iters = 10L,
     lflag_mp_beta_whiten = 1L, mp_T = mp_T,
     lflag_mp_vol_scale = 1L,
@@ -136,7 +175,8 @@ stopifnot(all.equal(crossprod(V_ilr), diag(R * C - 1), tolerance = 1e-8))
 ## 3. Model inputs
 ## ---------------------------------------------------------------------------
 mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C)    # row-margin coordinates removed: rows conditioned on the data
-mr  <- rw_setup(mr, rm, cm, row_order = order(colSums(rm)), rem_col = c(1L, 1L, 1L))
+ALLOC <- 3L                                               # 3 = adjusted row (default); 2 = odds-ratio logit
+mr  <- rw_setup(mr, rm, cm, row_order = order(colSums(rm)), rem_col = c(1L, 1L, 1L), alloc = ALLOC)
 Dm1 <- mr$Dm1_model
 
 ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
