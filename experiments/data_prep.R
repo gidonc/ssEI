@@ -1,6 +1,6 @@
 ## Data preparation for the Scottish 2007 and New Zealand examples.
 ##
-## prep_scotland(size, n_areas)  -> list(rm, cm, kc, row_names, col_names, bloc)
+## prep_scotland(size, n_areas)  -> list(rm, cm, kc, row_names, col_names, bloc, area_idx, actual, s07actual)
 ## prep_nz(year, size, rows, n_areas) -> same
 ##
 ## kc is the array of true cells (areas x rows x columns); it is used only to score the fit.
@@ -311,7 +311,9 @@ prep_scotland <- function(size = 5, n_areas = 30, seed = 1234) {
   area_idx <- if (n_areas < nrow(tb$s07rm)) sample(seq_len(nrow(tb$s07rm)), n_areas) else seq_len(nrow(tb$s07rm))
   s <- build_collapsed_margins(tb$s07rm, tb$s07cm, tb$s07actual, map, area_idx = area_idx)
   list(rm = as.matrix(s$rm), cm = as.matrix(s$cm), kc = s$known_cell_values,
-       row_names = s$row_names, col_names = s$col_names, bloc = bloc, area_idx = area_idx)
+       row_names = s$row_names, col_names = s$col_names, bloc = bloc, area_idx = area_idx,
+       actual = s$actual_wide,          # the true cells in long form, collapsed to this size, areas renumbered 1..n_areas
+       s07actual = tb$s07actual)        # the same for all 73 areas and 7 x 7 categories, with the original district numbers
 }
 
 ## ---------------------------------------------------------------------------
