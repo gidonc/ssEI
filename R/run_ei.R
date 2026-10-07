@@ -373,7 +373,7 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     ROT_agg          = diag(Dm1_model),
     lflag_noncentred_mat = noncentred_mat_model   # n_areas x Dm1_model
   )
-  modifyList(out, margin_param_defaults(Dm1_model))
+  modifyList(out, margin_param_defaults(Dm1_model, R, C))
 }
 
 #' @export
@@ -393,14 +393,59 @@ build_rot_E_rc <- function(pilot_fit, n_agg_free) {
 ## 1. Defaults so that every existing call still supplies the new data fields.
 ##    Add these to the list returned by build_margin_reduction() (same place
 ##    ROT_agg / lflag_rot_agg are added), or merge them onto mr before ei_estimate().
-margin_param_defaults <- function(Dm1_model) {
-  list(
+margin_param_defaults <- function(Dm1_model, R = NULL, C = NULL) {
+  out <- list(
     lflag_margin_param = 0L,
     n_pin    = 0L,
     mp_b_ref = array(0, c(0, Dm1_model)),
     mp_G     = array(0, c(0, 0, Dm1_model)),
     mp_P     = array(0, c(0, Dm1_model, 0)),
     mp_N     = array(0, c(0, Dm1_model, Dm1_model))
+  )
+  if (!is.null(R) && !is.null(C)) out <- c(out, rowwise_defaults(R, C, Dm1_model))
+  out
+}
+
+#' Defaults for the data fields of the sequential (row-by-row) margin model
+#'
+#' Every switch is off and every optional input is empty, so a model built with
+#' these behaves as it did before the fields existed. `build_margin_reduction()`
+#' merges them in; change individual entries afterwards to switch a feature on.
+#'
+#' @param R,C number of rows and columns of the table
+#' @param Dm1_model number of ILR coordinates in the hierarchy
+#' @export
+rowwise_defaults <- function(R, C, Dm1_model) {
+  K <- (R - 1) * (C - 1)
+  list(
+    ## sequential expected table
+    lflag_mp_seq = 0L, lflag_mp_seq_anchor = 0L, lflag_mp_exact = 0L,
+    mp_newton_iters = 5L, lflag_mp_gamma_centred = 0L,
+    lflag_seq_or_expected = 0L,                       # 3 = row by row
+    mp_row_order = as.array(seq_len(R)),              # allocation order of the rows (last = remainder row)
+    mp_rem_col   = as.array(pmin(seq_len(R), C)),     # reference column of each row
+    kink_delta_expected = 0, kink_delta_realised = 0,
+    ## scaling of the margin and interior parameters
+    lflag_mp_vol_scale = 0L,
+    lflag_mp_beta_whiten = 0L, mp_T  = array(0, c(0, C - 1, C - 1)),
+    lflag_mp_row_whiten  = 0L, mp_Tr = array(0, c(0, R - 1, R - 1)),
+    lflag_mp_seq_scale = 0L, lflag_mp_scale_fast = 0L,
+    mp_A = array(0, c(0, K, Dm1_model)),
+    mp_B = array(0, c(0, Dm1_model, K)),
+    mp_nc_w = numeric(0), mp_sigma0 = numeric(0),
+    ## HYBRID: realised table row by row
+    lflag_real_rowwise = 0L, lflag_real_scale = 0L, lflag_cpois_norm = 0L,
+    rl_S = array(0, c(0, K, K)),
+    ## small-cell term (soft multinomial) and its lookup table
+    lflag_soft_smallcell = 0L, smallcell_scale = 0,
+    cz_n = 0L, cz_t0 = 0, cz_h = 1, cz_v = numeric(0), cz_d = numeric(0),
+    ## experimental: covariate in the hierarchy mean, area-level column effects
+    lflag_E_cov = 0L, E_cov_x = array(0, c(0, Dm1_model)), prior_E_cov_scale = 0.5,
+    lflag_col_eff = 0L, lflag_col_tau_shared = 0L, prior_col_tau_scale = 0.5,
+    n_col_groups = 0L, col_group = integer(0),
+    col_eff_known = array(0, c(0, C)),
+    lflag_col_cov = 0L, lflag_col_kappa_shared = 1L, col_x = array(0, c(0, C)),
+    prior_col_kappa_scale = 2
   )
 }
 
