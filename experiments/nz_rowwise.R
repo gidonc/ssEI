@@ -28,3 +28,10 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               tiers = c(1, 1, rep(2, C - 3)),              # sigma tiers within each row
               loyalty_mean = qlogis(0.75),
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
+
+## Set BM_SAVE <- TRUE before sourcing to save this fit in the form used to compare with other methods (experiments/benchmark)
+if (isTRUE(get0("BM_SAVE"))) {
+  source("experiments/benchmark/bm_lib.R"); nm <- sprintf("nz%d_%d", YEAR, SIZE)
+  if (ROWS == "candidate" && dim(kc)[1] == bm_data(nm)$n_areas) bm_ssei_save(fit, kc, nm, label = sprintf("ssEI alloc %d", ALLOC))
+  else message("not saved: the benchmark uses every electorate with the candidate vote on the rows")
+}
