@@ -138,7 +138,7 @@ mk_eval_plot <- function(cv_eval, rr_eval, cv_eval_stats, rr_eval_stats){
 #'
 #' Summarise the performance of results from a set of Ecological Inference models against known actual cell and row rates (in long format).
 #'
-#' @param mod_list The models to evaluate in a list. Models can be the result of sequential sampling EI (from this package), or ei package or RxCEcolInf package.
+#' @param mod_list The models to evaluate in a list. Models can be the result of sequential sampling EI (from this package), or ei package or RxCEcolInf package, or a benchmark result converted with `bm_as_mod()`.
 #' @param actual_long The data containing the actual cell values and actual row rates.
 #'
 #' @return List of values of summary performance.
@@ -154,7 +154,11 @@ mods_summary <- function(mod_list, actual_long){
 
   for (n in 1:n_mod){
     this_class <- class(mod_list[[n]])
-    if(this_class =="eiMD"){
+    if(this_class[[1]] == "bm_mod"){
+      # benchmark result converted with bm_as_mod() (experiments/benchmark/bm_report.R): tables ready made
+      cv_res[[n]] <- mod_list[[n]]$cv
+      rr_res[[n]] <- mod_list[[n]]$rr
+    } else if(this_class =="eiMD"){
       rr_res[[n]] <- md.bayes.join.rr(mod_list[[n]], actual_long)
       cv_res[[n]] <- md.bayes.cv(rr_res[[n]])
 
