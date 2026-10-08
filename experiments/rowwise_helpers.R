@@ -155,6 +155,8 @@ rw_init <- function(J, n_pin, K, E_mean, n_sigma) {
 ## row-margin coordinates (Helmert on the log row shares), then within each row: loyalty vs the rest, congruent (same bloc) vs cross,
 ## then bisections of what is left. `bloc` is a named vector of bloc labels for the categories (NULL: no blocs, so the loyalty split is
 ## followed by bisections of all the other columns). `bisect_order` (e.g. column totals) puts the largest columns first within a bisection.
+## `loyal_rows` (names or positions of rows; NULL = every row) are the rows that get a loyalty split. Any other row (e.g. spoilt ballots,
+## a pooled "Other") has no loyal column and no bloc partners: its tree is just bisections of all C columns.
 rw_bisect <- function(cells, add_split) {
   if (length(cells) <= 1) return(invisible(NULL))
   mid <- ceiling(length(cells) / 2)
@@ -162,8 +164,15 @@ rw_bisect <- function(cells, add_split) {
   rw_bisect(cells[1:mid], add_split); rw_bisect(cells[(mid + 1):length(cells)], add_split)
   invisible(NULL)
 }
-rw_row_priority_basis <- function(row_names, col_names, bloc = NULL, bisect_order = NULL) {
+rw_loyal_index <- function(loyal_rows, row_names) {
+  if (is.null(loyal_rows)) return(seq_along(row_names))
+  ix <- if (is.character(loyal_rows)) match(loyal_rows, row_names) else as.integer(loyal_rows)
+  if (anyNA(ix) || any(ix < 1 | ix > length(row_names))) stop("loyal_rows not found among the rows: ", paste(loyal_rows[is.na(ix) | ix < 1 | ix > length(row_names)], collapse = ", "))
+  sort(unique(ix))
+}
+rw_row_priority_basis <- function(row_names, col_names, bloc = NULL, bisect_order = NULL, loyal_rows = NULL) {
   R <- length(row_names); C <- length(col_names)
+  loyal_ix <- rw_loyal_index(loyal_rows, row_names)
   if (is.null(bloc)) bloc <- setNames(seq_along(col_names), col_names)     # no blocs: every category its own bloc
   srt <- function(ix) if (is.null(bisect_order)) ix else ix[order(-bisect_order[ix], ix)]   # largest first, so bisections group like with like
   helmert <- function(N) { V <- matrix(0, N, N - 1); for (k in 1:(N - 1)) { nc <- sqrt(k * (k + 1)); V[1:k, k] <- 1 / nc; V[k + 1, k] <- -k / nc }; V }
@@ -171,7 +180,14 @@ rw_row_priority_basis <- function(row_names, col_names, bloc = NULL, bisect_orde
   for (r in seq_len(R)) {
     S <- matrix(0, C, C - 1); col <- 1
     add_split <- function(pos, neg) { S[pos, col] <<- 1; S[neg, col] <<- -1; col <<- col + 1 }
+    if (!(r %in% loyal_ix)) {                                # no loyal column: bisections of all the columns
+      rw_bisect(srt(seq_len(C)), add_split)
+      stopifnot(col - 1 == C - 1)
+      V_within[(r - 1) * C + 1:C, (r - 1) * (C - 1) + 1:(C - 1)] <- rw_sbp_to_v(S)
+      next
+    }
     loyal <- match(row_names[r], col_names)
+    if (is.na(loyal)) stop("row '", row_names[r], "' has no column of the same name: leave it out of loyal_rows")
     congruent <- srt(setdiff(which(bloc[col_names] == bloc[row_names[r]]), loyal))
     cross <- srt(setdiff(seq_len(C), c(loyal, congruent)))
     if (length(congruent) + length(cross) > 0) add_split(loyal, c(congruent, cross))
@@ -188,7 +204,7 @@ rw_row_priority_basis <- function(row_names, col_names, bloc = NULL, bisect_orde
 ## Centre for the non-loyalty coordinates: quasi-independence. Loyalty is estimated from the margins alone (Goodman regression table raked to
 ## each area's margins, as in rw_setup); the voters who do not stay are then spread over the other columns in proportion to what each
 ## column has left (IPF on the off-diagonal). Returns, for each coordinate, log(sum expected on + side) - log(sum on - side), NA if undefined.
-rw_qi_centre <- function(V_model, rm, cm) {
+rw_qi_centre <- function(V_model, rm, cm, loyal_ix = seq_len(ncol(as.matrix(rm)))) {
   rm <- as.matrix(rm); cm <- as.matrix(cm); J <- nrow(rm); R <- ncol(rm); C <- ncol(cm)
   q_bar <- rw_goodman(rm, cm)
   W <- (rm + 0.01) / (rowSums(rm) + R * 0.01); M <- (cm + 0.01) / (rowSums(cm) + C * 0.01)
@@ -198,8 +214,9 @@ rw_qi_centre <- function(V_model, rm, cm) {
     for (i in 1:200) { X <- sweep(X, 2, M[j, ] / colSums(X), "*"); X <- X * (W[j, ] / rowSums(X)) }
     T <- T + sum(rm[j, ]) * X
   }
-  off <- T; diag(off) <- 0; rs <- rowSums(off); cs <- colSums(off)
-  E <- outer(rs, cs) * (1 - diag(R))
+  keep <- matrix(1, R, C); keep[cbind(loyal_ix, loyal_ix)] <- 0      # the loyal cell of each loyal row is set aside; other rows keep every cell
+  off <- T * keep; rs <- rowSums(off); cs <- colSums(off)
+  E <- outer(rs, cs) * keep
   for (i in 1:500) { E <- E * (rs / rowSums(E)); E[is.nan(E)] <- 0; E <- sweep(E, 2, cs / colSums(E), "*"); E[is.nan(E)] <- 0 }
   Ev <- as.vector(t(E))
   apply(V_model, 2, function(v) {
@@ -239,11 +256,14 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
 ##               split of each row, e.g. qlogis(0.75).
+##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
+##               The other rows have no loyalty coordinate: no loyalty_mean, and all their coordinates count as non-loyalty ones.
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, ...) {
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
+  loyal_ix <- rw_loyal_index(loyal_rows, if (is.null(dimnames(kc)[[2]])) seq_len(R) else dimnames(kc)[[2]])
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
   if (is.null(rem_col)) rem_col <- rep(1L, R)
@@ -268,11 +288,15 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   }
   ## E_sd_scale_offdiag: scale the sd of every coordinate except each row's loyalty split (the first split, which involves all C columns),
   ## i.e. the contrasts between the columns a row's voters do NOT stay with
-  loy <- (m_pos + n_neg) == C
+  ## a loyalty split: one column against all the others of its row, in a row that has one (a non-loyal row's first bisection also
+  ## involves all C columns, so the count of columns alone does not identify it)
+  coord_row <- apply(mr$V_ilr_model, 2, function(v) ((which(abs(v) > 1e-10)[1] - 1) %/% C) + 1)
+  loy <- (m_pos + n_neg) == C & pmin(m_pos, n_neg) == 1 & coord_row %in% loyal_ix
+  if (!is.null(loyal_rows)) message(sprintf("loyalty split in %d of %d rows", length(loyal_ix), R))
   if (E_sd_scale_offdiag != 1) E_sd[!loy] <- E_sd[!loy] * E_sd_scale_offdiag
   E_centre <- match.arg(E_centre)
   if (E_centre == "qi") {
-    qi <- rw_qi_centre(mr$V_ilr_model, rm, cm)
+    qi <- rw_qi_centre(mr$V_ilr_model, rm, cm, loyal_ix)
     use <- !loy & is.finite(qi)
     E_mean[use] <- qi[use]
     message(sprintf("E_rc prior centred on quasi-independence for %d of %d non-loyalty coordinates", sum(use), sum(!loy)))
