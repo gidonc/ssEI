@@ -146,6 +146,8 @@ mk_eval_plot <- function(cv_eval, rr_eval, cv_eval_stats, rr_eval_stats){
 #'
 #' @examples
 mods_summary <- function(mod_list, actual_long){
+  # a single converted benchmark result may be passed without wrapping it in a list
+  if(inherits(mod_list, "bm_mod")) mod_list <- stats::setNames(list(mod_list), mod_list$method)
   model_names <- names(mod_list)
   n_mod <- length(mod_list)
 
@@ -158,7 +160,7 @@ mods_summary <- function(mod_list, actual_long){
       # benchmark result converted with bm_as_mod() (experiments/benchmark/bm_report.R): tables ready made
       cv_res[[n]] <- mod_list[[n]]$cv
       rr_res[[n]] <- mod_list[[n]]$rr
-    } else if(this_class =="eiMD"){
+    } else if("eiMD" %in% this_class){
       rr_res[[n]] <- md.bayes.join.rr(mod_list[[n]], actual_long)
       cv_res[[n]] <- md.bayes.cv(rr_res[[n]])
 
@@ -168,7 +170,7 @@ mods_summary <- function(mod_list, actual_long){
     } else if(this_class[[1]] == "ei_optim"){
       cv_res[[n]] <- ei_cv_summary_optim(mod_list[[n]])
       rr_res[[n]] <- ei_row_rate_summary_optim(mod_list[[n]])
-    } else if(this_class=="mcmc.list"){
+    } else if("mcmc.list" %in% this_class){
       tmp_res <- link.gq.res(mod_list[[n]], actual_long)
       rr_res[[n]] <- tmp_res
       cv_res[[n]] <- tmp_res |> dplyr::mutate(mean = value)
