@@ -18,6 +18,7 @@
 #' @param method Either 'sampling' for NUTS or 'optimizing'
 #' @param cores To be passed to rstan::sampling
 #' @param chains To be passed to rstan::sampling
+#' @param return_data If TRUE, return the list of data for the Stan model instead of fitting it (for example to run the model in cmdstanr)
 #' @param ... other arguments to be passed to rstan::sampling
 #'
 #' @return
@@ -93,7 +94,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                         sample_optim = "sampling",
                         cores = 4,
                         chains = 4,
-                        verbose = TRUE, ...){
+                        verbose = TRUE, return_data = FALSE, ...){
 
   if(ll_rep == "ILR 3" & is.null(V_ilr)){
     stop("A V_ilr basis matrix is required for the ILR 3 representation of the log-linear model.")
@@ -284,6 +285,9 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
     print(standata$n_areas)
     print(standata$V_ilr_model)
 
+  }
+  if(return_data){
+    return(standata)
   }
   if(mod_cols){
     mod <- stanmodels$ssEItable

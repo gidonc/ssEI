@@ -190,10 +190,11 @@ rw_row_priority_basis <- function(row_names, col_names, bloc) {
 ##   rem_col     reference column of each row; default column 1. For tables with the same categories on both margins use
 ##               seq_len(R): each row's own (loyal) column.
 ##   tiers       NULL: one sigma per coordinate. Otherwise the sigma group of each within-row coordinate (length C - 1), shared by all rows.
+##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
 ##               split of each row, e.g. qlogis(0.75).
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
-                   chains = 4, iter = 1000, warmup = 500, seed = 1234) {
+                   chains = 4, iter = 1000, warmup = 500, seed = 1234, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
@@ -201,6 +202,8 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C)    # row-margin coordinates removed: rows conditioned on the data
   mr  <- rw_setup(mr, rm, cm, row_order = row_order, rem_col = rem_col, alloc = alloc)
   Dm1 <- mr$Dm1_model
+  ## with sigma shared in a few groups the scaling has a low-rank form: same density, cheaper gradient (about 1.5x at 7 x 7, 73 areas)
+  if (!is.null(tiers)) mr$lflag_mp_scale_fast <- 2L
   ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
   m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)
   E_mean <- digamma(m_pos) - digamma(n_neg); E_sd <- sqrt(trigamma(m_pos) + trigamma(n_neg))
@@ -235,8 +238,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = chains, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, G), seed = seed
+    init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, G), seed = seed, ...
   )
+  ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, G)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
