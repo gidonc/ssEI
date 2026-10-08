@@ -193,12 +193,13 @@ rw_row_priority_basis <- function(row_names, col_names, bloc) {
 ##   cores, refresh  passed to rstan::sampling; with cores > 1 rstan shows no progress in RStudio, so for a quick look use
 ##               chains = 1, iter = 100, warmup = 50, refresh = 10 (prints the gradient time)
 ##   E_sd_scale, E_sd_scale_small  multiply the E_rc prior sd (all coordinates / coordinates on small columns only)
+##   E_sd_scale_offdiag  multiplies the E_rc prior sd of every coordinate except each row's loyalty split
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
 ##               split of each row, e.g. qlogis(0.75).
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
-                   cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, ...) {
+                   cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
@@ -222,8 +223,11 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     message(sprintf("E_rc prior sd scaled: %d of %d coordinates small-cell (scale %.2f), the rest %.2f",
                     sum(is_small), Dm1, E_sd_scale_small, E_sd_scale))
   }
+  ## E_sd_scale_offdiag: scale the sd of every coordinate except each row's loyalty split (the first split, which involves all C columns),
+  ## i.e. the contrasts between the columns a row's voters do NOT stay with
+  loy <- (m_pos + n_neg) == C
+  if (E_sd_scale_offdiag != 1) E_sd[!loy] <- E_sd[!loy] * E_sd_scale_offdiag
   if (!is.null(loyalty_mean)) {                              # the loyalty split is the first split of each row: it involves all C columns
-    loy <- (m_pos + n_neg) == C
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean
   }
   sig_id <- if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
