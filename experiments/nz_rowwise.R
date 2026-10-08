@@ -14,6 +14,10 @@ source("experiments/data_prep.R")
 
 YEAR <- 2020; SIZE <- 6; ROWS <- "candidate"; N_AREAS <- 30; ALLOC <- 3L
 SEED <- 1234; CHAINS <- 4; ITER <- 1000; WARMUP <- 500
+E_SD_SCALE_SMALL <- 1; E_SD_SCALE_OFFDIAG <- 1;
+## E_SD_SCALE_SMALL / E_SD_SCALE_OFFDIAG < 1 tighten the E_rc prior sd (small-column coordinates / all but the loyalty splits)
+E_CENTRE <- "uniform"; BLOC_AFFINITY <- 0; E_CENTRE_SHIFT <- 0;   # E_CENTRE "qi": non-loyalty coordinates centred on quasi-independence (see rw_qi_centre)
+BLOCS <- TRUE;   # FALSE: no blocs, the tree is loyalty then bisections of the other columns, largest columns first (the general default)
 
 d <- prep_nz(YEAR, SIZE, ROWS, N_AREAS)
 R <- length(d$row_names); C <- length(d$col_names)
@@ -21,10 +25,12 @@ kc <- d$kc; dimnames(kc) <- list(NULL, d$row_names, d$col_names)
 cat(sprintf("New Zealand %d: %d electorates, %d x %d, %d voters\n", YEAR, dim(kc)[1], R, C, sum(kc)))
 cat("empty rows (areas with no votes for a category):", sum(apply(kc, c(1, 2), sum) == 0), "of", dim(kc)[1] * R, "\n")
 
-V_ilr <- rw_row_priority_basis(d$row_names, d$col_names, d$bloc)
+V_ilr <- rw_row_priority_basis(d$row_names, d$col_names, if (BLOCS) d$bloc, bisect_order = if (!BLOCS) colSums(d$cm))
 
 fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               rem_col = seq_len(R),                        # each row's own column
               tiers = c(1, 1, rep(2, C - 3)),              # sigma tiers within each row
               loyalty_mean = qlogis(0.75),
+              E_sd_scale_small = E_SD_SCALE_SMALL, E_sd_scale_offdiag = E_SD_SCALE_OFFDIAG,
+              E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY, E_centre_shift = E_CENTRE_SHIFT,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)

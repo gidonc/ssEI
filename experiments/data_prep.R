@@ -364,7 +364,7 @@ prep_nz <- function(year = 2020, size = 6, rows = c("candidate", "party"), n_are
   set.seed(seed); idx <- if (n_areas < length(ok)) sort(sample(ok, n_areas)) else ok
   kc <- kc[idx, , , drop = FALSE]
   if (rows == "party") kc <- aperm(kc, c(1, 3, 2))
-  bloc <- if (size == 6) c(Labour = 1, Green = 1, National = 2, ACT = 2, NZFirst = 3, Other = 3) else c(Labour = 1, National = 2, Green = 1, Other = 3)
+  bloc <- if (size == 6) c(Labour = 1, Green = 1, National = 2, ACT = 2, NZFirst = 3, Other = 4) else c(Labour = 1, National = 2, Green = 1, Other = 3)
   rmm <- apply(kc, c(1, 2), sum); cmm <- apply(kc, c(1, 3), sum); colnames(rmm) <- colnames(cmm) <- cats
   list(rm = rmm, cm = cmm, kc = kc, row_names = cats, col_names = cats, bloc = bloc, area_idx = idx)
 }
