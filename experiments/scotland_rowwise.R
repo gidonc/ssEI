@@ -2,7 +2,8 @@
 ##
 ## SIZE 3 (Labour, SNP, Other), 5 (Con, Lab, LD, SNP, Other) or 7 (all seven categories); N_AREAS 30 (the fixed random subset,
 ## set.seed(1234)) or 73 (every constituency). The default is 7 x 7 on all 73: the case used to compare with other methods. It has
-## many empty rows (constituencies with no Green and / or no Other candidate). For a quick run use SIZE <- 5; N_AREAS <- 30. Rows and columns are the same parties, so the reference column of each row is its own
+## many empty rows (constituencies with no Green and / or no Other candidate). For a quick run use SIZE <- 5; N_AREAS <- 30.
+## Rows and columns are the same parties, so the reference column of each row is its own
 ## (loyal) column, the loyalty split of each row has a prior centred on 75%, and the sigmas are shared in two tiers:
 ## loyalty and congruent-vs-cross splits, and all the rest.
 ##
