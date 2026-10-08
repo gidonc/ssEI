@@ -328,14 +328,25 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   invisible(fit)
 }
 
-## Error index, interval coverage, the sigma and E_rc summaries, and what the sampler did.
+## Error index and interval coverage (all area cells together, area by area, and for the table summed over the areas),
+## the sigma and E_rc summaries, and what the sampler did. Returns the scores invisibly.
 rw_report <- function(fit, kc) {
   cv  <- rstan::extract(fit, "cell_values")$cell_values                  # draws x areas x R x C
   est <- apply(cv, 2:4, mean)
   lo  <- apply(cv, 2:4, quantile, 0.05); hi <- apply(cv, 2:4, quantile, 0.95)
   big <- kc >= 50
-  cat(sprintf("error index %.2f | 90%% coverage of cells of 50+ %.2f\n",
-              50 * sum(abs(est - kc)) / sum(kc), mean((kc >= lo & kc <= hi)[big])))
+  ei_area <- 50 * sum(abs(est - kc)) / sum(kc); cover_area <- mean((kc >= lo & kc <= hi)[big])
+  cat(sprintf("error index %.2f | 90%% coverage of cells of 50+ %.2f\n", ei_area, cover_area))
+  ## the same for each area on its own (areas with no voters left out)
+  n_j <- apply(kc, 1, sum)
+  ei_by_area <- (50 * apply(abs(est - kc), 1, sum) / n_j)[n_j > 0]
+  cat(sprintf("error index by area: median %.2f | range %.2f to %.2f\n", median(ei_by_area), min(ei_by_area), max(ei_by_area)))
+  ## the table summed over the areas, summed draw by draw so that its interval is the interval of the total
+  tot <- apply(cv, c(1, 3, 4), sum); kc_tot <- apply(kc, 2:3, sum)       # draws x R x C; R x C
+  est_tot <- apply(tot, 2:3, mean)
+  lo_tot <- apply(tot, 2:3, quantile, 0.05); hi_tot <- apply(tot, 2:3, quantile, 0.95)
+  ei_total <- 50 * sum(abs(est_tot - kc_tot)) / sum(kc_tot); cover_total <- mean(kc_tot >= lo_tot & kc_tot <= hi_tot)
+  cat(sprintf("summed table: error index %.2f | 90%% coverage of its %d cells %.2f\n", ei_total, length(kc_tot), cover_total))
   s <- rstan::summary(fit, pars = c("E_rc", "sigma_group_mu"))$summary
   if (nrow(s) <= 12) print(round(s[, c("mean", "sd", "n_eff", "Rhat")], 3)) else {
     sg <- s[grepl("^sigma_group_mu", rownames(s)), , drop = FALSE]; print(round(sg[, c("mean", "sd", "n_eff", "Rhat")], 3))
@@ -348,4 +359,6 @@ rw_report <- function(fit, kc) {
               mean(sp[, "stepsize__"]), mean(sp[, "n_leapfrog__"]), sum(sp[, "divergent__"]),
               sum(sp[, "treedepth__"] >= 10)))
   print(rstan::get_elapsed_time(fit))
+  invisible(list(ei_area = ei_area, cover_area = cover_area, ei_by_area = ei_by_area, ei_total = ei_total, cover_total = cover_total,
+                 est = est, est_total = est_tot))
 }
