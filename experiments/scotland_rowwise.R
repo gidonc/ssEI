@@ -13,6 +13,8 @@ source("experiments/data_prep.R")
 
 SIZE <- 5; N_AREAS <- 30; ALLOC <- 3L
 SEED <- 1234; CHAINS <- 4; ITER <- 1000; WARMUP <- 500
+E_SD_SCALE_SMALL <- 1;
+## E_SD_SCALE_SMALL < 1 tightens the E_rc prior sd on coordinates that involve only small columns
 
 d <- prep_scotland(SIZE, N_AREAS)
 R <- length(d$row_names); C <- length(d$col_names)
@@ -26,4 +28,5 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               rem_col = seq_len(R),                        # each row's own column
               tiers = c(1, 1, rep(2, C - 3)),              # sigma tiers within each row
               loyalty_mean = qlogis(0.75),
+              E_sd_scale_small = E_SD_SCALE_SMALL,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)

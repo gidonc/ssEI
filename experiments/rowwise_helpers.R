@@ -190,11 +190,15 @@ rw_row_priority_basis <- function(row_names, col_names, bloc) {
 ##   rem_col     reference column of each row; default column 1. For tables with the same categories on both margins use
 ##               seq_len(R): each row's own (loyal) column.
 ##   tiers       NULL: one sigma per coordinate. Otherwise the sigma group of each within-row coordinate (length C - 1), shared by all rows.
+##   cores, refresh  passed to rstan::sampling; with cores > 1 rstan shows no progress in RStudio, so for a quick look use
+##               chains = 1, iter = 100, warmup = 50, refresh = 10 (prints the gradient time)
+##   E_sd_scale, E_sd_scale_small  multiply the E_rc prior sd (all coordinates / coordinates on small columns only)
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
 ##               split of each row, e.g. qlogis(0.75).
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
-                   chains = 4, iter = 1000, warmup = 500, seed = 1234, ...) {
+                   chains = 4, iter = 1000, warmup = 500, seed = 1234,
+                   cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
@@ -207,6 +211,17 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
   m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)
   E_mean <- digamma(m_pos) - digamma(n_neg); E_sd <- sqrt(trigamma(m_pos) + trigamma(n_neg))
+  ## optional tightening of the E_rc prior sd: E_sd_scale for every coordinate, E_sd_scale_small for coordinates whose loadings
+  ## have a side made only of small columns (column share of the total below small_frac); both default 1 = the uniform-split prior
+  if (E_sd_scale != 1 || E_sd_scale_small != 1) {
+    small_col <- which(colSums(cm) / sum(cm) < small_frac)
+    cell_col <- ((seq_len(nrow(mr$V_ilr_model)) - 1) %% C) + 1
+    ## small coordinate: one side of the split consists only of small columns (e.g. a spoilt-ballot or minor-party share)
+    is_small <- apply(mr$V_ilr_model, 2, function(v) all(cell_col[v > 1e-10] %in% small_col) || all(cell_col[v < -1e-10] %in% small_col))
+    E_sd <- E_sd * ifelse(is_small, E_sd_scale_small, E_sd_scale)
+    message(sprintf("E_rc prior sd scaled: %d of %d coordinates small-cell (scale %.2f), the rest %.2f",
+                    sum(is_small), Dm1, E_sd_scale_small, E_sd_scale))
+  }
   if (!is.null(loyalty_mean)) {                              # the loyalty split is the first split of each row: it involves all C columns
     loy <- (m_pos + n_neg) == C
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean
@@ -237,7 +252,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     sigma_floor = 0, prior_sigma_c_scale = 2, prior_lambda_raw_scale = 12,
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
-    chains = chains, cores = chains, iter = iter, warmup = warmup,
+    chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
     init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, G), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
