@@ -35,3 +35,9 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               E_sd_scale_small = E_SD_SCALE_SMALL, E_sd_scale_offdiag = E_SD_SCALE_OFFDIAG,
               E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY, E_centre_shift = E_CENTRE_SHIFT,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
+
+## Set BM_SAVE <- TRUE before sourcing to save this fit in the form used to compare with other methods (experiments/benchmark)
+if (isTRUE(get0("BM_SAVE"))) {
+  if (SIZE == 7 && N_AREAS >= 73) { source("experiments/benchmark/bm_lib.R"); bm_ssei_save(fit, kc, "scotland7", label = sprintf("ssEI alloc %d", ALLOC)) }
+  else message("not saved: the benchmark case is SIZE 7 with all 73 constituencies")
+}

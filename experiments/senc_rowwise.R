@@ -39,3 +39,6 @@ stopifnot(all.equal(crossprod(V_ilr), diag(R * C - 1), tolerance = 1e-8))
 ## ---------------------------------------------------------------------------
 fit <- rw_fit(kc, V_ilr, alloc = ALLOC, rem_col = c(1L, 1L, 1L),
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
+
+## Set BM_SAVE <- TRUE before sourcing to save this fit in the form used to compare with other methods (experiments/benchmark)
+if (isTRUE(get0("BM_SAVE"))) { source("experiments/benchmark/bm_lib.R"); bm_ssei_save(fit, kc, "senc", label = sprintf("ssEI alloc %d", ALLOC)) }
