@@ -234,6 +234,7 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##   E_sd_scale, E_sd_scale_small  multiply the E_rc prior sd (all coordinates / coordinates on small columns only)
 ##   E_centre    "uniform" (the logit of a uniform split) or "qi" (quasi-independence from loyalty estimated from the margins) for the non-loyalty coordinates
 ##   bloc, bloc_affinity  with bloc (named labels of the categories), adds bloc_affinity (a log odds ratio) to the coordinates that split a row's bloc partners from the rest
+##   E_centre_shift  (experiments) moves the non-loyalty centres by this many prior sds, alternating in sign
 ##   E_sd_scale_offdiag  multiplies the E_rc prior sd of every coordinate except each row's loyalty split
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
@@ -241,7 +242,7 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, ...) {
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
@@ -281,6 +282,13 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     bc <- rw_bloc_coords(mr$V_ilr_model, bloc, dimnames(kc)[[2]], dimnames(kc)[[3]])
     E_mean <- E_mean + bloc_affinity * bc
     message(sprintf("bloc affinity %.2f added to %d coordinates", bloc_affinity, sum(bc != 0)))
+  }
+  ## for experiments: move the non-loyalty centres away by E_centre_shift prior sds (the sd actually used), alternating in sign, to create
+  ## a deliberate conflict between prior and data
+  if (E_centre_shift != 0) {
+    sgn <- rep(c(1, -1), length.out = length(E_mean))
+    E_mean[!loy] <- E_mean[!loy] + E_centre_shift * E_sd[!loy] * sgn[!loy]
+    message(sprintf("non-loyalty centres shifted by %.1f prior sds", E_centre_shift))
   }
   if (!is.null(loyalty_mean)) {                              # the loyalty split is the first split of each row: it involves all C columns
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean

@@ -16,7 +16,7 @@ YEAR <- 2020; SIZE <- 6; ROWS <- "candidate"; N_AREAS <- 30; ALLOC <- 3L
 SEED <- 1234; CHAINS <- 4; ITER <- 1000; WARMUP <- 500
 E_SD_SCALE_SMALL <- 1; E_SD_SCALE_OFFDIAG <- 1;
 ## E_SD_SCALE_SMALL / E_SD_SCALE_OFFDIAG < 1 tighten the E_rc prior sd (small-column coordinates / all but the loyalty splits)
-E_CENTRE <- "uniform"; BLOC_AFFINITY <- 0;   # E_CENTRE "qi": non-loyalty coordinates centred on quasi-independence (see rw_qi_centre)
+E_CENTRE <- "uniform"; BLOC_AFFINITY <- 0; E_CENTRE_SHIFT <- 0;   # E_CENTRE "qi": non-loyalty coordinates centred on quasi-independence (see rw_qi_centre)
 BLOCS <- TRUE;   # FALSE: no blocs, the tree is loyalty then bisections of the other columns, largest columns first (the general default)
 
 d <- prep_nz(YEAR, SIZE, ROWS, N_AREAS)
@@ -32,5 +32,5 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               tiers = c(1, 1, rep(2, C - 3)),              # sigma tiers within each row
               loyalty_mean = qlogis(0.75),
               E_sd_scale_small = E_SD_SCALE_SMALL, E_sd_scale_offdiag = E_SD_SCALE_OFFDIAG,
-              E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY,
+              E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY, E_centre_shift = E_CENTRE_SHIFT,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
