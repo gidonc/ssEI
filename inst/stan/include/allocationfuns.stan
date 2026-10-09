@@ -154,11 +154,123 @@
     return tau;
   }
   // ---------------------------------------------------------------------------------------------
+  // ADJUSTED-TABLE allocation (raking style), mode 4. The whole table is allocated at once:
+  //     T[r, c] = exp(theta[r, c] + u[r] + v[c]),
+  //   theta = the interior: (R-1) x (C-1) log odds ratios against the last row and the last column (0 in both),
+  //   u, v  = one adjustment per row and per column, solved jointly so that both margins are met.
+  // This is the table that raking (iterative proportional fitting) of the seed exp(theta) converges to. u and v
+  // minimise a convex function, so the solution exists and is unique; it is found by a few raking sweeps followed
+  // by Newton steps. There is no fill order and there are no kinks; row_order and rem_col are not used.
+  // lam: (R-1)*(C-1) log odds ratios, row by row (rows 1:(R-1), columns 1:(C-1)).
+  // Returns (R+1) x C: rows 1:R = the table, [R+1, 1] = log |d free cells / d lam| if jac == 1 (0 otherwise).
+  matrix alloc_table(vector w, vector m, vector lam, int jac) {
+    int R = rows(w);
+    int C = rows(m);
+    int K = (R - 1) * (C - 1);
+    int D = R + C - 1;
+    real tot = sum(w);
+    matrix[R, C] th = rep_matrix(0, R, C);
+    vector[R] u;
+    vector[C] v = log(m) - log(tot);
+    matrix[R, C] T;
+    matrix[R + 1, C] out = rep_matrix(0, R + 1, C);
+    for (r in 1:(R - 1)) for (c in 1:(C - 1)) th[r, c] = lam[(r - 1) * (C - 1) + c];
+    for (s in 1:3) {                                   // raking sweeps to get close
+      for (r in 1:R) u[r] = log(w[r]) - log_sum_exp(th[r]' + v);
+      for (c in 1:C) v[c] = log(m[c]) - log_sum_exp(col(th, c) + u);
+    }
+    u += v[C];
+    v -= v[C];                                         // v[C] = 0 fixes the one redundant direction
+    for (it in 1:50) {                                 // Newton on (u, v[1:(C-1)])
+      vector[D] g;
+      matrix[D, D] H = rep_matrix(0, D, D);
+      vector[D] step;
+      real big;
+      for (r in 1:R) for (c in 1:C) T[r, c] = exp(th[r, c] + u[r] + v[c]);
+      for (r in 1:R) { g[r] = sum(T[r]) - w[r]; H[r, r] = sum(T[r]); }
+      for (c in 1:(C - 1)) {
+        g[R + c] = sum(col(T, c)) - m[c];
+        H[R + c, R + c] = sum(col(T, c));
+        for (r in 1:R) { H[r, R + c] = T[r, c]; H[R + c, r] = T[r, c]; }
+      }
+      step = -(H \ g);
+      big = max(fabs(step));
+      if (big > 2) step *= 2 / big;                    // safeguard far from the solution
+      u += step[1:R];
+      for (c in 1:(C - 1)) v[c] += step[R + c];
+      // once converged, the step just taken is exact to rounding error and carries the right gradient
+      if (max(fabs(g)) < 1e-11 * tot) break;
+    }
+    for (r in 1:R) for (c in 1:C) T[r, c] = exp(th[r, c] + u[r] + v[c]);
+    // Jacobian. The inverse map is explicit, theta[r, c] = log T[r, c] + log T[R, C] - log T[r, C] - log T[R, c], with the
+    // last row and column linear in the free cells, so
+    //   d theta[r, c] / d T[r', c'] = (r = r')(c = c') / T[r, c] + 1 / T[R, C] + (r = r') / T[r, C] + (c = c') / T[R, c].
+    if (jac == 1) {
+      matrix[K, K] J;
+      for (r in 1:(R - 1)) for (c in 1:(C - 1)) {
+        int a = (r - 1) * (C - 1) + c;
+        for (r2 in 1:(R - 1)) for (c2 in 1:(C - 1)) {
+          int b = (r2 - 1) * (C - 1) + c2;
+          J[a, b] = inv(T[R, C]) + (r == r2 ? inv(T[r, C]) : 0) + (c == c2 ? inv(T[R, c]) : 0) + (a == b ? inv(T[r, c]) : 0);
+        }
+      }
+      out[R + 1, 1] = -log_determinant_spd(J);
+    }
+    out[1:R, 1:C] = T;
+    return out;
+  }
+  // the log odds ratios of table T (they do not depend on its margins)
+  vector alloc_table_inv(matrix T) {
+    int R = rows(T);
+    int C = cols(T);
+    vector[(R - 1) * (C - 1)] lam;
+    for (r in 1:(R - 1)) for (c in 1:(C - 1))
+      lam[(r - 1) * (C - 1) + c] = log(T[r, c]) + log(T[R, C]) - log(T[r, C]) - log(T[R, c]);
+    return lam;
+  }
+  // Interior fixed at the seed (lflag_mp_interior = 1): the table is the seed with one move per column (and, when the
+  // rows are parameters, one per row). Returns log |d (move coordinates) / d (margin log-ratios)| at table T, where the
+  // move is Hc * (column move coordinates) on the log scale (and Hr * (row move coordinates)), and the margin log-ratios
+  // are against the last column (and the last row). cond = 1: rows conditioned on the data (only the columns move).
+  real mp_move_logjac(matrix T, matrix Hr, matrix Hc, int cond) {
+    int R = rows(T);
+    int C = cols(T);
+    vector[R] w;
+    vector[C] m;
+    for (r in 1:R) w[r] = sum(T[r]);
+    for (c in 1:C) m[c] = sum(col(T, c));
+    if (cond == 1) {
+      // d log m[c] / d (log move of column c') = (c = c') - sum_r T[r, c] T[r, c'] / (w[r] m[c])
+      matrix[C, C] A = -diag_pre_multiply(inv(m), crossprod(diag_pre_multiply(inv_sqrt(w), T)));
+      matrix[C - 1, C] Ad;
+      for (c in 1:C) A[c, c] += 1;
+      for (c in 1:(C - 1)) Ad[c] = A[c] - A[C];
+      return -log_determinant(Ad * Hc);
+    } else {
+      // log-linear moves of a table with total 1: d (w, m) / d (row moves, column moves) = [diag(w), T; T', diag(m)] - z z', z = (w, m)
+      int n = R + C;
+      vector[n] z = append_row(w, m);
+      matrix[n, n] G = -z * z';
+      matrix[n - 2, n] Gd;
+      matrix[n, n - 2] HH = rep_matrix(0, n, n - 2);
+      for (r in 1:R) { G[r, r] += w[r]; for (c in 1:C) { G[r, R + c] += T[r, c]; G[R + c, r] += T[r, c]; } }
+      for (c in 1:C) G[R + c, R + c] += m[c];
+      G = diag_pre_multiply(inv(z), G);
+      for (r in 1:(R - 1)) Gd[r] = G[r] - G[R];
+      for (c in 1:(C - 1)) Gd[R - 1 + c] = G[R + c] - G[R + C];
+      HH[1:R, 1:(R - 1)] = Hr;
+      HH[(R + 1):n, R:(n - 2)] = Hc;
+      return -log_determinant(Gd * HH);
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Sequential allocation of the expected table with a chosen ORDER.
   //   row_order[1:(R-1)] = rows allocated, in order; row_order[R] = the remainder row.
   //   rem_col[r]         = the column of row r that is found by subtraction (cell-wise) / used as reference (row-wise).
   //   mode 2 = cell by cell, each cell placed by its 2x2 log odds ratio (seq_or_cell)
   //   mode 3 = row by row: row r takes cap[c] * inv_logit(lam_c + tau) from each column, tau from seq_row_shift
+  //   mode 4 = adjusted table (raking style): lam = log odds ratios against the last row and column; see alloc_table
   // lam is laid out row by row in allocation order, C-1 values per row (columns other than rem_col, in natural order).
   // Returns (R+1) x C: rows 1:R = table, [R+1, 1] = log|d free cells / d lam|.
   matrix seq_alloc_ordered(vector w, vector m, vector lam, int mode, int[] row_order, int[] rem_col) {
@@ -168,6 +280,7 @@
     vector[C] sc = m;
     matrix[R + 1, C] out = rep_matrix(0, R + 1, C);
     real lj = 0;
+    if (mode == 4) return alloc_table(w, m, lam, 1);   // adjusted table (raking style): no order
     for (k in 1:(R - 1)) {
       int r = row_order[k];
       int last = rem_col[r];
@@ -211,6 +324,7 @@
     vector[R] sr;
     vector[C] sc;
     vector[(R - 1) * (C - 1)] lam;
+    if (mode == 4) return alloc_table_inv(T);
     for (r in 1:R) sr[r] = sum(T[r]);
     for (c in 1:C) sc[c] = sum(col(T, c));
     for (k in 1:(R - 1)) {
