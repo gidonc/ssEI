@@ -425,7 +425,10 @@ rowwise_defaults <- function(R, C, Dm1_model) {
     ## sequential expected table
     lflag_mp_seq = 0L, lflag_mp_seq_anchor = 0L, lflag_mp_exact = 0L,
     mp_newton_iters = 5L, lflag_mp_gamma_centred = 0L,
-    lflag_seq_or_expected = 0L,                       # 3 = row by row
+    lflag_seq_or_expected = 0L,                       # 3 = row by row, 4 = adjusted table (raking style)
+    ## what areas may do beyond moving whole rows and columns: 0 = free interior, 1 = interior fixed at E_rc's (raking
+    ## E_rc's table to the area's margins; needs lflag_seq_or_expected = 4), 2 = the rest scaled by kappa
+    lflag_mp_interior = 0L, mp_kappa_fixed = 0, prior_mp_kappa_a = log(0.5), prior_mp_kappa_b = 0.5,
     mp_row_order = as.array(seq_len(R)),              # allocation order of the rows (last = remainder row)
     mp_rem_col   = as.array(pmin(seq_len(R), C)),     # reference column of each row
     kink_delta_expected = 0, kink_delta_realised = 0,

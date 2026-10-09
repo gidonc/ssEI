@@ -10,7 +10,10 @@
 ## For the earlier set-up (loyalty in every row, blocs) set LOYAL_ROWS <- NULL; BLOCS <- TRUE before the fit.
 ##
 ## Usage, from the package directory, after installing ssEI and ei.Datasets:  source("experiments/scotland_rowwise.R")
-## Set ALLOC <- 2L for the odds-ratio logit allocation instead of adjusted row (3).
+## Set ALLOC <- 2L for the odds-ratio logit allocation instead of adjusted row (3), or 4L for the adjusted table (raking style).
+## INTERIOR: "free" (the usual hierarchy), "fixed" (every area is the average table raked to its margins: no interior parameters)
+## or "scaled" (in between: the part of an area's deviation that is not a whole-column move has sd KAPPA x sigma; KAPPA <- NULL
+## estimates it). With "fixed" sigma comes out larger, so widen its prior, e.g. SIGMA_PRIOR <- c(log(0.7), 0.7).
 
 source("experiments/rowwise_helpers.R")
 source("experiments/data_prep.R")
@@ -20,6 +23,7 @@ SEED <- 1234; CHAINS <- 4; ITER <- 1000; WARMUP <- 500
 E_SD_SCALE_SMALL <- 1; E_SD_SCALE_OFFDIAG <- 1;
 ## E_SD_SCALE_SMALL / E_SD_SCALE_OFFDIAG < 1 tighten the E_rc prior sd (small-column coordinates / all but the loyalty splits)
 E_CENTRE <- "uniform"; BLOC_AFFINITY <- 0; E_CENTRE_SHIFT <- 0;   # E_CENTRE "qi": non-loyalty coordinates centred on quasi-independence (see rw_qi_centre)
+INTERIOR <- "free"; KAPPA <- NULL; SIGMA_PRIOR <- c(log(0.3), 0.5)   # see the top of the file
 BLOCS <- FALSE;   # FALSE: no blocs, the tree is loyalty then bisections of the other columns, largest columns first (the general default)
 LOYAL_ROWS <- c("Conservative and Unionist Party [The]", "Labour Party [The]", "Liberal Democrats", "Scottish National Party")
 ## rows with a loyalty split (NULL: every row). At SIZE 3 and 5 only the ones present are used.
@@ -37,12 +41,13 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               rem_col = seq_len(R),                        # each row's own column
               tiers = c(1, 1, rep(2, C - 3)),              # sigma tiers within each row
               loyalty_mean = qlogis(0.75), loyal_rows = loyal_rows,
+              interior = INTERIOR, kappa = KAPPA, sigma_prior = SIGMA_PRIOR,
               E_sd_scale_small = E_SD_SCALE_SMALL, E_sd_scale_offdiag = E_SD_SCALE_OFFDIAG,
               E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY, E_centre_shift = E_CENTRE_SHIFT,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
 
 ## Set BM_SAVE <- TRUE before sourcing to save this fit in the form used to compare with other methods (experiments/benchmark)
 if (isTRUE(get0("BM_SAVE"))) {
-  if (SIZE == 7 && N_AREAS >= 73) { source("experiments/benchmark/bm_lib.R"); bm_ssei_save(fit, kc, "scotland7", label = sprintf("ssEI alloc %d%s%s", ALLOC, if (is.null(LOYAL_ROWS)) "" else " major-loyal", if (BLOCS) "" else " no-blocs")) }
+  if (SIZE == 7 && N_AREAS >= 73) { source("experiments/benchmark/bm_lib.R"); bm_ssei_save(fit, kc, "scotland7", label = sprintf("ssEI alloc %d%s%s", ALLOC, if (is.null(LOYAL_ROWS)) "" else " major-loyal", if (BLOCS) "" else " no-blocs", if (INTERIOR == "free") "" else paste0(" interior-", INTERIOR))) }
   else message("not saved: the benchmark case is SIZE 7 with all 73 constituencies")
 }

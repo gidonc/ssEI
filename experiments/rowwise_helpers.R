@@ -3,7 +3,8 @@
 ## They build the extra model inputs (row order, reference columns, whitening matrices, anchor matrices, starting values), run the fit
 ## and report it. They are here so the examples run against the package as it stands; they are meant to move into the package.
 ##
-## Allocation functions (Beyond RxC names -> lflag_seq_or_expected): adjusted row = 3 (default), odds-ratio logit = 2.
+## Allocation functions (Beyond RxC names -> lflag_seq_or_expected): adjusted row = 3 (default), odds-ratio logit = 2,
+## adjusted table (raking style) = 4.
 
 library(ssEI)
 
@@ -58,6 +59,19 @@ rw_inv <- function(X, row_order, rem_col) {
   lam
 }
 
+## adjusted table (raking style), as in the Stan function alloc_table (mode 4): the table with log odds ratios lam (against the
+## last row and the last column, row by row) and margins w, m. row_order and rem_col are not used.
+rw_alloc_tab <- function(w, m, lam, row_order = NULL, rem_col = NULL) {
+  R <- length(w); C <- length(m); th <- matrix(0, R, C); th[-R, -C] <- matrix(lam, R - 1, C - 1, byrow = TRUE)
+  X <- exp(th - max(th))
+  for (i in 1:5000) { X <- X * (w / rowSums(X)); cs <- colSums(X); X <- sweep(X, 2, m / cs, "*"); if (max(abs(cs / m - 1)) < 1e-13) break }
+  X
+}
+rw_inv_tab <- function(X, row_order = NULL, rem_col = NULL) {
+  R <- nrow(X); C <- ncol(X); L <- log(X)
+  as.vector(t(L[-R, -C, drop = FALSE] + L[R, C] - matrix(L[-R, C], R - 1, C - 1) - matrix(L[R, -C], R - 1, C - 1, byrow = TRUE)))
+}
+
 ## cell-by-cell allocation with odds-ratio placement, as in the Stan function seq_alloc_ordered (mode 2).
 ## Same layout of lam, row order and reference columns as rw_alloc; each cell is placed by the log odds ratio of its 2 x 2 table.
 rw_or_cell <- function(sr, sc, rest, lam) {
@@ -98,12 +112,13 @@ rw_inv_or <- function(X, row_order, rem_col) {
 ##   rm, cm    row and column margins (areas x R, areas x C)
 ##   row_order allocation order; default smallest row first, largest row as remainder
 ##   rem_col   reference column of each row
-##   alloc     3 = row by row, one adjustment per row ("adjusted row"); 2 = cell by cell, odds-ratio placement ("odds-ratio logit")
+##   alloc     3 = row by row, one adjustment per row ("adjusted row"); 2 = cell by cell, odds-ratio placement ("odds-ratio logit");
+##             4 = the whole table at once, raking style ("adjusted table")
 rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1L, ncol(rm)),
                      q_bar = rw_goodman(rm, cm), alloc = 3L) {
-  stopifnot(alloc %in% c(2L, 3L))
-  alloc_fun <- if (alloc == 3L) rw_alloc else rw_alloc_or
-  inv_fun   <- if (alloc == 3L) rw_inv else rw_inv_or
+  stopifnot(alloc %in% c(2L, 3L, 4L))
+  alloc_fun <- switch(as.character(alloc), "3" = rw_alloc, "2" = rw_alloc_or, "4" = rw_alloc_tab)
+  inv_fun   <- switch(as.character(alloc), "3" = rw_inv, "2" = rw_inv_or, "4" = rw_inv_tab)
   rm <- as.matrix(rm); cm <- as.matrix(cm)
   J <- nrow(rm); R <- ncol(rm); C <- ncol(cm); Dm1 <- mr$Dm1_model; K <- (R - 1) * (C - 1)
   V <- mr$V_ilr_model
@@ -140,10 +155,12 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 }
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
-rw_init <- function(J, n_pin, K, E_mean, n_sigma) {
-  function() list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
-                  mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
-                  E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log(0.3), n_sigma)))
+##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
+rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3)) {
+  function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
+                    mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
+                    E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log_sigma, n_sigma))),
+               if (!is.null(kappa)) list(mp_kappa = as.array(kappa)))
 }
 
 
@@ -256,13 +273,26 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
 ##               split of each row, e.g. qlogis(0.75).
+##   interior    what an area may do beyond moving whole columns (and rows, when they are parameters):
+##               "free"   the usual hierarchy, each area's balances ~ normal(E_rc, sigma) (the default)
+##               "fixed"  the interaction is E_rc's in every area: the area's table is E_rc's table raked to its margins. The same
+##                        normal, restricted to those moves; no interior parameters. Uses the adjusted table (alloc is set to 4).
+##               "scaled" as "free", but the part of an area's deviation that is not such a move has sd kappa x sigma:
+##                        kappa = 1 is "free" exactly, kappa near 0 approaches "fixed". Any alloc.
+##               With "fixed" a move is paid for once in every row, so sigma comes out larger (about sqrt(R) times the sd of the
+##               column move): see sigma_prior.
+##   kappa       "scaled" only: NULL = kappa is estimated with a lognormal(kappa_prior[1], kappa_prior[2]) prior; a number fixes it
+##   sigma_prior log mean and log sd of the lognormal prior on each sigma
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
 ##               The other rows have no loyalty coordinate: no loyalty_mean, and all their coordinates count as non-loyalty ones.
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, ...) {
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
+                   interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5), ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
+  interior <- match.arg(interior)
+  if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
   loyal_ix <- rw_loyal_index(loyal_rows, if (is.null(dimnames(kc)[[2]])) seq_len(R) else dimnames(kc)[[2]])
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
@@ -272,6 +302,14 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   Dm1 <- mr$Dm1_model
   ## with sigma shared in a few groups the scaling has a low-rank form: same density, cheaper gradient (about 1.5x at 7 x 7, 73 areas)
   if (!is.null(tiers)) mr$lflag_mp_scale_fast <- 2L
+  if (interior != "free") {
+    mr$lflag_mp_interior <- if (interior == "fixed") 1L else 2L
+    mr$lflag_mp_scale_fast <- 0L                             # the low-rank scaling does not cover these
+    mr$mp_kappa_fixed <- if (interior == "scaled" && !is.null(kappa)) kappa else 0
+    mr$prior_mp_kappa_a <- kappa_prior[1]; mr$prior_mp_kappa_b <- kappa_prior[2]
+  }
+  K_int <- if (interior == "fixed") 0L else (R - 1L) * (C - 1L)
+  kappa0 <- if (interior == "scaled" && is.null(kappa)) exp(kappa_prior[1]) else NULL
   ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
   m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)
   E_mean <- digamma(m_pos) - digamma(n_neg); E_sd <- sqrt(trigamma(m_pos) + trigamma(n_neg))
@@ -334,7 +372,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     ROT_E_rc = diag(Dm1), rotate_E_rc = FALSE,
     link_E_rc = NULL, rotate_lambda = "none",
     sigma_group_id = sig_id, sigma_group_mode = rep("shared", G),             # sigma shared by the areas
-    sigma_group_prior_a = rep(log(.3), G), sigma_group_prior_b = rep(0.5, G),
+    sigma_group_prior_a = rep(sigma_prior[1], G), sigma_group_prior_b = rep(sigma_prior[2], G),
     sigma_ncp = TRUE,
     E_rc_group_id = 1:Dm1, E_rc_group_mode = rep("shared", Dm1),
     E_rc_group_prior_a = unname(E_mean), E_rc_group_prior_b = unname(E_sd),
@@ -344,10 +382,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, G), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_mean, G, kappa0, sigma_prior[1]), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, (R - 1) * (C - 1), E_mean, G)))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_mean, G, kappa0, sigma_prior[1])))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
@@ -371,7 +409,8 @@ rw_report <- function(fit, kc) {
   lo_tot <- apply(tot, 2:3, quantile, 0.05); hi_tot <- apply(tot, 2:3, quantile, 0.95)
   ei_total <- 50 * sum(abs(est_tot - kc_tot)) / sum(kc_tot); cover_total <- mean(kc_tot >= lo_tot & kc_tot <= hi_tot)
   cat(sprintf("summed table: error index %.2f | 90%% coverage of its %d cells %.2f\n", ei_total, length(kc_tot), cover_total))
-  s <- rstan::summary(fit, pars = c("E_rc", "sigma_group_mu"))$summary
+  s <- rstan::summary(fit, pars = c("E_rc", "sigma_group_mu", if ("mp_kappa" %in% fit@model_pars && fit@par_dims$mp_kappa > 0) "mp_kappa"))$summary
+  if (any(grepl("^mp_kappa", rownames(s)))) print(round(s[grepl("^mp_kappa", rownames(s)), c("mean", "sd", "n_eff", "Rhat"), drop = FALSE], 3))
   if (nrow(s) <= 12) print(round(s[, c("mean", "sd", "n_eff", "Rhat")], 3)) else {
     sg <- s[grepl("^sigma_group_mu", rownames(s)), , drop = FALSE]; print(round(sg[, c("mean", "sd", "n_eff", "Rhat")], 3))
     cat(sprintf("E_rc (%d values): min n_eff %.0f, max Rhat %.3f\n", sum(grepl("^E_rc", rownames(s))),
