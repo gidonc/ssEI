@@ -283,13 +283,18 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##               column move): see sigma_prior.
 ##   kappa       "scaled" only: NULL = kappa is estimated with a lognormal(kappa_prior[1], kappa_prior[2]) prior; a number fixes it
 ##   sigma_prior log mean and log sd of the lognormal prior on each sigma
+##   nat_table   R x C table of known totals over all the areas (e.g. national split-ticket figures, or a survey table); NULL = none.
+##               Each row's split, summed over the areas, gets a multinomial likelihood. It must cover the same areas as kc.
+##   nat_n_eff   0 = use nat_table as counts (an exact count of the population is then effectively exact); > 0 = rescale it to this
+##               total, e.g. a survey's sample size
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
 ##               The other rows have no loyalty coordinate: no loyalty_mean, and all their coordinates count as non-loyalty ones.
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
-                   interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5), ...) {
+                   interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
+                   nat_table = NULL, nat_n_eff = 0, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -309,6 +314,11 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     mr$prior_mp_kappa_a <- kappa_prior[1]; mr$prior_mp_kappa_b <- kappa_prior[2]
   }
   K_int <- if (interior == "fixed") 0L else (R - 1L) * (C - 1L)
+  if (!is.null(nat_table)) {
+    stopifnot(all(dim(nat_table) == c(R, C)), all(nat_table >= 0))
+    mr$lflag_nat <- 1L; mr$nat_table <- unname(as.matrix(nat_table)); mr$nat_n_eff <- nat_n_eff
+    message(sprintf("known totals over the areas: multinomial on each row's split, total %s", if (nat_n_eff > 0) format(nat_n_eff) else format(sum(nat_table))))
+  }
   kappa0 <- if (interior == "scaled" && is.null(kappa)) exp(kappa_prior[1]) else NULL
   ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
   m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)

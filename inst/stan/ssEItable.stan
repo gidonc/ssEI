@@ -146,6 +146,13 @@ data{
   int<lower=0, upper=1> lflag_cpois_norm;      // HYBRID row by row: 1 = divide each realised cell's continuous Poisson density by its integral over x >= 0, so it is a proper density whatever the mean (cells in non-empty rows only; cells of empty rows are fixed at 0 and keep the Poisson probability of 0)
   int<lower=0, upper=1> lflag_soft_smallcell;  // SOFT (fit type 2): 1 = add the log integral of the continuous Poisson density for every expected cell in a non-empty row, i.e. the same implicit prior against very small expected cells that HYBRID has when lflag_cpois_norm = 0 (uses the cz_ grid)
   real<lower=0> smallcell_scale;               // multiplier on the SOFT small-cell term (1 = the HYBRID-equivalent strength)
+  int<lower=0, upper=1> lflag_nat;             // 1 = a known table of totals over all the areas (e.g. national split-ticket figures, or a survey):
+                                               //     for each row r, nat_table[r] ~ multinomial(the row's split implied by the areas), i.e.
+                                               //     target += sum_c w[r, c] * log(sum_j n_jr q_jrc / sum_j n_jr), q = the model's row-conditional shares.
+                                               //     Only the split within each row is used, so the table's row totals need not match the areas'.
+                                               //     The table must cover the same set of areas as the data.
+  matrix<lower=0>[lflag_nat ? R : 0, lflag_nat ? C : 0] nat_table;   // the known totals (counts or proportions)
+  real<lower=0> nat_n_eff;                     // 0 = use nat_table as counts; > 0 = rescale it to sum to nat_n_eff (e.g. a survey's sample size), keeping its row shares
   int<lower=0, upper=2> lflag_mp_interior;     // sequential margin param: what areas may do beyond moving whole rows and columns. 0 = free interior, the hierarchy b_j ~ N(E_rc, diag(sigma^2)) as before. 1 = interior fixed at E_rc's: each area's table is E_rc's table raked to the area's margins (one move per column, and per row when rows are parameters); mp_z has size 0; the same normal on b_j, restricted to those moves; needs lflag_seq_or_expected = 4 and lflag_mp_seq_anchor = 1. 2 = as 0 but the part of an area's deviation that is NOT such a move has sd kappa * sigma (kappa = 1 is mode 0 exactly, kappa -> 0 is mode 1); any allocation mode
   real<lower=0> mp_kappa_fixed;                // lflag_mp_interior = 2: 0 = kappa is a parameter with a lognormal(prior_mp_kappa_a, prior_mp_kappa_b) prior; > 0 = kappa fixed at this value
   real prior_mp_kappa_a;
@@ -929,6 +936,20 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     }
   }
 
+  // known totals over all the areas: weights of the multinomial kernel, row by row
+  matrix[lflag_nat ? R : 0, lflag_nat ? C : 0] nat_w;
+  array[lflag_nat ? R : 0] int nat_use;      // 1 = this row enters (positive total in the table and present in some area)
+  if (lflag_nat == 1) {
+    real tot = sum(nat_table);
+    if (tot <= 0) reject("lflag_nat: nat_table sums to zero");
+    nat_w = nat_n_eff > 0 ? nat_table * (nat_n_eff / tot) : nat_table;
+    for (r in 1:R) {
+      nat_use[r] = (sum(nat_table[r]) > 0 && sum(row_margins[1:n_areas, r]) > 0) ? 1 : 0;
+      if (sum(nat_table[r]) > 0 && sum(row_margins[1:n_areas, r]) == 0)
+        print("lflag_nat: row ", r, " has votes in nat_table but none in any area; it is left out");
+    }
+  }
+
   // margin param (exact): column log-ratios at each area's reference point, with the model's own row weights
   array[(lflag_margin_param == 1 && lflag_mp_exact == 1 && lflag_mp_seq == 0) ? n_areas : 0] vector[n_pin] mp_s_ref;
   if (lflag_margin_param == 1 && lflag_mp_exact == 1 && lflag_mp_seq == 0) {
@@ -1666,6 +1687,19 @@ if(lflag_fit_type == 1){
 
   log_volume ~ normal(0, 10);
 
+  // known totals over all the areas: each row's split, summed over the areas with the observed row counts
+  if (lflag_nat == 1) {
+    for (r in 1:R) if (nat_use[r] == 1) {
+      vector[C] mu = rep_vector(0, C);
+      for (j in 1:n_areas) if (row_margins[j, r] > 0) {
+        vector[C] q_jr;
+        for (c in 1:C) q_jr[c] = composition_arr[j, r, c];
+        mu += row_margins[j, r] * (q_jr / sum(q_jr));
+      }
+      target += dot_product(nat_w[r], log(mu) - log(sum(mu)));
+    }
+  }
+
 if (lflag_margin_param == 1) {
   // hierarchy b_j ~ N(E_rc, diag sigma^2) in (beta, z) coordinates
   target += mp_beta_lp;
@@ -1781,6 +1815,18 @@ if(lflag_fit_type == 0){
     }
 }
 generated quantities{
+  matrix[lflag_nat ? R : 0, lflag_nat ? C : 0] nat_share_model;   // each row's split summed over the areas (compare with the known table's row shares)
+  if (lflag_nat == 1) {
+    for (r in 1:R) {
+      vector[C] mu = rep_vector(0, C);
+      for (j in 1:n_areas) if (row_margins[j, r] > 0) {
+        vector[C] q_jr;
+        for (c in 1:C) q_jr[c] = composition_arr[j, r, c];
+        mu += row_margins[j, r] * (q_jr / sum(q_jr));
+      }
+      nat_share_model[r] = sum(mu) > 0 ? (mu / sum(mu))' : rep_row_vector(0, C);
+    }
+  }
   vector[(R * C) - 1] ilr_mean;
   vector[(R * C) - 1] ilr_var;
   vector[(R * C) - 1] ilr_n;
