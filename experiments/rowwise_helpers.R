@@ -311,7 +311,9 @@ rw_coords <- function(kc, V_ilr) {
 ##   directions  named directions: patterns of change shared by all an area's coordinates, each group with its own sd across areas
 ##               (dir_tau, half-normal(0, dir_tau_scale)), added to the covariance: Sigma0 + W diag(tau^2) W'. NULL = none;
 ##               "columns" = a move of each column in every row, one shared sd (column effects with a common size); "columns_each" =
-##               the same with one sd per column (the integrated column effects, lflag_col_eff = 3); or a list of R x C matrices,
+##               the same with one sd per column (the integrated column effects, lflag_col_eff = 3); "loyalty" = one move of
+##               every loyalty split together (areas where voters stay more loyal to all the major parties at once), one sd;
+##               "columns+loyalty" = both, each with its own sd; or a list of R x C matrices,
 ##               each a pattern of log changes to the cells (row constants are irrelevant), one sd per matrix; or a list of
 ##               lists of such matrices, one sd per inner list. Uses the correlation machinery (corr_blocks may be combined).
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
@@ -401,7 +403,14 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     Vm <- mr$V_ilr_model
     to_dir <- function(P) { stopifnot(all(dim(P) == c(R, C))); as.vector(crossprod(Vm, as.vector(t(P)))) }
     colpat <- function(c) { P <- matrix(0, R, C); P[, c] <- 1; P }
+    loypat <- function() {                                   # +1 on each loyal row's own column (matched by name)
+      P <- matrix(0, R, C); rn <- dimnames(kc)[[2]]; cn <- dimnames(kc)[[3]]
+      for (r in loyal_ix) P[r, match(rn[r], cn)] <- 1
+      stopifnot(sum(P) == length(loyal_ix)); P
+    }
     grp <- if (identical(directions, "columns")) list(lapply(seq_len(C), colpat))
+           else if (identical(directions, "loyalty")) list(list(loypat()))
+           else if (identical(directions, "columns+loyalty")) list(lapply(seq_len(C), colpat), list(loypat()))
            else if (identical(directions, "columns_each")) lapply(seq_len(C), function(c) list(colpat(c)))
            else lapply(directions, function(x) if (is.matrix(x)) list(x) else x)
     W <- do.call(cbind, lapply(unlist(grp, recursive = FALSE), to_dir))
