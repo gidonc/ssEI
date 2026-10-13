@@ -156,11 +156,12 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
-rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3)) {
+rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0) {
   function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
                     mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
                     E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log_sigma, n_sigma))),
-               if (!is.null(kappa)) list(mp_kappa = as.array(kappa)))
+               if (!is.null(kappa)) list(mp_kappa = as.array(kappa)),
+               if (n_corr_raw > 0) list(corr_raw = as.array(rep(0, n_corr_raw))))
 }
 
 
@@ -255,6 +256,16 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
   out
 }
 
+## The model's hierarchy coordinates (rows conditioned: the within-row coordinates of V_ilr), described by row and by the
+## columns on each side of the split, numbered as corr_blocks expects. kc gives the row margins and the category names.
+rw_coords <- function(kc, V_ilr) {
+  R <- dim(kc)[2]; C <- dim(kc)[3]; rn <- if (is.null(dimnames(kc)[[2]])) paste0("r", 1:R) else dimnames(kc)[[2]]; cn <- if (is.null(dimnames(kc)[[3]])) paste0("c", 1:C) else dimnames(kc)[[3]]
+  V <- build_margin_reduction(V_ilr, apply(kc, c(1, 2), sum), R = R, C = C)$V_ilr_model
+  do.call(rbind, lapply(seq_len(ncol(V)), function(k) { v <- V[, k]; nz <- which(abs(v) > 1e-10)
+    r <- ((nz[1] - 1) %/% C) + 1; pos <- ((which(v > 1e-10) - 1) %% C) + 1; neg <- ((which(v < -1e-10) - 1) %% C) + 1
+    data.frame(coord = k, row = rn[r], plus = paste(cn[pos], collapse = "+"), minus = paste(cn[neg], collapse = "+")) }))
+}
+
 ## Fit one table and report. All the choices are arguments; the defaults are the senc configuration.
 ##   kc          true cells (areas x R x C), used only to score the fit
 ##   V_ilr       orthonormal basis, row-margin coordinates first
@@ -287,6 +298,12 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##               Each row's split, summed over the areas, gets a multinomial likelihood. It must cover the same areas as kc.
 ##   nat_n_eff   0 = use nat_table as counts (an exact count of the population is then effectively exact); > 0 = rescale it to this
 ##               total, e.g. a survey's sample size
+##   corr_blocks correlations between the hierarchy coordinates (the within-row coordinates of the model, numbered as in rw_coords()):
+##               NULL = none; "all" = one dense correlation matrix; "loyalty" = the loyalty coordinates of all rows; or a list of
+##               integer vectors, one per block. Blocks are independent of one another; each block is LKJ(corr_eta), on the scale of
+##               the model without correlations (with interior = "scaled", relative to the kappa structure). Needs the full
+##               (not low-rank) scaling path, which is switched on here.
+##   corr_eta    LKJ shape: 1 = uniform over correlation matrices; larger = closer to no correlations
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
@@ -296,7 +313,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
-                   nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, ...) {
+                   nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -316,6 +333,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     mr$prior_mp_kappa_a <- kappa_prior[1]; mr$prior_mp_kappa_b <- kappa_prior[2]
   }
   K_int <- if (interior == "fixed") 0L else (R - 1L) * (C - 1L)
+  n_corr_raw <- 0L
   if (!is.null(nat_table)) {
     stopifnot(all(dim(nat_table) == c(R, C)), all(nat_table >= 0))
     mr$lflag_nat <- 1L; mr$nat_table <- unname(as.matrix(nat_table)); mr$nat_n_eff <- nat_n_eff
@@ -368,6 +386,15 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean
   }
   ## starting values for E_rc: the prior centre, or the known table's row splits
+  if (!is.null(corr_blocks)) {
+    blk <- if (identical(corr_blocks, "all")) list(seq_len(Dm1)) else if (identical(corr_blocks, "loyalty")) list(which(loy)) else corr_blocks
+    stopifnot(is.list(blk), all(unlist(blk) %in% seq_len(Dm1)), !anyDuplicated(unlist(blk)), all(lengths(blk) >= 2))
+    cb <- integer(Dm1); for (g in seq_along(blk)) cb[blk[[g]]] <- g
+    mr$lflag_corr <- 1L; mr$n_corr_blocks <- length(blk); mr$corr_block <- as.array(as.integer(cb)); mr$corr_eta <- corr_eta
+    mr$lflag_mp_scale_fast <- 0L
+    n_corr_raw <- sum(lengths(blk) * (lengths(blk) - 1) / 2)
+    message(sprintf("correlations: %d block(s) of size %s, LKJ(%g); %d correlation parameters", length(blk), paste(lengths(blk), collapse = ", "), corr_eta, n_corr_raw))
+  }
   E_init <- E_mean
   if (!is.null(nat_table) && nat_init) {
     P <- as.matrix(nat_table) / pmax(rowSums(as.matrix(nat_table)), 1e-300); p <- as.vector(t(P))
@@ -402,10 +429,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1]), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1])))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }

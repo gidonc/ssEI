@@ -232,6 +232,49 @@
   // rows are parameters, one per row). Returns log |d (move coordinates) / d (margin log-ratios)| at table T, where the
   // move is Hc * (column move coordinates) on the log scale (and Hr * (row move coordinates)), and the margin log-ratios
   // are against the last column (and the last row). cond = 1: rows conditioned on the data (only the columns move).
+  // Correlations between the hierarchy coordinates (lflag_corr): a Cholesky factor of a correlation matrix from unconstrained
+  // values, exactly as Stan builds cholesky_factor_corr[K] (tanh to canonical partial correlations, filled row by row), and the
+  // log Jacobian of that map. Checked against Stan's own cholesky_factor_corr.
+  matrix corr_chol_from_raw(vector x, int K) {
+    matrix[K, K] L = rep_matrix(0, K, K);
+    int k = 0;
+    L[1, 1] = 1;
+    for (i in 2:K) {
+      real ss;
+      k += 1;
+      L[i, 1] = tanh(x[k]);
+      ss = square(L[i, 1]);
+      for (j in 2:(i - 1)) {
+        k += 1;
+        L[i, j] = tanh(x[k]) * sqrt(1 - ss);
+        ss += square(L[i, j]);
+      }
+      L[i, i] = sqrt(1 - ss);
+    }
+    return L;
+  }
+  real corr_chol_logjac(vector x, int K) {
+    real lj = 0;
+    int k = 0;
+    for (i in 2:K) {
+      real ss;
+      real z;
+      k += 1;
+      z = tanh(x[k]);
+      lj += log1m(square(z));
+      ss = square(z);
+      for (j in 2:(i - 1)) {
+        real lij;
+        k += 1;
+        z = tanh(x[k]);
+        lj += log1m(square(z)) + 0.5 * log1m(ss);
+        lij = z * sqrt(1 - ss);
+        ss += square(lij);
+      }
+    }
+    return lj;
+  }
+
   real mp_move_logjac(matrix T, matrix Hr, matrix Hc, int cond) {
     int R = rows(T);
     int C = cols(T);
