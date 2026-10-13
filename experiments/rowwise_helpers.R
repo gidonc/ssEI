@@ -156,13 +156,15 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
-rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0) {
+rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0) {
   function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
                     mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
                     E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log_sigma, n_sigma))),
                if (!is.null(kappa)) list(mp_kappa = as.array(kappa)),
                if (n_corr_raw > 0) list(corr_raw = as.array(rep(0, n_corr_raw))),
-               if (n_dir_groups > 0) list(dir_tau = as.array(rep(0.2, n_dir_groups))))
+               if (n_dir_groups > 0) list(dir_tau = as.array(rep(0.2, n_dir_groups))),
+               if (n_ctx > 0) list(E_cov_gamma = as.array(rep(0, n_ctx))),
+               if (n_ctx_groups > 0) list(E_cov_tau = as.array(rep(0.1, n_ctx_groups))))
 }
 
 
@@ -316,6 +318,12 @@ rw_coords <- function(kc, V_ilr) {
 ##               "columns+loyalty" = both, each with its own sd; or a list of R x C matrices,
 ##               each a pattern of log changes to the cells (row constants are irrelevant), one sd per matrix; or a list of
 ##               lists of such matrices, one sd per inner list. Uses the correlation machinery (corr_blocks may be combined).
+##   context     contextual effects: the hierarchy mean of each coordinate shifts with an area covariate, b_j ~ N(E_rc + b .* x_j, ...).
+##               NULL = none; "own_row" = every within-row coordinate gets the log share of its own row in the area, standardised over
+##               the areas where the row is not empty (0 where it is empty); "own_row_loyalty" = the same for the loyalty coordinates only
+##               (the others get 0); or an n_areas x (model coordinates) matrix supplied directly.
+##   context_tau TRUE = the coefficients' sd is estimated (half-normal(0, context_scale)), one sd for the loyalty coordinates and one
+##               for the rest (one in all if there are no loyalty coordinates); FALSE = coefficients normal(0, context_scale)
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
@@ -326,7 +334,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -429,6 +437,24 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     n_corr_raw <- sum(lengths(blk) * (lengths(blk) - 1) / 2)
     message(sprintf("correlations: %d block(s) of size %s, LKJ(%g); %d correlation parameters", length(blk), paste(lengths(blk), collapse = ", "), corr_eta, n_corr_raw))
   }
+  n_ctx <- 0L; n_ctx_groups <- 0L
+  if (!is.null(context)) {
+    if (is.matrix(context)) { X <- context; stopifnot(all(dim(X) == c(J, Dm1))) } else {
+      context <- match.arg(context, c("own_row", "own_row_loyalty"))
+      xr <- sapply(seq_len(R), function(r) {
+        ok <- rm[, r] > 0; x <- numeric(J); l <- log(rm[ok, r] / rowSums(rm)[ok])
+        if (sum(ok) > 1 && sd(l) > 0) x[ok] <- (l - mean(l)) / sd(l); x })
+      X <- xr[, coord_row, drop = FALSE]
+      if (context == "own_row_loyalty") X[, !loy] <- 0
+    }
+    mr$lflag_E_cov <- if (context_tau) 2L else 1L; mr$E_cov_x <- unname(X); mr$prior_E_cov_scale <- context_scale; n_ctx <- Dm1
+    if (context_tau) {
+      grp <- if (any(loy) && any(!loy)) ifelse(loy, 1L, 2L) else rep(1L, Dm1)
+      mr$n_E_cov_groups <- max(grp); mr$E_cov_group <- as.array(as.integer(grp)); n_ctx_groups <- max(grp)
+    }
+    message(sprintf("contextual effects on %d of %d coordinates; %s", sum(colSums(X != 0) > 0), Dm1,
+                    if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
+  }
   E_init <- E_mean
   if (!is.null(nat_table) && nat_init) {
     P <- as.matrix(nat_table) / pmax(rowSums(as.matrix(nat_table)), 1e-300); p <- as.vector(t(P))
@@ -463,10 +489,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups)))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }

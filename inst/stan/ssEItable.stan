@@ -175,7 +175,7 @@ data{
   int<lower=0, upper=1> corr_scale;            // lflag_corr: 0 = the interior parameters are scaled as without correlations (Sigma0), so Omega
                                                //   only enters the density of each area's coordinates (centred in Omega); 1 = scaled by the full
                                                //   Sigma (non-centred in Omega). Same posterior either way.
-  int<lower=0, upper=1> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_gamma .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate.
+  int<lower=0, upper=2> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_b .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate, normal(0, prior_E_cov_scale). 2 = the same with the coefficients' sd estimated, one sd per group of coordinates (E_cov_tau, half-normal(0, prior_E_cov_scale)); non-centred: E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma
   int<lower=0, upper=4> lflag_col_eff;         // sequential margin param: area-level column effects shared by every row: in area j, col_eff[j, c] ~ normal(0, col_tau[c]) is added to the log share of column c in every row. 1 = explicit, non-centred; 2 = explicit, centred; 3 = integrated out: b_j ~ multi_normal(E_rc, diag(sigma^2) + mp_Wc * diag(col_tau^2) * mp_Wc'), no per-area effect parameters (needs lflag_mp_seq_scale = 2, lflag_mp_scale_fast = 0, mp_nc_w = 1)
   int<lower=0, upper=1> lflag_col_tau_shared;  // 1 = one col_tau for every column, 0 = one per column
   int<lower=0> n_col_groups;                   // explicit column effects (lflag_col_eff 1 or 2): 0 = one set of effects per area; > 0 = one set per group of areas (e.g. polling places within an electorate share the electorate's candidate effects)
@@ -187,7 +187,9 @@ data{
   matrix[lflag_col_eff == 4 ? n_areas : 0, C] col_eff_known;   // lflag_col_eff = 4: the column effects are supplied as data (for diagnosis with known cells)
   real<lower=0> prior_col_tau_scale;           // prior sd of col_tau (half-normal)
   matrix[lflag_E_cov ? n_areas : 0, Dm1_model] E_cov_x;
-  real<lower=0> prior_E_cov_scale;             // prior sd of the coefficients (normal, mean 0)
+  real<lower=0> prior_E_cov_scale;             // prior sd of the coefficients (normal, mean 0); with lflag_E_cov = 2, of their sds (half-normal)
+  int<lower=0> n_E_cov_groups;                 // lflag_E_cov = 2: number of groups of coefficients, each with its own sd
+  array[lflag_E_cov == 2 ? Dm1_model : 0] int<lower=1, upper=n_E_cov_groups> E_cov_group;
   int<lower=0> cz_n;                           // grid for the log integral: cz_n points, t = log(mean) from cz_t0 in steps of cz_h
   real cz_t0;
   real<lower=0> cz_h;
@@ -1034,7 +1036,8 @@ parameters{
 
   vector[sigma_n_leaf] sigma_raw_leaf;
   vector[sigma_n_mu] sigma_group_mu;
-  vector[lflag_E_cov ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean
+  vector[lflag_E_cov ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
+  vector<lower=0>[lflag_E_cov == 2 ? n_E_cov_groups : 0] E_cov_tau;   // lflag_E_cov = 2: sd of each group's coefficients
   vector[lflag_col_cov ? (lflag_col_kappa_shared ? 1 : C) : 0] col_kappa;   // coefficient of the column covariate
   array[(lflag_col_eff == 1 || lflag_col_eff == 2) ? (n_col_groups > 0 ? n_col_groups : n_areas) : 0] vector[C] col_eff_raw;      // area-level column effects when explicit (raw scale if non-centred)
   vector<lower=0>[(lflag_col_eff >= 1 && lflag_col_eff <= 3) ? (lflag_col_tau_shared ? 1 : C) : 0] col_tau;   // their sd across areas (one, or one per column)
@@ -1060,6 +1063,7 @@ transformed parameters{
   real corr_lj = 0;     // lflag_corr: log Jacobian of the correlation blocks plus their LKJ priors
   matrix[lflag_corr ? Dm1_model : 0, lflag_corr ? Dm1_model : 0] corr_L;   // Cholesky factor of Omega (lower triangular; blocks placed at their coordinates)
   real mp_beta_lp = 0;   // margin param: log prior of mp_beta (and of gamma if centred) given (E_rc, sigma_jrc)
+  vector[lflag_E_cov ? Dm1_model : 0] E_cov_b;   // coefficients of the area covariate in the hierarchy mean
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
@@ -1077,6 +1081,8 @@ transformed parameters{
   array[(lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1] real anchor_lambda = rep_array(0.0, (lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1);
 
 vector[n_agg_free] E_rc_raw;
+  if (lflag_E_cov == 1) E_cov_b = E_cov_gamma;
+  if (lflag_E_cov == 2) E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma;
   {
     vector[n_agg_free] u;
     int k = 0;
@@ -1274,9 +1280,9 @@ vector[n_agg_free] E_rc_raw;
         // ---- sequential expected table: margins and interior logits are the coordinates ----
         vector[Dm1_model] Ej = E_rc;                                           // hierarchy mean for this area
         matrix[R, C] qEj = mp_qE;                                              // its table
-        if (lflag_E_cov == 1 || lflag_col_eff == 1 || lflag_col_eff == 2 || lflag_col_eff == 4 || lflag_col_cov == 1) {
+        if (lflag_E_cov >= 1 || lflag_col_eff == 1 || lflag_col_eff == 2 || lflag_col_eff == 4 || lflag_col_cov == 1) {
           if (lflag_col_cov == 1) Ej += mp_Wc * ((lflag_col_kappa_shared == 1 ? rep_vector(col_kappa[1], C) : col_kappa) .* col_x[j]');
-          if (lflag_E_cov == 1) Ej += E_cov_gamma .* E_cov_x[j]';
+          if (lflag_E_cov >= 1) Ej += E_cov_b .* E_cov_x[j]';
           if (lflag_col_eff == 1) Ej += mp_Wc * (mp_tauv .* col_eff_raw[n_col_groups > 0 ? col_group[j] : j]);
           if (lflag_col_eff == 2) Ej += mp_Wc * col_eff_raw[n_col_groups > 0 ? col_group[j] : j];
           if (lflag_col_eff == 4) Ej += mp_Wc * col_eff_known[j]';
@@ -1844,6 +1850,7 @@ if (lflag_margin_param == 1) {
   if (lflag_corr == 1) target += corr_lj;
   if (n_dir > 0) dir_tau ~ normal(0, dir_tau_scale);
   if (lflag_E_cov == 1) E_cov_gamma ~ normal(0, prior_E_cov_scale);
+  if (lflag_E_cov == 2) { E_cov_gamma ~ std_normal(); E_cov_tau ~ normal(0, prior_E_cov_scale); }
   if (lflag_col_cov == 1) col_kappa ~ normal(0, prior_col_kappa_scale);
   if (lflag_col_eff >= 1 && lflag_col_eff <= 3) {
     col_tau ~ normal(0, prior_col_tau_scale);
