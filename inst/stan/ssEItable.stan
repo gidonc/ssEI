@@ -165,6 +165,13 @@ data{
   int<lower=0> n_corr_blocks;
   array[lflag_corr ? Dm1_model : 0] int<lower=0> corr_block;   // block of each coordinate (0 = in no block: uncorrelated with all others)
   real<lower=0> corr_eta;                      // LKJ shape: 1 = uniform over correlation matrices, larger = closer to Omega = I
+  int<lower=0> n_dir;                          // lflag_corr: named directions shared by an area's coordinates. Sigma0 gains
+                                               //   dir_W diag(tau^2) dir_W', tau = dir_tau[dir_group] (one scale per group); each column of
+                                               //   dir_W is a pattern of change in the hierarchy coordinates (e.g. a whole-column move)
+  int<lower=0> n_dir_groups;
+  matrix[n_dir > 0 ? Dm1_model : 0, n_dir] dir_W;
+  array[n_dir] int<lower=1> dir_group;
+  real<lower=0> dir_tau_scale;                 // half-normal prior scale of each dir_tau
   int<lower=0, upper=1> corr_scale;            // lflag_corr: 0 = the interior parameters are scaled as without correlations (Sigma0), so Omega
                                                //   only enters the density of each area's coordinates (centred in Omega); 1 = scaled by the full
                                                //   Sigma (non-centred in Omega). Same posterior either way.
@@ -952,6 +959,8 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   array[lflag_corr ? Dm1_model : 0] int corr_members;
   array[n_corr_blocks] int corr_start;
   int n_corr_raw = 0;
+  if (n_dir > 0 && lflag_corr != 1) reject("named directions (n_dir > 0) need lflag_corr = 1 (with n_corr_blocks = 0 for directions only)");
+  for (k in 1:n_dir) if (dir_group[k] > n_dir_groups) reject("dir_group: group ", dir_group[k], " but n_dir_groups = ", n_dir_groups);
   if (lflag_corr == 1) {
     int k = 0;
     if (lflag_margin_param != 1 || lflag_mp_seq != 1) reject("lflag_corr needs lflag_margin_param = 1 and lflag_mp_seq = 1");
@@ -1015,7 +1024,8 @@ parameters{
   // margin parameterisation
   array[lflag_margin_param ? n_areas : 0] vector[n_pin] mp_beta;              // pinned margin coords (centred)
   array[lflag_margin_param ? n_areas : 0] vector[lflag_mp_interior == 1 ? 0 : Dm1_model - n_pin] mp_z;     // interaction coords: z (NCP | beta) or gamma itself if lflag_mp_gamma_centred; none when the interior is fixed
-  vector[n_corr_raw] corr_raw;                 // lflag_corr: unconstrained values of each block's correlation matrix (as cholesky_factor_corr)
+  vector[n_corr_raw] corr_raw;
+  vector<lower=0>[n_dir > 0 ? n_dir_groups : 0] dir_tau;  // named directions: sd of each group's shared move across areas                 // lflag_corr: unconstrained values of each block's correlation matrix (as cholesky_factor_corr)
   vector<lower=0>[mp_kappa_free] mp_kappa;     // lflag_mp_interior = 2: sd of the non-move part of an area's deviation, as a multiple of sigma
   vector[lflag_margin_param ? n_areas - 1 : 0] log_volume_rest;              // log_volume[2:n_areas]
   vector[E_rc_n_leaf] E_rc_raw_leaf;
@@ -1231,9 +1241,15 @@ vector[n_agg_free] E_rc_raw;
             corr_lj += corr_chol_logjac(xg, Kb) + lkj_corr_cholesky_lpdf(Lg | corr_eta);
           }
         }
-        if (lflag_mp_interior == 2) {
-          matrix[Dm1_model, mp_n_mv] H = mdivide_left_tri_low(mp_LP, mp_Wm')';
-          matrix[Dm1_model, Dm1_model] S0 = square(mp_kap) * diag_matrix(s2) + (1 - square(mp_kap)) * tcrossprod(H);
+        if (lflag_mp_interior == 2 || n_dir > 0) {
+          matrix[Dm1_model, Dm1_model] S0;
+          if (lflag_mp_interior == 2) {
+            matrix[Dm1_model, mp_n_mv] H = mdivide_left_tri_low(mp_LP, mp_Wm')';
+            S0 = square(mp_kap) * diag_matrix(s2) + (1 - square(mp_kap)) * tcrossprod(H);
+          } else {
+            S0 = diag_matrix(s2);
+          }
+          if (n_dir > 0) S0 += tcrossprod(diag_post_multiply(dir_W, dir_tau[dir_group]));   // + dir_W diag(tau^2) dir_W'
           A = cholesky_decompose(0.5 * (S0 + S0'));
         } else {
           A = diag_matrix(sigma_jrc);
@@ -1826,6 +1842,7 @@ if (lflag_margin_param == 1) {
 
   if (mp_kappa_free == 1) mp_kappa ~ lognormal(prior_mp_kappa_a, prior_mp_kappa_b);
   if (lflag_corr == 1) target += corr_lj;
+  if (n_dir > 0) dir_tau ~ normal(0, dir_tau_scale);
   if (lflag_E_cov == 1) E_cov_gamma ~ normal(0, prior_E_cov_scale);
   if (lflag_col_cov == 1) col_kappa ~ normal(0, prior_col_kappa_scale);
   if (lflag_col_eff >= 1 && lflag_col_eff <= 3) {
