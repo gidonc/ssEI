@@ -304,6 +304,9 @@ rw_coords <- function(kc, V_ilr) {
 ##               the model without correlations (with interior = "scaled", relative to the kappa structure). Needs the full
 ##               (not low-rank) scaling path, which is switched on here.
 ##   corr_eta    LKJ shape: 1 = uniform over correlation matrices; larger = closer to no correlations
+##   corr_scale  1 (default) = the interior parameters are scaled by the full covariance (non-centred in the correlations); 0 = scaled
+##               as without correlations, so the correlations enter only the
+##               density of each area's coordinates. Same posterior; 1 needed fewer leapfrog steps in a test (Scotland 5 x 5).
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
@@ -313,7 +316,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
-                   nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, ...) {
+                   nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -390,7 +393,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     blk <- if (identical(corr_blocks, "all")) list(seq_len(Dm1)) else if (identical(corr_blocks, "loyalty")) list(which(loy)) else corr_blocks
     stopifnot(is.list(blk), all(unlist(blk) %in% seq_len(Dm1)), !anyDuplicated(unlist(blk)), all(lengths(blk) >= 2))
     cb <- integer(Dm1); for (g in seq_along(blk)) cb[blk[[g]]] <- g
-    mr$lflag_corr <- 1L; mr$n_corr_blocks <- length(blk); mr$corr_block <- as.array(as.integer(cb)); mr$corr_eta <- corr_eta
+    mr$lflag_corr <- 1L; mr$n_corr_blocks <- length(blk); mr$corr_block <- as.array(as.integer(cb)); mr$corr_eta <- corr_eta; mr$corr_scale <- as.integer(corr_scale)
     mr$lflag_mp_scale_fast <- 0L
     n_corr_raw <- sum(lengths(blk) * (lengths(blk) - 1) / 2)
     message(sprintf("correlations: %d block(s) of size %s, LKJ(%g); %d correlation parameters", length(blk), paste(lengths(blk), collapse = ", "), corr_eta, n_corr_raw))

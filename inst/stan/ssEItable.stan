@@ -165,6 +165,9 @@ data{
   int<lower=0> n_corr_blocks;
   array[lflag_corr ? Dm1_model : 0] int<lower=0> corr_block;   // block of each coordinate (0 = in no block: uncorrelated with all others)
   real<lower=0> corr_eta;                      // LKJ shape: 1 = uniform over correlation matrices, larger = closer to Omega = I
+  int<lower=0, upper=1> corr_scale;            // lflag_corr: 0 = the interior parameters are scaled as without correlations (Sigma0), so Omega
+                                               //   only enters the density of each area's coordinates (centred in Omega); 1 = scaled by the full
+                                               //   Sigma (non-centred in Omega). Same posterior either way.
   int<lower=0, upper=1> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_gamma .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate.
   int<lower=0, upper=4> lflag_col_eff;         // sequential margin param: area-level column effects shared by every row: in area j, col_eff[j, c] ~ normal(0, col_tau[c]) is added to the log share of column c in every row. 1 = explicit, non-centred; 2 = explicit, centred; 3 = integrated out: b_j ~ multi_normal(E_rc, diag(sigma^2) + mp_Wc * diag(col_tau^2) * mp_Wc'), no per-area effect parameters (needs lflag_mp_seq_scale = 2, lflag_mp_scale_fast = 0, mp_nc_w = 1)
   int<lower=0, upper=1> lflag_col_tau_shared;  // 1 = one col_tau for every column, 0 = one per column
@@ -1379,10 +1382,10 @@ vector[n_agg_free] E_rc_raw;
             }
             if (lflag_col_eff == 3) Mi -= tcrossprod(mp_B[j]' * mp_DiW);          // precision of the logits under the full covariance
             if (lflag_mp_interior == 2) Mi = mp_ik2 * Mi + (1 - mp_ik2) * tcrossprod(mp_B[j]' * mp_DiW2);
-            if (lflag_corr == 1) Mi = crossprod(mp_K * mp_B[j]);                      // B' Sigma^-1 B under the correlated covariance
+            if (lflag_corr == 1 && corr_scale == 1) Mi = crossprod(mp_K * mp_B[j]);   // B' Sigma^-1 B under the correlated covariance
             Lp = cholesky_decompose(0.5 * (Mi + Mi'));
             // conditional mean of the logits given the margins (one GLS step from the anchor) + non-centred deviation
-            if (lflag_corr == 1) {
+            if (lflag_corr == 1 && corr_scale == 1) {
               vector[Dm1_model] vv = Ej - b0;
               lam += Lp' \ (mdivide_left_tri_low(Lp, mp_B[j]' * (mp_K' * (mp_K * vv))) + mp_z[j]);
             } else if (lflag_col_eff == 3) {

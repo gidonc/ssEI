@@ -448,7 +448,7 @@ rowwise_defaults <- function(R, C, Dm1_model) {
     ## known totals over all the areas (e.g. national figures): off by default
     lflag_nat = 0L, nat_table = array(0, c(0, 0)), nat_n_eff = 0,
     ## correlations between the hierarchy coordinates: off by default
-    lflag_corr = 0L, n_corr_blocks = 0L, corr_block = integer(0), corr_eta = 2,
+    lflag_corr = 0L, n_corr_blocks = 0L, corr_block = integer(0), corr_eta = 2, corr_scale = 1L,
     cz_n = 0L, cz_t0 = 0, cz_h = 1, cz_v = numeric(0), cz_d = numeric(0),
     ## experimental: covariate in the hierarchy mean, area-level column effects
     lflag_E_cov = 0L, E_cov_x = array(0, c(0, Dm1_model)), prior_E_cov_scale = 0.5,
