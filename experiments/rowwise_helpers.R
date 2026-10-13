@@ -287,6 +287,8 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##               Each row's split, summed over the areas, gets a multinomial likelihood. It must cover the same areas as kc.
 ##   nat_n_eff   0 = use nat_table as counts (an exact count of the population is then effectively exact); > 0 = rescale it to this
 ##               total, e.g. a survey's sample size
+##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
+##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
 ##               The other rows have no loyalty coordinate: no loyalty_mean, and all their coordinates count as non-loyalty ones.
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
@@ -294,7 +296,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
-                   nat_table = NULL, nat_n_eff = 0, ...) {
+                   nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -365,6 +367,14 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   if (!is.null(loyalty_mean)) {                              # the loyalty split is the first split of each row: it involves all C columns
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean
   }
+  ## starting values for E_rc: the prior centre, or the known table's row splits
+  E_init <- E_mean
+  if (!is.null(nat_table) && nat_init) {
+    P <- as.matrix(nat_table) / pmax(rowSums(as.matrix(nat_table)), 1e-300); p <- as.vector(t(P))
+    nl <- apply(mr$V_ilr_model, 2, function(v) { a <- sum(p[v > 1e-10]); b <- sum(p[v < -1e-10]); if (a > 0 && b > 0) log(a / b) else NA_real_ })
+    E_init[is.finite(nl)] <- nl[is.finite(nl)]
+    message(sprintf("E_rc started at the known table's row splits (%d of %d coordinates)", sum(is.finite(nl)), Dm1))
+  }
   sig_id <- if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
   G <- max(sig_id)
   stopifnot(length(sig_id) == Dm1)
@@ -392,10 +402,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_mean, G, kappa0, sigma_prior[1]), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1]), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_mean, G, kappa0, sigma_prior[1])))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1])))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
