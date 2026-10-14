@@ -329,7 +329,10 @@ rw_coords <- function(kc, V_ilr) {
 ##   mix         neighbourhood mixing (assimilation of small groups): row r's hierarchy mean in area j is (1 - w) x its E_rc rates + w x the
 ##               other rows' E_rc rates weighted by their shares in the area, w = inv_logit(a_r + b log s_jr), s_jr = row r's share of area j.
 ##               NULL = off; "estimate" = a (one per row) and b (shared, < 0) estimated, priors normal(mix_prior[1], mix_prior[2]) and
-##               normal(mix_prior[3], mix_prior[4]); list(a = R values, b = one value) = fixed (oracle checks)
+##               normal(mix_prior[3], mix_prior[4]); "half_share" = the same with a_r replaced by the log share at which row r is half assimilated,
+##               w = inv_logit(b (log s - h_r)), h_r ~ normal(mix_prior[1], mix_prior[2]) (e.g. c(log(0.02), 1, -1, 0.5));
+##               list(a = R values, b = one value) = fixed (oracle checks)
+##   mix_rows    rows that mix (names or positions); NULL = all rows; the others have w = 0
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
@@ -340,7 +343,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -465,10 +468,12 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   }
   n_mix <- 0L
   if (!is.null(mix)) {
-    if (identical(mix, "estimate")) {
-      mr$lflag_mix <- 1L; n_mix <- R
+    rn <- dimnames(kc)[[2]]; on <- if (is.null(mix_rows)) seq_len(R) else if (is.character(mix_rows)) match(mix_rows, rn) else mix_rows
+    stopifnot(!anyNA(on)); mr$mix_rows <- as.array(as.integer(seq_len(R) %in% on))
+    if (identical(mix, "estimate") || identical(mix, "half_share")) {
+      mr$lflag_mix <- if (identical(mix, "half_share")) 3L else 1L; n_mix <- R
       mr$prior_mix_a_mu <- mix_prior[1]; mr$prior_mix_a_sd <- mix_prior[2]; mr$prior_mix_b_mu <- mix_prior[3]; mr$prior_mix_b_sd <- mix_prior[4]
-      message(sprintf("neighbourhood mixing: a ~ normal(%g, %g) per row, shared b ~ normal(%g, %g), b < 0", mix_prior[1], mix_prior[2], mix_prior[3], mix_prior[4]))
+      message(sprintf("neighbourhood mixing (%s; rows %s): a ~ normal(%g, %g) per row, shared b ~ normal(%g, %g), b < 0", mix, paste(on, collapse = ","), mix_prior[1], mix_prior[2], mix_prior[3], mix_prior[4]))
     } else {
       stopifnot(is.list(mix), length(mix$a) == R, length(mix$b) == 1)
       mr$lflag_mix <- 2L; mr$mix_a_fixed <- as.array(as.numeric(mix$a)); mr$mix_b_fixed <- as.numeric(mix$b)
