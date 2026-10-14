@@ -189,6 +189,16 @@ data{
   matrix[lflag_E_cov ? n_areas : 0, Dm1_model] E_cov_x;
   real<lower=0> prior_E_cov_scale;             // prior sd of the coefficients (normal, mean 0); with lflag_E_cov = 2, of their sds (half-normal)
   int<lower=0> n_E_cov_groups;                 // lflag_E_cov = 2: number of groups of coefficients, each with its own sd
+  int<lower=0, upper=2> lflag_mix;             // sequential margin param, rows conditioned: neighbourhood mixing (assimilation of small groups). The hierarchy
+                                               //   mean of row r in area j is the table (1 - w) q_r + w m_jr, q_r = E_rc's row r, m_jr = the other rows' E_rc rates
+                                               //   weighted by their shares in area j, w = inv_logit(mix_a[r] + mix_b * log(share of row r in area j)).
+                                               //   0 = off; 1 = mix_a (one per row) and mix_b (shared, < 0) estimated; 2 = fixed at mix_a_fixed, mix_b_fixed
+  vector[lflag_mix == 2 ? R : 0] mix_a_fixed;
+  real mix_b_fixed;
+  real prior_mix_a_mu;                         // mix_a[r] ~ normal(prior_mix_a_mu, prior_mix_a_sd)
+  real<lower=0> prior_mix_a_sd;
+  real prior_mix_b_mu;                         // mix_b ~ normal(prior_mix_b_mu, prior_mix_b_sd), mix_b < 0
+  real<lower=0> prior_mix_b_sd;
   array[lflag_E_cov == 2 ? Dm1_model : 0] int<lower=1, upper=n_E_cov_groups> E_cov_group;
   vector[lflag_E_cov == 3 ? Dm1_model : 0] E_cov_b_fixed;
   int<lower=0> cz_n;                           // grid for the log integral: cz_n points, t = log(mean) from cz_t0 in steps of cz_h
@@ -925,6 +935,8 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   matrix[lflag_mp_interior > 0 ? Dm1_model : 0, mp_n_mv] mp_Wm;
   for (k in 1:(C - 1)) { for (i in 1:k) mp_Hc[i, k] = inv_sqrt(k * (k + 1.0)); mp_Hc[k + 1, k] = -k * inv_sqrt(k * (k + 1.0)); }
   for (k in 1:(R - 1)) { for (i in 1:k) mp_Hr[i, k] = inv_sqrt(k * (k + 1.0)); mp_Hr[k + 1, k] = -k * inv_sqrt(k * (k + 1.0)); }
+  if (lflag_mix > 0 && (lflag_margin_param != 1 || lflag_mp_seq != 1 || lflag_mp_seq_anchor != 1 || lflag_row_decompose != 1))
+    reject("lflag_mix needs the sequential margin parameterisation with the anchor and rows conditioned");
   if (lflag_mp_interior > 0) {
     matrix[R * C, mp_n_mv] Kf = rep_matrix(0, R * C, mp_n_mv);
     int offm = lflag_row_decompose == 1 ? 0 : R - 1;
@@ -1038,6 +1050,8 @@ parameters{
   vector[sigma_n_leaf] sigma_raw_leaf;
   vector[sigma_n_mu] sigma_group_mu;
   vector[(lflag_E_cov == 1 || lflag_E_cov == 2) ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
+  vector[lflag_mix == 1 ? R : 0] mix_a;                     // neighbourhood mixing: level of each row's weight (logit scale, at share 1)
+  vector<upper=0>[lflag_mix == 1 ? 1 : 0] mix_b;            // neighbourhood mixing: slope of the weight's logit on log share (shared by the rows)
   vector<lower=0>[lflag_E_cov == 2 ? n_E_cov_groups : 0] E_cov_tau;   // lflag_E_cov = 2: sd of each group's coefficients
   vector[lflag_col_cov ? (lflag_col_kappa_shared ? 1 : C) : 0] col_kappa;   // coefficient of the column covariate
   array[(lflag_col_eff == 1 || lflag_col_eff == 2) ? (n_col_groups > 0 ? n_col_groups : n_areas) : 0] vector[C] col_eff_raw;      // area-level column effects when explicit (raw scale if non-centred)
@@ -1282,6 +1296,20 @@ vector[n_agg_free] E_rc_raw;
         // ---- sequential expected table: margins and interior logits are the coordinates ----
         vector[Dm1_model] Ej = E_rc;                                           // hierarchy mean for this area
         matrix[R, C] qEj = mp_qE;                                              // its table
+        if (lflag_mix > 0) {
+          // neighbourhood mixing: each row's mean table moves towards the rest of the area's (E_rc) rates, more so the smaller its share
+          vector[R * C] lq;
+          real mb = lflag_mix == 1 ? mix_b[1] : mix_b_fixed;
+          for (r in 1:R) {
+            real w = inv_logit((lflag_mix == 1 ? mix_a[r] : mix_a_fixed[r]) + mb * log(rm_prop[j, r]));
+            row_vector[C] mr = rep_row_vector(0, C);
+            real ws = 0;
+            for (r2 in 1:R) if (r2 != r) { mr += rm_prop[j, r2] * mp_qE[r2]; ws += rm_prop[j, r2]; }
+            qEj[r] = (1 - w) * mp_qE[r] + w * mr / ws;
+            for (c in 1:C) lq[(r - 1) * C + c] = log(qEj[r, c]);
+          }
+          Ej = V_ilr_model' * lq;
+        }
         if (lflag_E_cov >= 1 || lflag_col_eff == 1 || lflag_col_eff == 2 || lflag_col_eff == 4 || lflag_col_cov == 1) {
           if (lflag_col_cov == 1) Ej += mp_Wc * ((lflag_col_kappa_shared == 1 ? rep_vector(col_kappa[1], C) : col_kappa) .* col_x[j]');
           if (lflag_E_cov >= 1) Ej += E_cov_b .* E_cov_x[j]';
@@ -1853,6 +1881,7 @@ if (lflag_margin_param == 1) {
   if (n_dir > 0) dir_tau ~ normal(0, dir_tau_scale);
   if (lflag_E_cov == 1) E_cov_gamma ~ normal(0, prior_E_cov_scale);
   if (lflag_E_cov == 2) { E_cov_gamma ~ std_normal(); E_cov_tau ~ normal(0, prior_E_cov_scale); }
+  if (lflag_mix == 1) { mix_a ~ normal(prior_mix_a_mu, prior_mix_a_sd); mix_b ~ normal(prior_mix_b_mu, prior_mix_b_sd); }
   if (lflag_col_cov == 1) col_kappa ~ normal(0, prior_col_kappa_scale);
   if (lflag_col_eff >= 1 && lflag_col_eff <= 3) {
     col_tau ~ normal(0, prior_col_tau_scale);

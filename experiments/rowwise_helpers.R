@@ -156,7 +156,7 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
-rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0) {
+rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0, n_mix = 0) {
   function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
                     mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
                     E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log_sigma, n_sigma))),
@@ -164,7 +164,8 @@ rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(
                if (n_corr_raw > 0) list(corr_raw = as.array(rep(0, n_corr_raw))),
                if (n_dir_groups > 0) list(dir_tau = as.array(rep(0.2, n_dir_groups))),
                if (n_ctx > 0) list(E_cov_gamma = as.array(rep(0, n_ctx))),
-               if (n_ctx_groups > 0) list(E_cov_tau = as.array(rep(0.1, n_ctx_groups))))
+               if (n_ctx_groups > 0) list(E_cov_tau = as.array(rep(0.1, n_ctx_groups))),
+               if (n_mix > 0) list(mix_a = as.array(rep(-4, n_mix)), mix_b = as.array(-1)))
 }
 
 
@@ -325,6 +326,10 @@ rw_coords <- function(kc, V_ilr) {
 ##   context_tau TRUE = the coefficients' sd is estimated (half-normal(0, context_scale)), one sd for the loyalty coordinates and one
 ##               for the rest (one in all if there are no loyalty coordinates); FALSE = coefficients normal(0, context_scale)
 ##   context_fixed  a vector of coefficients (one per model coordinate) to fix them instead of estimating them (diagnosis)
+##   mix         neighbourhood mixing (assimilation of small groups): row r's hierarchy mean in area j is (1 - w) x its E_rc rates + w x the
+##               other rows' E_rc rates weighted by their shares in the area, w = inv_logit(a_r + b log s_jr), s_jr = row r's share of area j.
+##               NULL = off; "estimate" = a (one per row) and b (shared, < 0) estimated, priors normal(mix_prior[1], mix_prior[2]) and
+##               normal(mix_prior[3], mix_prior[4]); list(a = R values, b = one value) = fixed (oracle checks)
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
@@ -335,7 +340,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -458,6 +463,18 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     message(sprintf("contextual effects on %d of %d coordinates; %s", sum(colSums(X != 0) > 0), Dm1,
                     if (!is.null(context_fixed)) "coefficients fixed" else if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
   }
+  n_mix <- 0L
+  if (!is.null(mix)) {
+    if (identical(mix, "estimate")) {
+      mr$lflag_mix <- 1L; n_mix <- R
+      mr$prior_mix_a_mu <- mix_prior[1]; mr$prior_mix_a_sd <- mix_prior[2]; mr$prior_mix_b_mu <- mix_prior[3]; mr$prior_mix_b_sd <- mix_prior[4]
+      message(sprintf("neighbourhood mixing: a ~ normal(%g, %g) per row, shared b ~ normal(%g, %g), b < 0", mix_prior[1], mix_prior[2], mix_prior[3], mix_prior[4]))
+    } else {
+      stopifnot(is.list(mix), length(mix$a) == R, length(mix$b) == 1)
+      mr$lflag_mix <- 2L; mr$mix_a_fixed <- as.array(as.numeric(mix$a)); mr$mix_b_fixed <- as.numeric(mix$b)
+      message(sprintf("neighbourhood mixing fixed: b = %.2f, a = %s", mix$b, paste(sprintf("%.2f", mix$a), collapse = " ")))
+    }
+  }
   E_init <- E_mean
   if (!is.null(nat_table) && nat_init) {
     P <- as.matrix(nat_table) / pmax(rowSums(as.matrix(nat_table)), 1e-300); p <- as.vector(t(P))
@@ -492,10 +509,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups)))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
