@@ -175,7 +175,7 @@ data{
   int<lower=0, upper=1> corr_scale;            // lflag_corr: 0 = the interior parameters are scaled as without correlations (Sigma0), so Omega
                                                //   only enters the density of each area's coordinates (centred in Omega); 1 = scaled by the full
                                                //   Sigma (non-centred in Omega). Same posterior either way.
-  int<lower=0, upper=2> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_b .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate, normal(0, prior_E_cov_scale). 2 = the same with the coefficients' sd estimated, one sd per group of coordinates (E_cov_tau, half-normal(0, prior_E_cov_scale)); non-centred: E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma
+  int<lower=0, upper=3> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_b .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate, normal(0, prior_E_cov_scale). 2 = the same with the coefficients' sd estimated, one sd per group of coordinates (E_cov_tau, half-normal(0, prior_E_cov_scale)); non-centred: E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma. 3 = coefficients fixed at E_cov_b_fixed (for diagnosis, e.g. slopes taken from known tables)
   int<lower=0, upper=4> lflag_col_eff;         // sequential margin param: area-level column effects shared by every row: in area j, col_eff[j, c] ~ normal(0, col_tau[c]) is added to the log share of column c in every row. 1 = explicit, non-centred; 2 = explicit, centred; 3 = integrated out: b_j ~ multi_normal(E_rc, diag(sigma^2) + mp_Wc * diag(col_tau^2) * mp_Wc'), no per-area effect parameters (needs lflag_mp_seq_scale = 2, lflag_mp_scale_fast = 0, mp_nc_w = 1)
   int<lower=0, upper=1> lflag_col_tau_shared;  // 1 = one col_tau for every column, 0 = one per column
   int<lower=0> n_col_groups;                   // explicit column effects (lflag_col_eff 1 or 2): 0 = one set of effects per area; > 0 = one set per group of areas (e.g. polling places within an electorate share the electorate's candidate effects)
@@ -190,6 +190,7 @@ data{
   real<lower=0> prior_E_cov_scale;             // prior sd of the coefficients (normal, mean 0); with lflag_E_cov = 2, of their sds (half-normal)
   int<lower=0> n_E_cov_groups;                 // lflag_E_cov = 2: number of groups of coefficients, each with its own sd
   array[lflag_E_cov == 2 ? Dm1_model : 0] int<lower=1, upper=n_E_cov_groups> E_cov_group;
+  vector[lflag_E_cov == 3 ? Dm1_model : 0] E_cov_b_fixed;
   int<lower=0> cz_n;                           // grid for the log integral: cz_n points, t = log(mean) from cz_t0 in steps of cz_h
   real cz_t0;
   real<lower=0> cz_h;
@@ -1036,7 +1037,7 @@ parameters{
 
   vector[sigma_n_leaf] sigma_raw_leaf;
   vector[sigma_n_mu] sigma_group_mu;
-  vector[lflag_E_cov ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
+  vector[(lflag_E_cov == 1 || lflag_E_cov == 2) ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
   vector<lower=0>[lflag_E_cov == 2 ? n_E_cov_groups : 0] E_cov_tau;   // lflag_E_cov = 2: sd of each group's coefficients
   vector[lflag_col_cov ? (lflag_col_kappa_shared ? 1 : C) : 0] col_kappa;   // coefficient of the column covariate
   array[(lflag_col_eff == 1 || lflag_col_eff == 2) ? (n_col_groups > 0 ? n_col_groups : n_areas) : 0] vector[C] col_eff_raw;      // area-level column effects when explicit (raw scale if non-centred)
@@ -1083,6 +1084,7 @@ transformed parameters{
 vector[n_agg_free] E_rc_raw;
   if (lflag_E_cov == 1) E_cov_b = E_cov_gamma;
   if (lflag_E_cov == 2) E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma;
+  if (lflag_E_cov == 3) E_cov_b = E_cov_b_fixed;
   {
     vector[n_agg_free] u;
     int k = 0;

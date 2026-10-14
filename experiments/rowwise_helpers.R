@@ -324,6 +324,7 @@ rw_coords <- function(kc, V_ilr) {
 ##               (the others get 0); or an n_areas x (model coordinates) matrix supplied directly.
 ##   context_tau TRUE = the coefficients' sd is estimated (half-normal(0, context_scale)), one sd for the loyalty coordinates and one
 ##               for the rest (one in all if there are no loyalty coordinates); FALSE = coefficients normal(0, context_scale)
+##   context_fixed  a vector of coefficients (one per model coordinate) to fix them instead of estimating them (diagnosis)
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
@@ -334,7 +335,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -447,13 +448,15 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
       X <- xr[, coord_row, drop = FALSE]
       if (context == "own_row_loyalty") X[, !loy] <- 0
     }
-    mr$lflag_E_cov <- if (context_tau) 2L else 1L; mr$E_cov_x <- unname(X); mr$prior_E_cov_scale <- context_scale; n_ctx <- Dm1
+    mr$lflag_E_cov <- if (!is.null(context_fixed)) 3L else if (context_tau) 2L else 1L; mr$E_cov_x <- unname(X); mr$prior_E_cov_scale <- context_scale
+    n_ctx <- if (is.null(context_fixed)) Dm1 else 0L
+    if (!is.null(context_fixed)) { stopifnot(length(context_fixed) == Dm1); mr$E_cov_b_fixed <- as.array(as.numeric(context_fixed)); context_tau <- FALSE }
     if (context_tau) {
       grp <- if (any(loy) && any(!loy)) ifelse(loy, 1L, 2L) else rep(1L, Dm1)
       mr$n_E_cov_groups <- max(grp); mr$E_cov_group <- as.array(as.integer(grp)); n_ctx_groups <- max(grp)
     }
     message(sprintf("contextual effects on %d of %d coordinates; %s", sum(colSums(X != 0) > 0), Dm1,
-                    if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
+                    if (!is.null(context_fixed)) "coefficients fixed" else if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
   }
   E_init <- E_mean
   if (!is.null(nat_table) && nat_init) {

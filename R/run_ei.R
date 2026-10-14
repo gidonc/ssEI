@@ -452,7 +452,7 @@ rowwise_defaults <- function(R, C, Dm1_model) {
     n_dir = 0L, n_dir_groups = 0L, dir_W = array(0, c(0, 0)), dir_group = integer(0), dir_tau_scale = 0.5,
     cz_n = 0L, cz_t0 = 0, cz_h = 1, cz_v = numeric(0), cz_d = numeric(0),
     ## experimental: covariate in the hierarchy mean, area-level column effects
-    lflag_E_cov = 0L, E_cov_x = array(0, c(0, Dm1_model)), prior_E_cov_scale = 0.5, n_E_cov_groups = 0L, E_cov_group = integer(0),
+    lflag_E_cov = 0L, E_cov_x = array(0, c(0, Dm1_model)), prior_E_cov_scale = 0.5, n_E_cov_groups = 0L, E_cov_group = integer(0), E_cov_b_fixed = numeric(0),
     lflag_col_eff = 0L, lflag_col_tau_shared = 0L, prior_col_tau_scale = 0.5,
     n_col_groups = 0L, col_group = integer(0),
     col_eff_known = array(0, c(0, C)),
