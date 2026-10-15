@@ -352,6 +352,14 @@ rw_coords <- function(kc, V_ilr) {
 ##               normal(mix_prior[3], mix_prior[4]); "half_share" = the same with a_r replaced by the log share at which row r is half assimilated,
 ##               w = inv_logit(b (log s - h_r)), h_r ~ normal(mix_prior[1], mix_prior[2]) (e.g. c(log(0.02), 1, -1, 0.5));
 ##               list(a = R values, b = one value) = fixed (oracle checks)
+##   E_alpha     prior on the average table: each row's split ~ Dirichlet(E_alpha, ..., E_alpha) translated to the node logits (centre
+##               digamma(E_alpha m) - digamma(E_alpha n), sd sqrt(trigamma(E_alpha m) + trigamma(E_alpha n)) for a split of m against n
+##               columns). 1 = the default (uniform on each row's simplex); 4 = King's ei.MD.bayes default (alpha_rc ~ Gamma(4, 2)
+##               independently, so the normalised row means are Dirichlet(4, ..., 4)): centred nearer an even split and tighter.
+##               E_centre = "qi" still replaces the centres (not the sds) of the non-loyalty coordinates.
+##   sigma_fixed the area spread fixed instead of estimated (one value, or one per sigma group). Under a symmetric Dirichlet(a) every ILR
+##               balance of a row has variance trigamma(a) and they are uncorrelated, so sqrt(trigamma(2)) = 0.80 matches King's area-level
+##               Dirichlet at its prior mean (alpha_rc about 2). The margins push an estimated sigma down when there is sorting across areas.
 ##   sigma_groups  one integer per model coordinate (overrides tiers), e.g. rep(1:R, each = C - 1) for one sigma per row
 ##   mix_rows    rows that mix (names or positions); NULL = all rows; the others have w = 0
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
@@ -364,7 +372,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -393,7 +401,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   kappa0 <- if (interior == "scaled" && is.null(kappa)) exp(kappa_prior[1]) else NULL
   ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
   m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)
-  E_mean <- digamma(m_pos) - digamma(n_neg); E_sd <- sqrt(trigamma(m_pos) + trigamma(n_neg))
+  E_mean <- digamma(E_alpha * m_pos) - digamma(E_alpha * n_neg); E_sd <- sqrt(trigamma(E_alpha * m_pos) + trigamma(E_alpha * n_neg))
   ## optional tightening of the E_rc prior sd: E_sd_scale for every coordinate, E_sd_scale_small for coordinates whose loadings
   ## have a side made only of small columns (column share of the total below small_frac); both default 1 = the uniform-split prior
   if (E_sd_scale != 1 || E_sd_scale_small != 1) {
@@ -524,7 +532,8 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     margin_reduction = mr,
     ROT_E_rc = diag(Dm1), rotate_E_rc = FALSE,
     link_E_rc = NULL, rotate_lambda = "none",
-    sigma_group_id = sig_id, sigma_group_mode = rep("shared", G),             # sigma shared by the areas
+    sigma_group_id = sig_id, sigma_group_mode = rep(if (is.null(sigma_fixed)) "shared" else "fixed", G),   # sigma shared by the areas, or fixed
+    sigma_group_fixed_value = if (is.null(sigma_fixed)) 0 else rep_len(log(sigma_fixed), G),
     sigma_group_prior_a = rep(sigma_prior[1], G), sigma_group_prior_b = rep(sigma_prior[2], G),
     sigma_ncp = TRUE,
     E_rc_group_id = 1:Dm1, E_rc_group_mode = rep("shared", Dm1),
@@ -535,10 +544,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, if (is.null(sigma_fixed)) G else 0L, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, G, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, if (is.null(sigma_fixed)) G else 0L, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
