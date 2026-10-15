@@ -284,7 +284,7 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ## columns on each side of the split, numbered as corr_blocks expects. kc gives the row margins and the category names.
 rw_coords <- function(kc, V_ilr) {
   R <- dim(kc)[2]; C <- dim(kc)[3]; rn <- if (is.null(dimnames(kc)[[2]])) paste0("r", 1:R) else dimnames(kc)[[2]]; cn <- if (is.null(dimnames(kc)[[3]])) paste0("c", 1:C) else dimnames(kc)[[3]]
-  V <- build_margin_reduction(V_ilr, apply(kc, c(1, 2), sum), R = R, C = C)$V_ilr_model
+  V <- build_margin_reduction(V_ilr, apply(kc, c(1, 2), sum), R = R, C = C, build_rot = FALSE)$V_ilr_model
   do.call(rbind, lapply(seq_len(ncol(V)), function(k) { v <- V[, k]; nz <- which(abs(v) > 1e-10)
     r <- ((nz[1] - 1) %/% C) + 1; pos <- ((which(v > 1e-10) - 1) %% C) + 1; neg <- ((which(v < -1e-10) - 1) %% C) + 1
     data.frame(coord = k, row = rn[r], plus = paste(cn[pos], collapse = "+"), minus = paste(cn[neg], collapse = "+")) }))
@@ -352,6 +352,7 @@ rw_coords <- function(kc, V_ilr) {
 ##               normal(mix_prior[3], mix_prior[4]); "half_share" = the same with a_r replaced by the log share at which row r is half assimilated,
 ##               w = inv_logit(b (log s - h_r)), h_r ~ normal(mix_prior[1], mix_prior[2]) (e.g. c(log(0.02), 1, -1, 0.5));
 ##               list(a = R values, b = one value) = fixed (oracle checks)
+##   sigma_groups  one integer per model coordinate (overrides tiers), e.g. rep(1:R, each = C - 1) for one sigma per row
 ##   mix_rows    rows that mix (names or positions); NULL = all rows; the others have w = 0
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
 ##               Large totals make warm-up very slow from the prior centre.
@@ -363,7 +364,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -371,7 +372,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
   if (is.null(rem_col)) rem_col <- rep(1L, R)
-  mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C)    # row-margin coordinates removed: rows conditioned on the data
+  mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C, build_rot = FALSE)    # row-margin coordinates removed: rows conditioned on the data
   mr  <- rw_setup(mr, rm, cm, row_order = row_order, rem_col = rem_col, alloc = alloc)
   Dm1 <- mr$Dm1_model
   ## with sigma shared in a few groups the scaling has a low-rank form: same density, cheaper gradient (about 1.5x at 7 x 7, 73 areas)
@@ -507,7 +508,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     E_init[is.finite(nl)] <- nl[is.finite(nl)]
     message(sprintf("E_rc started at the known table's row splits (%d of %d coordinates)", sum(is.finite(nl)), Dm1))
   }
-  sig_id <- if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
+  sig_id <- if (!is.null(sigma_groups)) as.integer(sigma_groups) else if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
   G <- max(sig_id)
   stopifnot(length(sig_id) == Dm1)
   fit <- ssEI::ei_estimate(

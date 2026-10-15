@@ -278,6 +278,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            hinge_delta_min = hinge_delta_min,
                            slack_tol = slack_tol
                          ))
+  if (isTRUE(standata$lflag_margin_param == 1)) standata$ROT_red <- matrix(0, 0, 0)   # unused with the margin parameterisation
 
   if(verbose){
     print(standata$R)
@@ -310,7 +311,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
 
 #' @export
 build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
-                                   noncentred_mat = NULL) {
+                                   noncentred_mat = NULL, build_rot = TRUE) {
   margin_structure <- detect_margin_columns(V_ilr, R, C)
   free_dims        <- margin_structure$free
   Dm1_model        <- length(free_dims)
@@ -334,27 +335,29 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     V
   }
 
-  V_area <- make_helmert_basis(n_areas)
-  j_area <- matrix(1 / sqrt(n_areas), n_areas, 1)
-  j_cell <- matrix(1 / sqrt(D), D, 1)
+  if (build_rot) {
+    V_area <- make_helmert_basis(n_areas)
+    j_area <- matrix(1 / sqrt(n_areas), n_areas, 1)
+    j_cell <- matrix(1 / sqrt(D), D, 1)
 
-  B_agg <- kronecker(j_area, V_ilr_model)
-  B_vol <- kronecker(V_area, j_cell)
-  B_dev <- kronecker(V_area, V_ilr_model)
-  V_nested <- cbind(B_agg, B_vol, B_dev)
+    B_agg <- kronecker(j_area, V_ilr_model)
+    B_vol <- kronecker(V_area, j_cell)
+    B_dev <- kronecker(V_area, V_ilr_model)
+    V_nested <- cbind(B_agg, B_vol, B_dev)
 
-  V_block_diag <- matrix(0, n_areas * D, n_areas * Dm1_model)
-  for (j in 1:n_areas) {
-    rows <- ((j-1)*D + 1):(j*D)
-    cols <- ((j-1)*Dm1_model + 1):(j*Dm1_model)
-    V_block_diag[rows, cols] <- V_ilr_model
-  }
-  V_flat   <- cbind(V_block_diag, B_vol)
-  ROT_full <- t(V_flat) %*% V_nested
+    V_block_diag <- matrix(0, n_areas * D, n_areas * Dm1_model)
+    for (j in 1:n_areas) {
+      rows <- ((j-1)*D + 1):(j*D)
+      cols <- ((j-1)*Dm1_model + 1):(j*Dm1_model)
+      V_block_diag[rows, cols] <- V_ilr_model
+    }
+    V_flat   <- cbind(V_block_diag, B_vol)
+    ROT_full <- t(V_flat) %*% V_nested
 
-  Dtot_m1_reduced <- n_areas * Dm1_model + (n_areas - 1)
-  stopifnot(all.equal(t(ROT_full) %*% ROT_full,
-                      diag(Dtot_m1_reduced), tolerance = 1e-6))
+    Dtot_m1_reduced <- n_areas * Dm1_model + (n_areas - 1)
+    stopifnot(all.equal(t(ROT_full) %*% ROT_full,
+                        diag(Dtot_m1_reduced), tolerance = 1e-6))
+  } else ROT_full <- matrix(0, 0, 0)   # not needed with the margin parameterisation (large for many areas)
 
   noncentred_mat_model <- if (!is.null(noncentred_mat)) {
     stopifnot(ncol(noncentred_mat) >= max(free_dims))

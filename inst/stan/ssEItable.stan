@@ -101,7 +101,6 @@ data{
   int<lower=1> Dm1_model;
   matrix[(R * C), (R * C) - 1] V_ilr_full; // basis matrix for ILR transformation
   matrix[(R * C), Dm1_model] V_ilr_model;
-  matrix[n_areas*Dm1_model + n_areas - 1, n_areas*Dm1_model + n_areas - 1] ROT_red; //rebuilt for reduced dimensions
   matrix[n_agg_free, n_agg_free] ROT_E_rc; //ilr rotation from raw to E_rc in V_ilr basis
 
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
@@ -131,6 +130,7 @@ data{
   // b_j = mp_b_ref[j] + mp_P[j] * beta_j + mp_N[j] * gamma_j      (b_j = llrep_model_j, V_ilr_model coords)
   // mp_G[j] : n_pin x Dm1 gradient of pinned margin log-ratios at b_ref ; G*P = I, G*N = 0, N'N = I
   int<lower=0, upper=1> lflag_margin_param;
+  matrix[lflag_margin_param == 1 ? 0 : n_areas*Dm1_model + n_areas - 1, lflag_margin_param == 1 ? 0 : n_areas*Dm1_model + n_areas - 1] ROT_red; // rebuilt for reduced dimensions (not used, and empty, with the margin parameterisation)
   int<lower=0, upper=1> lflag_mp_seq;            // margin param: 1 = expected table built by sequential allocation: mp_beta = column log-ratio deviation from observed, mp_z = interior logits (centred). Works with rows conditioned or free. Overrides lflag_mp_exact / lflag_mp_gamma_centred; mp_G, mp_P, mp_N, mp_b_ref are unused (pass zeros).
   int<lower=0, upper=1> lflag_mp_seq_anchor;     // margin param (seq): 1 = interior logits = (logits that realise E_rc for this area's rows) + mp_z, i.e. mp_z is the area's deviation from E_rc; 0 = mp_z are the logits themselves
   int<lower=0, upper=1> lflag_mp_exact;          // margin param: 0 = mp_beta is the linearised pinned coord; 1 = mp_beta is the EXACT column log-ratio deviation (Newton solve + Jacobian)
