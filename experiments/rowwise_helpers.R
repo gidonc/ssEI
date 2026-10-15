@@ -13,6 +13,26 @@ library(ssEI)
 ## ---------------------------------------------------------------------------
 
 ## within-row basis from a sign matrix (one column per split: +1 / -1 / 0)
+## Sequential binary partition of the categories of one margin from its observed area shares X (areas x categories): average-linkage
+## clustering of Aitchison's variation matrix var(log(x_i / x_j)), split from the top of the tree. Categories whose shares move together
+## across areas end up in the same group, so the balances between groups vary most and those within groups least.
+rw_cluster_sbp <- function(X, labels = colnames(X)) {
+  L <- log(X); n <- ncol(X)
+  T <- outer(seq_len(n), seq_len(n), Vectorize(function(i, j) var(L[, i] - L[, j]))); dimnames(T) <- list(labels, labels)
+  h <- hclust(as.dist(T), "average"); S <- matrix(0, n, 0)
+  members <- function(i) if (i < 0) -i else c(members(h$merge[i, 1]), members(h$merge[i, 2]))
+  rec <- function(i) { if (i < 0) return(invisible()); v <- numeric(n); v[members(h$merge[i, 1])] <- 1; v[members(h$merge[i, 2])] <- -1
+                       S <<- cbind(S, v); rec(h$merge[i, 1]); rec(h$merge[i, 2]) }
+  rec(nrow(h$merge)); dimnames(S) <- list(labels, NULL); S
+}
+
+## Full-table basis with no margin given priority: row-margin balances, column-margin balances, then the interaction as products of the two
+## (all orthonormal; cells in row-major order). Vr: R x (R - 1), Vc: C x (C - 1), e.g. rw_sbp_to_v(rw_cluster_sbp(...)).
+rw_symmetric_basis <- function(Vr, Vc) {
+  R <- nrow(Vr); C <- nrow(Vc)
+  cbind(kronecker(Vr, matrix(1 / sqrt(C), C, 1)), kronecker(matrix(1 / sqrt(R), R, 1), Vc), kronecker(Vr, Vc))
+}
+
 rw_sbp_to_v <- function(S) {
   V <- matrix(0, nrow(S), ncol(S))
   for (k in seq_len(ncol(S))) {
