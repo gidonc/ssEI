@@ -9,7 +9,10 @@
 ##   assim     assimilation of small groups (row-specific contextual effect): row r's rates in area j become (1 - w) x its own rates
 ##             + w x the other rows' rates weighted by their shares, w = inv_logit(-1.2 (log s_jr - log h)), h = the share at which a row
 ##             is half assimilated. assim = 0: none; assim > 0: h = 0.05 * assim (so 1 gives half assimilation at a 5% share).
-sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, seg = 0.8, N_mean = 5000, seed = 1, assim = 0) {
+##   sort_rank rank of the sorting map Phi: 0 = full (as drawn); k > 0 = its best rank-k approximation (after centring), from the same
+##             random draw, so the data otherwise match the full-rank dataset with the same seed. Rank 1 = people sort on one latent
+##             dimension s_j = v' lc_j (returned as sort_dir = v, the row loading, and sort_score = s).
+sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, seg = 0.8, N_mean = 5000, seed = 1, assim = 0, sort_rank = 0) {
   set.seed(seed)
   H <- function(n) { V <- matrix(0, n, n - 1); for (k in 1:(n - 1)) { V[1:k, k] <- 1 / sqrt(k * (k + 1)); V[k + 1, k] <- -k / sqrt(k * (k + 1)) }; V }
   ## average table: column popularity (unequal) + diagonal association (row r prefers column r when R = C; otherwise a monotone pattern)
@@ -22,7 +25,13 @@ sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, s
   rs <- exp(sweep(Zr, 2, mu_r, "+")); rs <- rs / rowSums(rs)
   ## sorting: column shift = Phi %*% (centred log composition); Phi random but fixed for the seed, scaled so the shift sd is about `sort`
   lc <- log(rs); lc <- lc - rowMeans(lc); lc <- sweep(lc, 2, colMeans(lc))
-  Phi <- matrix(rnorm(C * R), C, R); shift <- lc %*% t(Phi); shift <- shift - rowMeans(shift)
+  Phi <- matrix(rnorm(C * R), C, R)
+  Pc <- diag(C) - 1 / C; Pr <- diag(R) - 1 / R; sv <- svd(Pc %*% Phi %*% Pr)                      # centred map: what reaches the shift
+  k <- if (sort_rank > 0) min(sort_rank, length(sv$d)) else length(sv$d)
+  Phi_used <- sv$u[, 1:k, drop = FALSE] %*% diag(sv$d[1:k], k) %*% t(sv$v[, 1:k, drop = FALSE])
+  if (sort_rank == 0) Phi_used <- Phi                                                            # full rank: exactly as before
+  shift <- lc %*% t(Phi_used); shift <- shift - rowMeans(shift)
+  sort_dir <- sv$v[, 1:k, drop = FALSE]; sort_score <- lc %*% sort_dir
   shift <- if (sort > 0) shift * sort / sd(as.vector(shift)) else shift * 0
   N <- round(exp(rnorm(J, log(N_mean), 0.5))); kc <- array(0, c(J, R, C)); rates <- array(0, c(J, R, C))
   Hc <- H(C)
@@ -43,5 +52,6 @@ sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, s
       kc[j, r, ] <- if (nr[r] > 0) as.vector(rmultinom(1, nr[r], p)) else 0
     }
   }
-  list(kc = kc, E = E, rates = rates, settings = list(J = J, R = R, C = C, assoc = assoc, sort = sort, sigma = sigma, seg = seg, N_mean = N_mean, seed = seed, assim = assim))
+  list(kc = kc, E = E, rates = rates, sort_dir = sort_dir, sort_score = sort_score,
+       settings = list(J = J, R = R, C = C, assoc = assoc, sort = sort, sigma = sigma, seg = seg, N_mean = N_mean, seed = seed, assim = assim, sort_rank = sort_rank))
 }

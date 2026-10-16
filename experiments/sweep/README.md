@@ -32,3 +32,20 @@ Rscript experiments/sweep/collect.R sweep_out
 Each task writes one `.rds` to `sweep_out/` and skips work whose file already exists, so resubmitting the array resumes. `collect.R` writes `sweep_out/results_long.csv` (one row per method, dataset and seed: area error, national error, coverage, Rhat, minutes) and prints the seed-averaged table.
 
 Quick local test of one task: `Rscript experiments/sweep/sweep_task.R 1 sweep_test`.
+
+## Rank-1 against full-rank sorting (grid_rank.csv)
+
+`make_grid_rank.R` writes `grid_rank.csv` (198 tasks):
+- tasks 1-90: reference methods (seconds each). These include Goodman with a contextual sorting term common to all rows, fitted three ways:
+  - all composition directions (`goodman_ctx`);
+  - one estimated direction (`goodman_rr1`);
+  - the true direction (`goodman_orc`, an oracle).
+- tasks 91-198: ssei_est, ssei_kingqi and King on the rank-1 datasets.
+
+The full-rank King and ssEI fits are already in `results/results_long.csv`: same seeds, identical data. Rank-1 datasets share compositions, area sizes and the sorting draw with their full-rank twins.
+
+```bash
+sbatch --array=1-198%60 <your working Slurm script, with the grid and output directory below>
+#   Rscript --vanilla experiments/sweep/sweep_task.R $SLURM_ARRAY_TASK_ID /nobackup/<user>/ssei_rank_out experiments/sweep/grid_rank.csv
+Rscript --vanilla experiments/sweep/collect.R /nobackup/<user>/ssei_rank_out
+```
