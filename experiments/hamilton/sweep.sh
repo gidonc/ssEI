@@ -4,12 +4,23 @@
 ##   bash experiments/hamilton/sweep.sh status  NAME
 ##   bash experiments/hamilton/sweep.sh rerun   NAME [extra sbatch options]   (submits only the tasks with no result yet)
 ##   bash experiments/hamilton/sweep.sh collect NAME [--push]
+##   bash experiments/hamilton/sweep.sh install         (reinstall ssEI from this checkout as a Slurm job, if its source changed)
 ## NAME picks the grid experiments/sweep/grid_NAME.csv ("main" = grid.csv). Results: /nobackup/$USER/ssei_NAME_out;
 ## logs: /nobackup/$USER/slurmout/ssei_NAME. Tasks run from a snapshot of experiments/ taken at submission, so pulling new code
 ## while a sweep runs does not affect it. The R module is the one the installed ssEI was built with (override: SSEI_R_MODULE).
 set -eo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-CMD=${1:?command: submit, status, rerun or collect}; NAME=${2:?name of the grid, e.g. base}; shift 2
+CMD=${1:?command: submit, status, rerun, collect or install}
+if [ "$CMD" = install ]; then
+  type module > /dev/null 2>&1 || source /etc/profile > /dev/null 2>&1 || true
+  LIB=${SSEI_LIB:-/nobackup/$USER/R-libs}; BUILT=$(sed -n 's/^Built: R \([0-9.]*\);.*/\1/p' "$LIB/ssEI/DESCRIPTION" 2> /dev/null)
+  RMOD=${SSEI_R_MODULE:-r/$BUILT}; [ -n "$BUILT" ] || [ -n "$SSEI_R_MODULE" ] || { echo "set SSEI_R_MODULE=<R module> for a first install"; exit 1; }
+  mkdir -p "/nobackup/$USER/slurmout"; LOG=/nobackup/$USER/slurmout/ssei_install_%j.out
+  sbatch -J ssei_install -p shared -c 4 --mem=8G --time=01:00:00 -o "$LOG" \
+    --wrap="module load $RMOD; export R_LIBS=$LIB SSEI_LIB=$LIB; cd $REPO && Rscript --vanilla experiments/hamilton/install.R"
+  echo "install job submitted (R module $RMOD); when it finishes: cat /nobackup/$USER/slurmout/ssei_install_<jobid>.out"; exit 0
+fi
+NAME=${2:?name of the grid, e.g. base}; shift 2
 LIB=${SSEI_LIB:-/nobackup/$USER/R-libs}
 GRID=$REPO/experiments/sweep/grid_$NAME.csv; [ "$NAME" = main ] && GRID=$REPO/experiments/sweep/grid.csv
 ROOT=${SSEI_OUT_ROOT:-/nobackup/$USER}
