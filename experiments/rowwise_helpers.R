@@ -306,6 +306,12 @@ rw_coords <- function(kc, V_ilr) {
 ##   E_centre_shift  (experiments) moves the non-loyalty centres by this many prior sds, alternating in sign
 ##   offset_rows rows (names or indices) whose hierarchy mean is offset by each area's log column shares: the row splits like the area's
 ##               column margin apart from its E_rc departure (quasi-independence; e.g. spoilt ballots as a cross-section of the area)
+##   E_family    restrict the average table E_rc to a low-dimensional family (imposed exactly, not as a prior centre):
+##               "qi" = loyalty + quasi-independent defection: P(c | r) = l_r on the diagonal, (1 - l_r) w_c / sum_{c' != r} w_c' off it,
+##               one loyalty per row and one popularity vector w shared by all rows' defectors (R + C - 1 free coordinates; needs R = C
+##               with rows and columns in the same order). Implemented as E_rc = ROT %*% E_raw with an orthonormal ROT whose first p columns
+##               span the family; the other raw coordinates are fixed at 0; E_rc_node_logit is switched off. Prior on the free raw
+##               coordinates: normal(projection of a QI table with loyalty 0.75 and popularity = the column margin shares, E_family_sd).
 ##   offset_sd   NULL = the offset rows' E_rc prior sds as usual; a number = the prior sd of every offset-row coordinate except the row's
 ##               own-column split (when the row is also in loyal_rows), which keeps its usual sd: e.g. 0.05 holds the row at "splits like the
 ##               area" apart from one free coefficient on its own column (for spoilt ballots: rejected on both halves)
@@ -374,7 +380,7 @@ rw_coords <- function(kc, V_ilr) {
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL,
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
                    directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
@@ -543,6 +549,23 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   sig_id <- if (!is.null(sigma_groups)) as.integer(sigma_groups) else if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
   G <- max(sig_id)
   stopifnot(length(sig_id) == Dm1)
+  ## E_family: the average table restricted to a subspace (see the argument notes)
+  fam <- NULL
+  if (!is.null(E_family)) {
+    E_family <- match.arg(E_family, "qi"); stopifnot(R == C, is.null(offset_rows))
+    Vm <- mr$V_ilr_model; pat <- function(P) as.vector(crossprod(Vm, as.vector(t(P))))
+    cols <- sapply(seq_len(C), function(c) { L <- matrix(0, R, C); L[-c, c] <- 1; pat(L) })   # popularity of column c among defectors
+    own <- sapply(seq_len(R), function(r) { L <- matrix(0, R, C); L[r, r] <- 1; pat(L) })     # own-column (loyalty) cell of row r
+    qs <- qr(cbind(cols, own)); p <- qs$rank; ROT <- qr.Q(qr(qr.Q(qs)[, seq_len(p), drop = FALSE]), complete = TRUE)
+    w0 <- colSums(cm) / sum(cm); P0 <- matrix(0, R, C)
+    for (r in seq_len(R)) { P0[r, -r] <- 0.25 * w0[-r] / sum(w0[-r]); P0[r, r] <- 0.75 }
+    e0 <- pat(log(P0)); raw0 <- as.vector(crossprod(ROT[, seq_len(p), drop = FALSE], e0))
+    stopifnot(max(abs(ROT[, seq_len(p), drop = FALSE] %*% raw0 - e0)) < 1e-8)            # the centre table is in the family
+    fam <- list(ROT = ROT, p = p, id = c(seq_len(p), rep(p + 1L, Dm1 - p)), mode = c(rep("shared", p), "fixed"),
+                a = c(raw0, 0), b = c(rep(E_family_sd, p), 1), fixed = c(rep(0, p), 0))
+    E_init <- raw0
+    message(sprintf("average table restricted to the %s family: %d free coordinates of %d (the rest fixed at 0)", E_family, p, Dm1))
+  }
   fit <- ssEI::ei_estimate(
     rm, cm,
     E_rc_fixed = rep(0, R * C - 1), sigma_jrc_fixed = rep(.5, R * C - 1),
@@ -554,15 +577,16 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     row_decompose = TRUE,
     rotate_llrep = TRUE,                                    # ignored by the margin model
     margin_reduction = mr,
-    ROT_E_rc = diag(Dm1), rotate_E_rc = FALSE,
+    ROT_E_rc = if (is.null(fam)) diag(Dm1) else fam$ROT, rotate_E_rc = !is.null(fam),
     link_E_rc = NULL, rotate_lambda = "none",
     sigma_group_id = sig_id, sigma_group_mode = rep(if (is.null(sigma_fixed)) "shared" else "fixed", G),   # sigma shared by the areas, or fixed
     sigma_group_fixed_value = if (is.null(sigma_fixed)) 0 else rep_len(log(sigma_fixed), G),
     sigma_group_prior_a = rep(sigma_prior[1], G), sigma_group_prior_b = rep(sigma_prior[2], G),
     sigma_ncp = TRUE,
-    E_rc_group_id = 1:Dm1, E_rc_group_mode = rep("shared", Dm1),
-    E_rc_group_prior_a = unname(E_mean), E_rc_group_prior_b = unname(E_sd),
-    E_rc_node_logit = TRUE,
+    E_rc_group_id = if (is.null(fam)) 1:Dm1 else fam$id, E_rc_group_mode = if (is.null(fam)) rep("shared", Dm1) else fam$mode,
+    E_rc_group_prior_a = if (is.null(fam)) unname(E_mean) else fam$a, E_rc_group_prior_b = if (is.null(fam)) unname(E_sd) else fam$b,
+    E_rc_group_fixed_value = if (is.null(fam)) 0 else fam$fixed,
+    E_rc_node_logit = is.null(fam),
     neutral_logit = "llrep", lambda_centred = FALSE,
     sigma_floor = 0, prior_sigma_c_scale = 2, prior_lambda_raw_scale = 12,
     prior_gamma_shape = 2, prior_gamma_rate = .5,
