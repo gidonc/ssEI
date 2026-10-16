@@ -6,7 +6,10 @@
 ##   seg       segregation: spread of the areas' row compositions (log-ratio sd)
 ##   J, R, C, N_mean: areas, rows, columns, mean area size (sizes lognormal, sd 0.5 on the log scale)
 ## Returns list(kc = J x R x C counts, E = the average row-conditional table used, rates = J x R x C true expected rates, settings).
-sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, seg = 0.8, N_mean = 5000, seed = 1) {
+##   assim     assimilation of small groups (row-specific contextual effect): row r's rates in area j become (1 - w) x its own rates
+##             + w x the other rows' rates weighted by their shares, w = inv_logit(-1.2 (log s_jr - log h)), h = the share at which a row
+##             is half assimilated. assim = 0: none; assim > 0: h = 0.05 * assim (so 1 gives half assimilation at a 5% share).
+sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, seg = 0.8, N_mean = 5000, seed = 1, assim = 0) {
   set.seed(seed)
   H <- function(n) { V <- matrix(0, n, n - 1); for (k in 1:(n - 1)) { V[1:k, k] <- 1 / sqrt(k * (k + 1)); V[k + 1, k] <- -k / sqrt(k * (k + 1)) }; V }
   ## average table: column popularity (unequal) + diagonal association (row r prefers column r when R = C; otherwise a monotone pattern)
@@ -25,11 +28,20 @@ sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, s
   Hc <- H(C)
   for (j in 1:J) {
     nr <- as.vector(rmultinom(1, N[j], rs[j, ]))
+    own <- matrix(0, R, C)
     for (r in 1:R) {
       l <- log(E[r, ]) + shift[j, ] + as.vector(Hc %*% rnorm(C - 1, 0, sigma))
-      p <- exp(l - max(l)); p <- p / sum(p); rates[j, r, ] <- p
+      p <- exp(l - max(l)); own[r, ] <- p / sum(p)
+    }
+    for (r in 1:R) {
+      p <- own[r, ]
+      if (assim > 0) {
+        w <- plogis(-1.2 * (log(rs[j, r]) - log(0.05 * assim))); o <- setdiff(1:R, r)
+        p <- (1 - w) * p + w * colSums(rs[j, o] * own[o, , drop = FALSE]) / sum(rs[j, o])
+      }
+      rates[j, r, ] <- p
       kc[j, r, ] <- if (nr[r] > 0) as.vector(rmultinom(1, nr[r], p)) else 0
     }
   }
-  list(kc = kc, E = E, rates = rates, settings = list(J = J, R = R, C = C, assoc = assoc, sort = sort, sigma = sigma, seg = seg, N_mean = N_mean, seed = seed))
+  list(kc = kc, E = E, rates = rates, settings = list(J = J, R = R, C = C, assoc = assoc, sort = sort, sigma = sigma, seg = seg, N_mean = N_mean, seed = seed, assim = assim))
 }
