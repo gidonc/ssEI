@@ -306,6 +306,9 @@ rw_coords <- function(kc, V_ilr) {
 ##   E_centre_shift  (experiments) moves the non-loyalty centres by this many prior sds, alternating in sign
 ##   offset_rows rows (names or indices) whose hierarchy mean is offset by each area's log column shares: the row splits like the area's
 ##               column margin apart from its E_rc departure (quasi-independence; e.g. spoilt ballots as a cross-section of the area)
+##   offset_sd   NULL = the offset rows' E_rc prior sds as usual; a number = the prior sd of every offset-row coordinate except the row's
+##               own-column split (when the row is also in loyal_rows), which keeps its usual sd: e.g. 0.05 holds the row at "splits like the
+##               area" apart from one free coefficient on its own column (for spoilt ballots: rejected on both halves)
 ##   E_sd_scale_offdiag  multiplies the E_rc prior sd of every coordinate except each row's loyalty split
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
@@ -371,7 +374,7 @@ rw_coords <- function(kc, V_ilr) {
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL,
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
                    directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
@@ -460,8 +463,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     if (Dm1 == 1) context <- t(context)
     context_fixed <- rep(1, Dm1); context_tau <- FALSE
     off_coord <- coord_row %in% off_ix; E_mean[off_coord] <- 0
+    if (!is.null(offset_sd)) E_sd[off_coord & !loy] <- offset_sd
     message(sprintf("offset rows %s: hierarchy mean shifted by the area's log column shares on %d coordinates; their E_rc prior centred on 0",
                     paste(dimnames(kc)[[2]][off_ix], collapse = ", "), sum(off_coord)))
+    if (!is.null(offset_sd)) message(sprintf("  offset-row prior sd %.3g on %d coordinates; own-column split free on %d", offset_sd, sum(off_coord & !loy), sum(off_coord & loy)))
   }
   ## starting values for E_rc: the prior centre, or the known table's row splits
   if (!is.null(directions)) {

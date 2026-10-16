@@ -2,12 +2,15 @@
 ## off-diagonal prior scale 0.5, quasi-independence centre, free interior, 2 chains x 1000) with offset rows.
 ## usage: Rscript experiments/scotland_structure/run_offset.R <tag> <out dir> [offset rows, comma-separated, default spoilt | none]
 a <- commandArgs(TRUE); tag <- a[1]; out <- a[2]; offs <- if (length(a) >= 3) a[3] else "spoilt"
+## optional 4th argument offset_sd: the offset rows also get their own-column ("loyalty") split, which stays free; the rest of the row is
+## held at the area's split with this prior sd
+osd <- if (length(a) >= 4 && a[4] != "none") as.numeric(a[4]) else NULL
 source("experiments/rowwise_helpers.R"); suppressMessages(source("experiments/data_prep.R"))
-d <- prep_scotland(7, 73); loyal <- d$row_names[1:4]; R <- 7; C <- 7; kc <- d$kc; dimnames(kc) <- list(NULL, d$row_names, d$col_names)
+d <- prep_scotland(7, 73); loyal <- d$row_names[1:4]; if (!is.null(osd)) loyal <- union(loyal, strsplit(offs, ",")[[1]]); R <- 7; C <- 7; kc <- d$kc; dimnames(kc) <- list(NULL, d$row_names, d$col_names)
 V <- rw_row_priority_basis(d$row_names, d$col_names, NULL, bisect_order = colSums(d$cm), loyal_rows = loyal)
 args <- list(rem_col = seq_len(R), tiers = c(1, 1, rep(2, C - 3)), loyalty_mean = qlogis(0.75), loyal_rows = loyal, E_sd_scale_offdiag = 0.5, E_centre = "qi")
 t0 <- Sys.time()
-fit <- do.call(rw_fit, c(list(kc, V, alloc = 3L), args, list(offset_rows = if (offs != "none") strsplit(offs, ",")[[1]],
+fit <- do.call(rw_fit, c(list(kc, V, alloc = 3L), args, list(offset_rows = if (offs != "none") strsplit(offs, ",")[[1]], offset_sd = osd,
                                                             interior = "free", sigma_prior = c(log(0.3), 0.5), chains = 2, cores = 2, iter = 1000, warmup = 500, seed = 1234)))
 mins <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 cv <- rstan::extract(fit, "cell_values")$cell_values; N <- sum(kc); kt <- apply(kc, 2:3, sum)
