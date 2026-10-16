@@ -1,15 +1,16 @@
 ## Scotland 7x7, 73 areas, average table restricted to a family (E_family): the default row-wise set-up (as the 'sco_base' run: loyalty for the four major parties, two sigma tiers,
 ## off-diagonal prior scale 0.5, free interior, 2 chains x 1000), with the average table restricted by E_family.
-## usage: Rscript experiments/scotland_structure/run_family.R <tag> <out dir> [family, default qi] [prior sd of the free coordinates, default 1.5] [sigma fixed | none]
+## usage: Rscript experiments/scotland_structure/run_family.R <tag> <out dir> [family, default qi] [prior sd of the free coordinates, default 1.5] [sigma fixed | none] [interior free | fixed | scaled]
 a <- commandArgs(TRUE); tag <- a[1]; out <- a[2]; fam <- if (length(a) >= 3) a[3] else "qi"; fsd <- if (length(a) >= 4) as.numeric(a[4]) else 1.5; offs <- "none"; osd <- NULL
 sfix <- if (length(a) >= 5 && a[5] != "none") as.numeric(a[5]) else NULL   # 5th argument: sigma fixed (weaker or stronger pooling), default estimated
+intr <- if (length(a) >= 6) a[6] else "free"                                   # 6th argument: interior free | fixed | scaled
 source("experiments/rowwise_helpers.R"); suppressMessages(source("experiments/data_prep.R"))
 d <- prep_scotland(7, 73); loyal <- d$row_names[1:4]; if (!is.null(osd)) loyal <- union(loyal, strsplit(offs, ",")[[1]]); R <- 7; C <- 7; kc <- d$kc; dimnames(kc) <- list(NULL, d$row_names, d$col_names)
 V <- rw_row_priority_basis(d$row_names, d$col_names, NULL, bisect_order = colSums(d$cm), loyal_rows = loyal)
 args <- list(rem_col = seq_len(R), tiers = c(1, 1, rep(2, C - 3)), loyalty_mean = qlogis(0.75), loyal_rows = loyal, E_sd_scale_offdiag = 0.5, E_centre = "qi")
 t0 <- Sys.time()
-fit <- do.call(rw_fit, c(list(kc, V, alloc = 3L), args, list(E_family = if (fam != "none") fam, E_family_sd = fsd, sigma_fixed = sfix,
-                                                            interior = "free", sigma_prior = c(log(0.3), 0.5), chains = 2, cores = 2, iter = 1000, warmup = 500, seed = 1234)))
+fit <- do.call(rw_fit, c(list(kc, V), args, list(E_family = if (fam != "none") fam, E_family_sd = fsd, sigma_fixed = sfix,
+                                                            interior = intr, sigma_prior = if (intr == "free") c(log(0.3), 0.5) else c(log(0.7), 0.7), alloc = if (intr == "fixed") 4L else 3L, chains = 2, cores = 2, iter = 1000, warmup = 500, seed = 1234)))
 mins <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 cv <- rstan::extract(fit, "cell_values")$cell_values; N <- sum(kc); kt <- apply(kc, 2:3, sum)
 est <- apply(cv, 2:4, mean); lo <- apply(cv, 2:4, quantile, 0.05); hi <- apply(cv, 2:4, quantile, 0.95); tot <- apply(cv, c(1, 3, 4), sum)
