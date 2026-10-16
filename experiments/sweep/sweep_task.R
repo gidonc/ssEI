@@ -59,13 +59,18 @@ if (p$method == "refs") {
   Vr <- rw_sbp_to_v(rw_cluster_sbp(rm + 0.5)); Vc <- rw_sbp_to_v(rw_cluster_sbp(cm + 0.5)); V <- cbind(kronecker(Vr, matrix(1 / sqrt(C), C, 1)), kronecker(diag(R), Vc))
   args <- list(rem_col = rep(which.max(colSums(cm)), R), tiers = rep(1, C - 1), loyal_rows = integer(0), E_centre = "qi")
   args <- switch(p$method, ssei_est = args, ssei_s08 = c(args, list(sigma_fixed = sqrt(trigamma(2)))),
-                 ssei_kingqi = c(args, list(E_alpha = 4, sigma_fixed = sqrt(trigamma(2)))), stop("unknown method"))
-  fit <- do.call(rw_fit, c(list(kc, V, alloc = 3L), args, list(chains = 2, cores = 2, iter = 800, warmup = 400, seed = 1234, refresh = 0)))
+                 ssei_kingqi = c(args, list(E_alpha = 4, sigma_fixed = sqrt(trigamma(2)))),
+                 ssei_fixed = c(args, list(interior = "fixed", sigma_prior = c(log(0.7), 0.7))),          # low-dimensional base: E_rc raked to each area
+                 ssei_scaled = c(args, list(interior = "scaled", sigma_prior = c(log(0.7), 0.7))),        # base + interior scaled by an estimated kappa
+                 stop("unknown method"))
+  alloc <- if (p$method == "ssei_fixed") 4L else 3L
+  fit <- do.call(rw_fit, c(list(kc, V, alloc = alloc), args, list(chains = 2, cores = 2, iter = 800, warmup = 400, seed = 1234, refresh = 0)))
   cv <- rstan::extract(fit, "cell_values")$cell_values; est <- setNames(list(apply(cv, 2:4, mean)), p$method)
   lo <- apply(cv, 2:4, quantile, 0.05); hi <- apply(cv, 2:4, quantile, 0.95); tot <- apply(cv, c(1, 3, 4), sum)
   cover <- c(area = mean((kc >= lo & kc <= hi)[kc >= 50]), national = mean(kt >= apply(tot, 2:3, quantile, 0.05) & kt <= apply(tot, 2:3, quantile, 0.95)))
   sp <- do.call(rbind, rstan::get_sampler_params(fit, inc_warmup = FALSE)); s <- rstan::summary(fit, pars = "E_rc")$summary
-  diag <- c(rhat = max(s[, "Rhat"]), n_eff_min = min(s[, "n_eff"]), divergent = sum(sp[, "divergent__"]))
+  diag <- c(rhat = max(s[, "Rhat"]), n_eff_min = min(s[, "n_eff"]), divergent = sum(sp[, "divergent__"]),
+            kappa = if ("mp_kappa" %in% fit@model_pars && fit@par_dims$mp_kappa > 0) mean(rstan::extract(fit, "mp_kappa")$mp_kappa) else NA)
 }
 res <- lapply(est, function(e) c(err = 50 * sum(abs(e - kc)) / N, nat = 50 * sum(abs(apply(e, 2:3, sum) - kt)) / N))
 ## screening measures available from the margins alone (for relating results to observable features)
