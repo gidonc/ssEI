@@ -375,6 +375,8 @@ rw_coords <- function(kc, V_ilr) {
 ##   sigma_fixed the area spread fixed instead of estimated (one value, or one per sigma group). Under a symmetric Dirichlet(a) every ILR
 ##               balance of a row has variance trigamma(a) and they are uncorrelated, so sqrt(trigamma(2)) = 0.80 matches King's area-level
 ##               Dirichlet at its prior mean (alpha_rc about 2). The margins push an estimated sigma down when there is sorting across areas.
+##   sigma_rows_fixed  named vector (row name = sigma): those rows' coordinates get their own sigma group, fixed at the value; the other
+##               groups are still estimated. E.g. c(spoilt = 0.8): the areas' spoilt splits are not used to learn how much areas differ there.
 ##   sigma_groups  one integer per model coordinate (overrides tiers), e.g. rep(1:R, each = C - 1) for one sigma per row
 ##   mix_rows    rows that mix (names or positions); NULL = all rows; the others have w = 0
 ##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
@@ -387,7 +389,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5, E_family_fix = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -551,8 +553,22 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     message(sprintf("E_rc started at the known table's row splits (%d of %d coordinates)", sum(is.finite(nl)), Dm1))
   }
   sig_id <- if (!is.null(sigma_groups)) as.integer(sigma_groups) else if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
-  G <- max(sig_id)
   stopifnot(length(sig_id) == Dm1)
+  sig_mode <- rep(if (is.null(sigma_fixed)) "shared" else "fixed", max(sig_id))
+  sig_val <- if (is.null(sigma_fixed)) rep(0, max(sig_id)) else rep_len(log(sigma_fixed), max(sig_id))
+  if (!is.null(sigma_rows_fixed)) {
+    stopifnot(is.null(sigma_fixed), !is.null(names(sigma_rows_fixed)))
+    sf_ix <- match(names(sigma_rows_fixed), dimnames(kc)[[2]])
+    if (anyNA(sf_ix)) stop("sigma_rows_fixed: unknown row name(s) ", paste(names(sigma_rows_fixed)[is.na(sf_ix)], collapse = ", "))
+    key <- ifelse(coord_row %in% sf_ix, paste0("f", coord_row), paste0("s", sig_id))
+    uk <- unique(key); sig_id <- match(key, uk)
+    is_f <- startsWith(uk, "f")
+    sig_mode <- ifelse(is_f, "fixed", "shared")
+    sig_val <- rep(0, length(uk)); sig_val[is_f] <- log(unname(sigma_rows_fixed[match(as.integer(sub("^f", "", uk[is_f])), sf_ix)]))
+    message(sprintf("sigma fixed for row(s) %s (%d coordinates); %d other sigma group(s) estimated",
+                    paste(sprintf("%s = %.2f", names(sigma_rows_fixed), sigma_rows_fixed), collapse = ", "), sum(coord_row %in% sf_ix), sum(!is_f)))
+  }
+  G <- max(sig_id); n_sig_est <- sum(sig_mode == "shared")
   ## E_family: the average table restricted to a subspace (see the argument notes)
   fam <- NULL
   if (!is.null(E_family)) {
@@ -591,8 +607,8 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     margin_reduction = mr,
     ROT_E_rc = if (is.null(fam)) diag(Dm1) else fam$ROT, rotate_E_rc = !is.null(fam),
     link_E_rc = NULL, rotate_lambda = "none",
-    sigma_group_id = sig_id, sigma_group_mode = rep(if (is.null(sigma_fixed)) "shared" else "fixed", G),   # sigma shared by the areas, or fixed
-    sigma_group_fixed_value = if (is.null(sigma_fixed)) 0 else rep_len(log(sigma_fixed), G),
+    sigma_group_id = sig_id, sigma_group_mode = sig_mode,   # sigma shared by the areas, or fixed
+    sigma_group_fixed_value = sig_val,
     sigma_group_prior_a = rep(sigma_prior[1], G), sigma_group_prior_b = rep(sigma_prior[2], G),
     sigma_ncp = TRUE,
     E_rc_group_id = if (is.null(fam)) 1:Dm1 else fam$id, E_rc_group_mode = if (is.null(fam)) rep("shared", Dm1) else fam$mode,
@@ -604,10 +620,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_init, if (is.null(sigma_fixed)) G else 0L, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, n_sig_est, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, if (is.null(sigma_fixed)) G else 0L, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, n_sig_est, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
