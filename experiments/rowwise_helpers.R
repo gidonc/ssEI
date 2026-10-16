@@ -312,6 +312,10 @@ rw_coords <- function(kc, V_ilr) {
 ##               with rows and columns in the same order). Implemented as E_rc = ROT %*% E_raw with an orthonormal ROT whose first p columns
 ##               span the family; the other raw coordinates are fixed at 0; E_rc_node_logit is switched off. Prior on the free raw
 ##               coordinates: normal(projection of a QI table with loyalty 0.75 and popularity = the column margin shares, E_family_sd).
+##   E_family_fix  with E_family: directions NOT learned from the cross-area pattern, held at a stated value. A list of
+##               list(row = <name or index>, share = <own-column share>): the row's own-column-against-the-rest balance is fixed at the
+##               value it takes when the row keeps that share of its voters and splits the rest like the prior-centre popularity;
+##               the rest of the family stays free. E.g. list(list(row = "spoilt", share = 0.10)) for ballots rejected on both halves.
 ##   offset_sd   NULL = the offset rows' E_rc prior sds as usual; a number = the prior sd of every offset-row coordinate except the row's
 ##               own-column split (when the row is also in loyal_rows), which keeps its usual sd: e.g. 0.05 holds the row at "splits like the
 ##               area" apart from one free coefficient on its own column (for spoilt ballots: rejected on both halves)
@@ -380,7 +384,7 @@ rw_coords <- function(kc, V_ilr) {
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5,
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5, E_family_fix = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
                    directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
@@ -556,14 +560,22 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     Vm <- mr$V_ilr_model; pat <- function(P) as.vector(crossprod(Vm, as.vector(t(P))))
     cols <- sapply(seq_len(C), function(c) { L <- matrix(0, R, C); L[-c, c] <- 1; pat(L) })   # popularity of column c among defectors
     own <- sapply(seq_len(R), function(r) { L <- matrix(0, R, C); L[r, r] <- 1; pat(L) })     # own-column (loyalty) cell of row r
-    qs <- qr(cbind(cols, own)); p <- qs$rank; ROT <- qr.Q(qr(qr.Q(qs)[, seq_len(p), drop = FALSE]), complete = TRUE)
+    qs <- qr(cbind(cols, own)); p <- qs$rank; QS <- qr.Q(qs)[, seq_len(p), drop = FALSE]
     w0 <- colSums(cm) / sum(cm); P0 <- matrix(0, R, C)
     for (r in seq_len(R)) { P0[r, -r] <- 0.25 * w0[-r] / sum(w0[-r]); P0[r, r] <- 0.75 }
-    e0 <- pat(log(P0)); raw0 <- as.vector(crossprod(ROT[, seq_len(p), drop = FALSE], e0))
-    stopifnot(max(abs(ROT[, seq_len(p), drop = FALSE] %*% raw0 - e0)) < 1e-8)            # the centre table is in the family
-    fam <- list(ROT = ROT, p = p, id = c(seq_len(p), rep(p + 1L, Dm1 - p)), mode = c(rep("shared", p), "fixed"),
-                a = c(raw0, 0), b = c(rep(E_family_sd, p), 1), fixed = c(rep(0, p), 0))
+    fix_ix <- if (is.null(E_family_fix)) integer(0) else sapply(E_family_fix, function(f) if (is.character(f$row)) match(f$row, dimnames(kc)[[2]]) else as.integer(f$row))
+    for (k in seq_along(fix_ix)) { r <- fix_ix[k]; sh <- E_family_fix[[k]]$share; P0[r, -r] <- (1 - sh) * w0[-r] / sum(w0[-r]); P0[r, r] <- sh }
+    e0 <- pat(log(P0)); stopifnot(max(abs(QS %*% crossprod(QS, e0) - e0)) < 1e-8)          # the centre table is in the family
+    ## fixed directions: each fixed row's own-column-against-the-rest balance (it lies in the family); the free part is the rest of the family
+    U <- if (length(fix_ix)) qr.Q(qr(sapply(fix_ix, function(r) { L <- matrix(0, R, C); L[r, r] <- 1; L[r, ] <- L[r, ] - 1 / C; pat(L) }))) else matrix(0, Dm1, 0)
+    Qfree <- if (ncol(U)) qr.Q(qr(QS - U %*% crossprod(U, QS)))[, seq_len(p - ncol(U)), drop = FALSE] else QS
+    ROT <- cbind(U, Qfree); ROT <- cbind(ROT, qr.Q(qr(ROT), complete = TRUE)[, -seq_len(p), drop = FALSE])
+    nf <- ncol(U); pf <- p - nf; vfix <- as.vector(crossprod(U, e0)); raw0 <- as.vector(crossprod(Qfree, e0))
+    fam <- list(ROT = ROT, p = p, id = c(seq_len(nf), nf + seq_len(pf), rep(p + 1L, Dm1 - p)), mode = c(rep("fixed", nf), rep("shared", pf), "fixed"),
+                a = c(rep(0, nf), raw0, 0), b = c(rep(1, nf), rep(E_family_sd, pf), 1), fixed = c(vfix, rep(0, pf), 0))
     E_init <- raw0
+    if (nf) message(sprintf("  held (not learned): own-column share of %s at %s", paste(dimnames(kc)[[2]][fix_ix], collapse = ", "),
+                            paste(sapply(E_family_fix, `[[`, "share"), collapse = ", ")))
     message(sprintf("average table restricted to the %s family: %d free coordinates of %d (the rest fixed at 0)", E_family, p, Dm1))
   }
   fit <- ssEI::ei_estimate(
