@@ -1,0 +1,23 @@
+## Scotland 7x7, 73 areas: the default row-wise set-up (as the 'sco_base' run: loyalty for the four major parties, two sigma tiers,
+## off-diagonal prior scale 0.5, quasi-independence centre, free interior, 2 chains x 1000) with offset rows.
+## usage: Rscript experiments/scotland_structure/run_offset.R <tag> <out dir> [offset rows, comma-separated, default spoilt | none]
+a <- commandArgs(TRUE); tag <- a[1]; out <- a[2]; offs <- if (length(a) >= 3) a[3] else "spoilt"
+source("experiments/rowwise_helpers.R"); suppressMessages(source("experiments/data_prep.R"))
+d <- prep_scotland(7, 73); loyal <- d$row_names[1:4]; R <- 7; C <- 7; kc <- d$kc; dimnames(kc) <- list(NULL, d$row_names, d$col_names)
+V <- rw_row_priority_basis(d$row_names, d$col_names, NULL, bisect_order = colSums(d$cm), loyal_rows = loyal)
+args <- list(rem_col = seq_len(R), tiers = c(1, 1, rep(2, C - 3)), loyalty_mean = qlogis(0.75), loyal_rows = loyal, E_sd_scale_offdiag = 0.5, E_centre = "qi")
+t0 <- Sys.time()
+fit <- do.call(rw_fit, c(list(kc, V, alloc = 3L), args, list(offset_rows = if (offs != "none") strsplit(offs, ",")[[1]],
+                                                            interior = "free", sigma_prior = c(log(0.3), 0.5), chains = 2, cores = 2, iter = 1000, warmup = 500, seed = 1234)))
+mins <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
+cv <- rstan::extract(fit, "cell_values")$cell_values; N <- sum(kc); kt <- apply(kc, 2:3, sum)
+est <- apply(cv, 2:4, mean); lo <- apply(cv, 2:4, quantile, 0.05); hi <- apply(cv, 2:4, quantile, 0.95); tot <- apply(cv, c(1, 3, 4), sum)
+s <- rstan::summary(fit, pars = c("E_rc", "sigma_group_mu"))$summary; sp <- do.call(rbind, rstan::get_sampler_params(fit, inc_warmup = FALSE))
+res <- list(tag = tag, offsets = offs, mins = mins, est = est, ei = 50 * sum(abs(est - kc)) / N, ei_sum = 50 * sum(abs(apply(est, 2:3, sum) - kt)) / N,
+            ei_row = 50 * apply(abs(est - kc), 2, sum) / N, row_err = 50 * apply(abs(est - kc), 2, sum) / apply(kc, 2, sum),
+            cover = mean((kc >= lo & kc <= hi)[kc >= 50]), cover_sum = mean(kt >= apply(tot, 2:3, quantile, 0.05) & kt <= apply(tot, 2:3, quantile, 0.95)),
+            nat_rates = apply(est, 2:3, sum) / rowSums(apply(est, 2:3, sum)), div = sum(sp[, "divergent__"]), rhat = max(s[, "Rhat"]), neff = min(s[, "n_eff"]))
+dir.create(out, showWarnings = FALSE, recursive = TRUE); saveRDS(res, file.path(out, paste0(tag, ".rds")))
+cat(sprintf("DONE %s (offsets %s): area %.2f | national %.2f | row errors %s | cover %.2f / %.2f | div %d Rhat %.3f n_eff %.0f | %.1f min\n", tag, offs, res$ei, res$ei_sum,
+            paste(sprintf("%.1f", res$row_err), collapse = " "), res$cover, res$cover_sum, res$div, res$rhat, res$neff, mins))
+cat("spoilt row, national split (%): estimate", paste(sprintf("%.1f", 100 * res$nat_rates[5, ]), collapse = " "), "| truth", paste(sprintf("%.1f", 100 * kt[5, ] / sum(kt[5, ])), collapse = " "), "\n")

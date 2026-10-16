@@ -304,6 +304,8 @@ rw_coords <- function(kc, V_ilr) {
 ##   E_centre    "uniform" (the logit of a uniform split) or "qi" (quasi-independence from loyalty estimated from the margins) for the non-loyalty coordinates
 ##   bloc, bloc_affinity  with bloc (named labels of the categories), adds bloc_affinity (a log odds ratio) to the coordinates that split a row's bloc partners from the rest
 ##   E_centre_shift  (experiments) moves the non-loyalty centres by this many prior sds, alternating in sign
+##   offset_rows rows (names or indices) whose hierarchy mean is offset by each area's log column shares: the row splits like the area's
+##               column margin apart from its E_rc departure (quasi-independence; e.g. spoilt ballots as a cross-section of the area)
 ##   E_sd_scale_offdiag  multiplies the E_rc prior sd of every coordinate except each row's loyalty split
 ##   ...         passed to ei_estimate and on to rstan::sampling, e.g. pars = ..., include = FALSE, or return_data = TRUE
 ##   loyalty_mean  NULL: every coordinate's prior centred on the logit of a uniform split. Otherwise the logit mean for the first (loyalty)
@@ -369,7 +371,7 @@ rw_coords <- function(kc, V_ilr) {
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
-                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
+                   E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
                    directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
@@ -443,6 +445,23 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   }
   if (!is.null(loyalty_mean)) {                              # the loyalty split is the first split of each row: it involves all C columns
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean
+  }
+  ## offset_rows (first term of the generative 'language' on log expected cells): for each named row, the area's hierarchy mean is shifted
+  ## by the area's own log column shares, log mu_jrc += log m_jc for that row. The row's E_rc coordinates then measure its departure from
+  ## "splits like the area's column margin" (quasi-independence; e.g. a spoilt-ballot row whose voters are a cross-section of the area),
+  ## and their prior is centred on 0. Implemented through the fixed-coefficient contextual route (lflag_E_cov = 3, coefficients 1).
+  if (!is.null(offset_rows)) {
+    if (!is.null(context)) stop("offset_rows and context cannot be combined yet")
+    off_ix <- if (is.character(offset_rows)) match(offset_rows, dimnames(kc)[[2]]) else as.integer(offset_rows)
+    stopifnot(!anyNA(off_ix))
+    lm_j <- log(cm + 0.5) - log(rowSums(cm + 0.5))                # J x C: log column shares of each area
+    context <- t(sapply(seq_len(J), function(j) { X <- matrix(0, R, C); X[off_ix, ] <- matrix(lm_j[j, ], length(off_ix), C, byrow = TRUE)
+      X[off_ix, ] <- X[off_ix, , drop = FALSE] - rowMeans(X[off_ix, , drop = FALSE]); as.vector(crossprod(mr$V_ilr_model, as.vector(t(X)))) }))
+    if (Dm1 == 1) context <- t(context)
+    context_fixed <- rep(1, Dm1); context_tau <- FALSE
+    off_coord <- coord_row %in% off_ix; E_mean[off_coord] <- 0
+    message(sprintf("offset rows %s: hierarchy mean shifted by the area's log column shares on %d coordinates; their E_rc prior centred on 0",
+                    paste(dimnames(kc)[[2]][off_ix], collapse = ", "), sum(off_coord)))
   }
   ## starting values for E_rc: the prior centre, or the known table's row splits
   if (!is.null(directions)) {
