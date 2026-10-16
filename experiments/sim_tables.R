@@ -12,7 +12,9 @@
 ##   sort_rank rank of the sorting map Phi: 0 = full (as drawn); k > 0 = its best rank-k approximation (after centring), from the same
 ##             random draw, so the data otherwise match the full-rank dataset with the same seed. Rank 1 = people sort on one latent
 ##             dimension s_j = v' lc_j (returned as sort_dir = v, the row loading, and sort_score = s).
-sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, seg = 0.8, N_mean = 5000, seed = 1, assim = 0, sort_rank = 0) {
+##   sort_form "log" (default): the shift is linear in the centred log composition; "share": linear in the centred shares themselves
+##             (same draws otherwise). Tests whether a method's gain comes from matching the log functional form.
+sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, seg = 0.8, N_mean = 5000, seed = 1, assim = 0, sort_rank = 0, sort_form = "log") {
   set.seed(seed)
   H <- function(n) { V <- matrix(0, n, n - 1); for (k in 1:(n - 1)) { V[1:k, k] <- 1 / sqrt(k * (k + 1)); V[k + 1, k] <- -k / sqrt(k * (k + 1)) }; V }
   ## average table: column popularity (unequal) + diagonal association (row r prefers column r when R = C; otherwise a monotone pattern)
@@ -24,7 +26,7 @@ sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, s
   mu_r <- log(seq(2, 0.5, length.out = R)); Zr <- matrix(rnorm(J * (R - 1)), J, R - 1) %*% t(H(R)) * seg
   rs <- exp(sweep(Zr, 2, mu_r, "+")); rs <- rs / rowSums(rs)
   ## sorting: column shift = Phi %*% (centred log composition); Phi random but fixed for the seed, scaled so the shift sd is about `sort`
-  lc <- log(rs); lc <- lc - rowMeans(lc); lc <- sweep(lc, 2, colMeans(lc))
+  lc <- if (sort_form == "share") rs else log(rs); lc <- lc - rowMeans(lc); lc <- sweep(lc, 2, colMeans(lc))
   Phi <- matrix(rnorm(C * R), C, R)
   Pc <- diag(C) - 1 / C; Pr <- diag(R) - 1 / R; sv <- svd(Pc %*% Phi %*% Pr)                      # centred map: what reaches the shift
   k <- if (sort_rank > 0) min(sort_rank, length(sv$d)) else length(sv$d)
@@ -53,5 +55,5 @@ sim_tables <- function(J = 60, R = 4, C = 4, assoc = 1, sort = 0, sigma = 0.3, s
     }
   }
   list(kc = kc, E = E, rates = rates, sort_dir = sort_dir, sort_score = sort_score,
-       settings = list(J = J, R = R, C = C, assoc = assoc, sort = sort, sigma = sigma, seg = seg, N_mean = N_mean, seed = seed, assim = assim, sort_rank = sort_rank))
+       settings = list(J = J, R = R, C = C, assoc = assoc, sort = sort, sigma = sigma, seg = seg, N_mean = N_mean, seed = seed, assim = assim, sort_rank = sort_rank, sort_form = sort_form))
 }

@@ -2,7 +2,7 @@
 a <- commandArgs(TRUE); out <- if (length(a) >= 1) a[1] else "sweep_out"
 fs <- list.files(out, pattern = "\\.rds$", full.names = TRUE); rows <- list()
 for (f in fs) { x <- readRDS(f); p <- x$params
-  for (m in names(x$res)) rows[[length(rows) + 1]] <- data.frame(p[, c("assoc", "sort", "assim", "seg", "sigma", "seed")], rank = if (is.null(p$rank)) 0L else p$rank, method = m,
+  for (m in names(x$res)) rows[[length(rows) + 1]] <- data.frame(p[, c("assoc", "sort", "assim", "seg", "sigma", "seed")], rank = if (is.null(p$rank)) 0L else p$rank, form = if (is.null(p$form)) "log" else p$form, method = m,
     err = x$res[[m]]["err"], nat = x$res[[m]]["nat"], cover = if (m %in% c("indep", "goodman_raked", "rake_true")) NA else x$cover[["area"]],
     cover_nat = if (m %in% c("indep", "goodman_raked", "rake_true")) NA else x$cover[["national"]],
     rhat = if (is.null(x$diag)) NA else x$diag[["rhat"]], n_eff_min = if (is.null(x$diag)) NA else x$diag[["n_eff_min"]], mins = x$mins, row.names = NULL) }

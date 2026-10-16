@@ -4,12 +4,12 @@
 ##          ssei_est (sigma estimated) | ssei_s08 (sigma fixed 0.80) | ssei_kingqi (Dirichlet(4) mean prior on quasi-independence + sigma 0.80)
 a <- commandArgs(TRUE); task <- as.integer(a[1]); out <- if (length(a) >= 2) a[2] else "sweep_out"; gridf <- if (length(a) >= 3) a[3] else "experiments/sweep/grid.csv"
 g <- read.csv(gridf); p <- g[g$task == task, ]; stopifnot(nrow(p) == 1); dir.create(out, showWarnings = FALSE, recursive = TRUE)
-if (is.null(p$rank)) p$rank <- 0L                                               # rank of the sorting map (0 = full); older grids have no column
-tag <- sprintf("t%04d_a%.1f_s%.2f_m%.0f_e%.1f_g%.2f_k%d_%d_%s", task, p$assoc, p$sort, p$assim, p$seg, p$sigma, p$rank, p$seed, p$method)
+if (is.null(p$form)) p$form <- "log"; if (is.null(p$rank)) p$rank <- 0L                                               # rank of the sorting map (0 = full); older grids have no column
+tag <- sprintf("t%04d_a%.1f_s%.2f_m%.0f_e%.1f_g%.2f_k%d%s_%d_%s", task, p$assoc, p$sort, p$assim, p$seg, p$sigma, p$rank, if (p$form == "log") "" else "sh", p$seed, p$method)
 outf <- file.path(out, paste0(tag, ".rds")); if (file.exists(outf)) { cat("exists:", outf, "\n"); quit(save = "no") }
 `%||%` <- function(x, y) if (is.null(x)) y else x; options(max.print = 5)
 suppressMessages({ source("experiments/rowwise_helpers.R"); source("experiments/sim_tables.R") })
-x <- sim_tables(J = 60, R = 4, C = 4, assoc = p$assoc, sort = p$sort, sigma = p$sigma, seg = p$seg, seed = p$seed, assim = p$assim, sort_rank = p$rank)
+x <- sim_tables(J = 60, R = 4, C = 4, assoc = p$assoc, sort = p$sort, sigma = p$sigma, seg = p$seg, seed = p$seed, assim = p$assim, sort_rank = p$rank, sort_form = p$form)
 kc <- x$kc; J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]; dimnames(kc) <- list(NULL, paste0("r", 1:R), paste0("c", 1:C))
 N <- sum(kc); kt <- apply(kc, 2:3, sum); rm <- apply(kc, 1:2, sum); cm <- apply(kc, c(1, 3), sum)
 rake <- function(seed) { o <- array(0, dim(kc)); for (j in 1:J) { X <- seed / sum(seed) + 1e-12
@@ -42,7 +42,8 @@ if (p$method == "refs") {
       f1 <- ctx_fit(L %*% a, FALSE); if (is.null(best) || f1$ssr < best$ssr) { best <- f1; a_best <- a } }
     ctx_fit(L %*% a_best)$est }
   est$goodman_rr1 <- rr1()
-  est$goodman_orc <- ctx_fit(lco %*% x$sort_dir)$est                             # the true sorting direction(s), effects estimated (oracle)
+  sco <- if (p$form == "share") { u <- xs - rowMeans(xs); sweep(u, 2, colMeans(u)) } else lco
+  est$goodman_orc <- ctx_fit(sco %*% x$sort_dir)$est                             # the true sorting direction(s), effects estimated (oracle)
 } else if (p$method == "king") {
   library(eiPack); df <- data.frame(rm, cm); names(df) <- c(paste0("R", 1:R), paste0("C", 1:C))
   f <- as.formula(paste0("cbind(", paste0("C", 1:C, collapse = ","), ") ~ cbind(", paste0("R", 1:R, collapse = ","), ")"))
