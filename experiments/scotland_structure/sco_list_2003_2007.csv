@@ -1,0 +1,128 @@
+year,region,party,list_votes,list_seats,const_seats
+2003,Glasgow,Lab,77540,0,10
+2003,Glasgow,SNP,34894,2,0
+2003,Glasgow,SSP,31216,2,0
+2003,Glasgow,Con,15299,1,0
+2003,Glasgow,LD,14839,1,0
+2003,Glasgow,Green,14570,1,0
+2003,Glasgow,SSCUP,4750,0,0
+2003,Glasgow,SocLab,3091,0,0
+2003,Glasgow,ProLife,2477,0,0
+2003,Glasgow,ScotUnionist,2349,0,0
+2003,Glasgow,BNP,2344,0,0
+2003,Glasgow,ScotPeoples,612,0,0
+2003,Glasgow,UKIP,552,0,0
+2003,Glasgow,Communist,345,0,0
+2007,Glasgow,Lab,78838,0,9
+2007,Glasgow,SNP,55832,4,1
+2007,Glasgow,LD,14767,1,0
+2007,Glasgow,Con,13751,1,0
+2007,Glasgow,Green,10759,1,0
+2007,Glasgow,Solidarity,8544,0,0
+2007,Glasgow,BNP,3865,0,0
+2007,Glasgow,SSCUP,3703,0,0
+2007,Glasgow,ScotChristian,2991,0,0
+2007,Glasgow,SocLab,2680,0,0
+2007,Glasgow,CPA,2626,0,0
+2007,Glasgow,SSP,2579,0,0
+2003,Lothians,Lab,65098,0,6
+2003,Lothians,SNP,43142,2,0
+2003,Lothians,Con,40173,1,1
+2003,Lothians,Green,31908,2,0
+2003,Lothians,LD,29237,0,2
+2003,Lothians,MargoMacDonald,27143,1,0
+2003,Lothians,SSP,14448,1,0
+2003,Lothians,Pensioners,5609,0,0
+2003,Lothians,Liberal,2573,0,0
+2003,Lothians,SocLab,2181,0,0
+2007,Lothians,SNP,76019,3,2
+2007,Lothians,Lab,75495,1,4
+2007,Lothians,Con,37548,1,1
+2007,Lothians,LD,36571,0,2
+2007,Lothians,Green,20147,1,0
+2007,Lothians,MargoMacDonald,19256,1,0
+2007,Lothians,SSCUP,4176,0,0
+2007,Lothians,Solidarity,2998,0,0
+2003,Central Scotland,Lab,106318,0,9
+2003,Central Scotland,SNP,59274,3,0
+2003,Central Scotland,Con,24121,1,0
+2003,Central Scotland,SSP,19016,1,0
+2003,Central Scotland,SSCUP,17146,1,0
+2003,Central Scotland,LD,15494,1,0
+2003,Central Scotland,Green,12248,0,0
+2003,Central Scotland,SocLab,3855,0,0
+2003,Central Scotland,Independent,1265,0,1
+2007,Central Scotland,Lab,112596,0,8
+2007,Central Scotland,SNP,89210,5,2
+2007,Central Scotland,Con,24253,1,0
+2007,Central Scotland,LD,14648,1,0
+2007,Central Scotland,Green,7204,0,0
+2007,Central Scotland,SSCUP,7060,0,0
+2007,Central Scotland,ScotChristian,5575,0,0
+2003,Highlands and Islands,SNP,39497,2,2
+2003,Highlands and Islands,Lab,37605,2,1
+2003,Highlands and Islands,LD,31655,0,5
+2003,Highlands and Islands,Con,26989,2,0
+2003,Highlands and Islands,Green,13935,1,0
+2003,Highlands and Islands,SSP,9000,0,0
+2003,Highlands and Islands,UKIP,1947,0,0
+2007,Highlands and Islands,SNP,63979,2,4
+2007,Highlands and Islands,LD,37001,0,4
+2007,Highlands and Islands,Lab,32952,3,0
+2007,Highlands and Islands,Con,23334,2,0
+2007,Highlands and Islands,Green,8602,0,0
+2007,Highlands and Islands,ScotChristian,6332,0,0
+2003,Mid Scotland and Fife,Lab,63239,0,5
+2003,Mid Scotland and Fife,SNP,57631,2,3
+2003,Mid Scotland and Fife,Con,43941,3,0
+2003,Mid Scotland and Fife,LD,30112,1,1
+2003,Mid Scotland and Fife,Green,17147,1,0
+2003,Mid Scotland and Fife,SSP,11401,0,0
+2003,Mid Scotland and Fife,Pensioners,8380,0,0
+2007,Mid Scotland and Fife,SNP,90090,1,5
+2007,Mid Scotland and Fife,Lab,71922,3,2
+2007,Mid Scotland and Fife,Con,44341,3,0
+2007,Mid Scotland and Fife,LD,36195,0,2
+2007,Mid Scotland and Fife,Green,10318,0,0
+2007,Mid Scotland and Fife,SSCUP,5523,0,0
+2003,North East Scotland,SNP,66463,1,4
+2003,North East Scotland,Lab,49189,2,2
+2003,North East Scotland,LD,45831,0,3
+2003,North East Scotland,Con,42318,3,0
+2003,North East Scotland,Green,12724,1,0
+2003,North East Scotland,SSP,10226,0,0
+2003,North East Scotland,Pensioners,5584,0,0
+2003,North East Scotland,Fishing,5566,0,0
+2007,North East Scotland,SNP,105265,2,6
+2007,North East Scotland,Lab,52125,2,1
+2007,North East Scotland,LD,40934,1,2
+2007,North East Scotland,Con,37666,2,0
+2007,North East Scotland,Green,8148,0,0
+2007,North East Scotland,SSCUP,3874,0,0
+2003,South of Scotland,Lab,78955,0,5
+2003,South of Scotland,Con,63827,2,2
+2003,South of Scotland,SNP,48371,3,0
+2003,South of Scotland,LD,27026,0,2
+2003,South of Scotland,Green,15062,1,0
+2003,South of Scotland,SSP,14228,1,0
+2003,South of Scotland,Pensioners,9082,0,0
+2007,South of Scotland,Lab,79762,0,5
+2007,South of Scotland,SNP,77053,5,0
+2007,South of Scotland,Con,62475,1,3
+2007,South of Scotland,LD,28040,1,1
+2007,South of Scotland,Green,9254,0,0
+2007,South of Scotland,SSCUP,5335,0,0
+2003,West of Scotland,Lab,83931,0,8
+2003,West of Scotland,SNP,50387,3,0
+2003,West of Scotland,Con,40261,2,0
+2003,West of Scotland,LD,31580,1,0
+2003,West of Scotland,SSP,18591,1,0
+2003,West of Scotland,Green,14544,0,0
+2003,West of Scotland,SSCUP,7100,0,0
+2003,West of Scotland,Independent,0,0,1
+2007,West of Scotland,Lab,91725,0,8
+2007,West of Scotland,SNP,75953,4,1
+2007,West of Scotland,Con,40637,2,0
+2007,West of Scotland,LD,22515,1,0
+2007,West of Scotland,Green,8152,0,0
+2007,West of Scotland,SSCUP,5231,0,0
