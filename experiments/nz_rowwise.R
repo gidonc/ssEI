@@ -18,6 +18,8 @@ E_SD_SCALE_SMALL <- 1; E_SD_SCALE_OFFDIAG <- 1;
 ## E_SD_SCALE_SMALL / E_SD_SCALE_OFFDIAG < 1 tighten the E_rc prior sd (small-column coordinates / all but the loyalty splits)
 E_CENTRE <- "uniform"; BLOC_AFFINITY <- 0; E_CENTRE_SHIFT <- 0;   # E_CENTRE "qi": non-loyalty coordinates centred on quasi-independence (see rw_qi_centre)
 BLOCS <- TRUE;   # FALSE: no blocs, the tree is loyalty then bisections of the other columns, largest columns first (the general default)
+NAT_N_EFF <- NULL   # known national split-ticket totals: NULL = not used; 0 = exact counts (the sum of the electorates in the
+                    # data, i.e. the official figures when every electorate is used); n > 0 = the same table treated as a survey of size n
 
 d <- prep_nz(YEAR, SIZE, ROWS, N_AREAS)
 R <- length(d$row_names); C <- length(d$col_names)
@@ -33,11 +35,12 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               loyalty_mean = qlogis(0.75),
               E_sd_scale_small = E_SD_SCALE_SMALL, E_sd_scale_offdiag = E_SD_SCALE_OFFDIAG,
               E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY, E_centre_shift = E_CENTRE_SHIFT,
+              nat_table = if (!is.null(NAT_N_EFF)) apply(kc, 2:3, sum), nat_n_eff = if (is.null(NAT_N_EFF)) 0 else NAT_N_EFF,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
 
 ## Set BM_SAVE <- TRUE before sourcing to save this fit in the form used to compare with other methods (experiments/benchmark)
 if (isTRUE(get0("BM_SAVE"))) {
   source("experiments/benchmark/bm_lib.R"); nm <- sprintf("nz%d_%d", YEAR, SIZE)
-  if (ROWS == "candidate" && dim(kc)[1] == bm_data(nm)$n_areas) bm_ssei_save(fit, kc, nm, label = sprintf("ssEI alloc %d", ALLOC))
+  if (ROWS == "candidate" && dim(kc)[1] == bm_data(nm)$n_areas) bm_ssei_save(fit, kc, nm, label = sprintf("ssEI alloc %d%s", ALLOC, if (is.null(NAT_N_EFF)) "" else paste0(" nat-", NAT_N_EFF)))
   else message("not saved: the benchmark uses every electorate with the candidate vote on the rows")
 }

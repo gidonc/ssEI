@@ -13,6 +13,26 @@ library(ssEI)
 ## ---------------------------------------------------------------------------
 
 ## within-row basis from a sign matrix (one column per split: +1 / -1 / 0)
+## Sequential binary partition of the categories of one margin from its observed area shares X (areas x categories): average-linkage
+## clustering of Aitchison's variation matrix var(log(x_i / x_j)), split from the top of the tree. Categories whose shares move together
+## across areas end up in the same group, so the balances between groups vary most and those within groups least.
+rw_cluster_sbp <- function(X, labels = colnames(X)) {
+  L <- log(X); n <- ncol(X)
+  T <- outer(seq_len(n), seq_len(n), Vectorize(function(i, j) var(L[, i] - L[, j]))); dimnames(T) <- list(labels, labels)
+  h <- hclust(as.dist(T), "average"); S <- matrix(0, n, 0)
+  members <- function(i) if (i < 0) -i else c(members(h$merge[i, 1]), members(h$merge[i, 2]))
+  rec <- function(i) { if (i < 0) return(invisible()); v <- numeric(n); v[members(h$merge[i, 1])] <- 1; v[members(h$merge[i, 2])] <- -1
+                       S <<- cbind(S, v); rec(h$merge[i, 1]); rec(h$merge[i, 2]) }
+  rec(nrow(h$merge)); dimnames(S) <- list(labels, NULL); S
+}
+
+## Full-table basis with no margin given priority: row-margin balances, column-margin balances, then the interaction as products of the two
+## (all orthonormal; cells in row-major order). Vr: R x (R - 1), Vc: C x (C - 1), e.g. rw_sbp_to_v(rw_cluster_sbp(...)).
+rw_symmetric_basis <- function(Vr, Vc) {
+  R <- nrow(Vr); C <- nrow(Vc)
+  cbind(kronecker(Vr, matrix(1 / sqrt(C), C, 1)), kronecker(matrix(1 / sqrt(R), R, 1), Vc), kronecker(Vr, Vc))
+}
+
 rw_sbp_to_v <- function(S) {
   V <- matrix(0, nrow(S), ncol(S))
   for (k in seq_len(ncol(S))) {
@@ -156,11 +176,16 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
-rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3)) {
+rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0, n_mix = 0) {
   function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
                     mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
                     E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log_sigma, n_sigma))),
-               if (!is.null(kappa)) list(mp_kappa = as.array(kappa)))
+               if (!is.null(kappa)) list(mp_kappa = as.array(kappa)),
+               if (n_corr_raw > 0) list(corr_raw = as.array(rep(0, n_corr_raw))),
+               if (n_dir_groups > 0) list(dir_tau = as.array(rep(0.2, n_dir_groups))),
+               if (n_ctx > 0) list(E_cov_gamma = as.array(rep(0, n_ctx))),
+               if (n_ctx_groups > 0) list(E_cov_tau = as.array(rep(0.1, n_ctx_groups))),
+               if (n_mix > 0) list(mix_a = as.array(rep(-4, n_mix)), mix_b = as.array(-1)))
 }
 
 
@@ -255,6 +280,16 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
   out
 }
 
+## The model's hierarchy coordinates (rows conditioned: the within-row coordinates of V_ilr), described by row and by the
+## columns on each side of the split, numbered as corr_blocks expects. kc gives the row margins and the category names.
+rw_coords <- function(kc, V_ilr) {
+  R <- dim(kc)[2]; C <- dim(kc)[3]; rn <- if (is.null(dimnames(kc)[[2]])) paste0("r", 1:R) else dimnames(kc)[[2]]; cn <- if (is.null(dimnames(kc)[[3]])) paste0("c", 1:C) else dimnames(kc)[[3]]
+  V <- build_margin_reduction(V_ilr, apply(kc, c(1, 2), sum), R = R, C = C, build_rot = FALSE)$V_ilr_model
+  do.call(rbind, lapply(seq_len(ncol(V)), function(k) { v <- V[, k]; nz <- which(abs(v) > 1e-10)
+    r <- ((nz[1] - 1) %/% C) + 1; pos <- ((which(v > 1e-10) - 1) %% C) + 1; neg <- ((which(v < -1e-10) - 1) %% C) + 1
+    data.frame(coord = k, row = rn[r], plus = paste(cn[pos], collapse = "+"), minus = paste(cn[neg], collapse = "+")) }))
+}
+
 ## Fit one table and report. All the choices are arguments; the defaults are the senc configuration.
 ##   kc          true cells (areas x R x C), used only to score the fit
 ##   V_ilr       orthonormal basis, row-margin coordinates first
@@ -283,13 +318,61 @@ rw_bloc_coords <- function(V_model, bloc, row_names, col_names) {
 ##               column move): see sigma_prior.
 ##   kappa       "scaled" only: NULL = kappa is estimated with a lognormal(kappa_prior[1], kappa_prior[2]) prior; a number fixes it
 ##   sigma_prior log mean and log sd of the lognormal prior on each sigma
+##   nat_table   R x C table of known totals over all the areas (e.g. national split-ticket figures, or a survey table); NULL = none.
+##               Each row's split, summed over the areas, gets a multinomial likelihood. It must cover the same areas as kc.
+##   nat_n_eff   0 = use nat_table as counts (an exact count of the population is then effectively exact); > 0 = rescale it to this
+##               total, e.g. a survey's sample size
+##   corr_blocks correlations between the hierarchy coordinates (the within-row coordinates of the model, numbered as in rw_coords()):
+##               NULL = none; "all" = one dense correlation matrix; "loyalty" = the loyalty coordinates of all rows; or a list of
+##               integer vectors, one per block. Blocks are independent of one another; each block is LKJ(corr_eta), on the scale of
+##               the model without correlations (with interior = "scaled", relative to the kappa structure). Needs the full
+##               (not low-rank) scaling path, which is switched on here.
+##   corr_eta    LKJ shape: 1 = uniform over correlation matrices; larger = closer to no correlations
+##   corr_scale  1 (default) = the interior parameters are scaled by the full covariance (non-centred in the correlations); 0 = scaled
+##               as without correlations, so the correlations enter only the
+##               density of each area's coordinates. Same posterior; 1 needed fewer leapfrog steps in a test (Scotland 5 x 5).
+##   directions  named directions: patterns of change shared by all an area's coordinates, each group with its own sd across areas
+##               (dir_tau, half-normal(0, dir_tau_scale)), added to the covariance: Sigma0 + W diag(tau^2) W'. NULL = none;
+##               "columns" = a move of each column in every row, one shared sd (column effects with a common size); "columns_each" =
+##               the same with one sd per column (the integrated column effects, lflag_col_eff = 3); "loyalty" = one move of
+##               every loyalty split together (areas where voters stay more loyal to all the major parties at once), one sd;
+##               "columns+loyalty" = both, each with its own sd; or a list of R x C matrices,
+##               each a pattern of log changes to the cells (row constants are irrelevant), one sd per matrix; or a list of
+##               lists of such matrices, one sd per inner list. Uses the correlation machinery (corr_blocks may be combined).
+##   context     contextual effects: the hierarchy mean of each coordinate shifts with an area covariate, b_j ~ N(E_rc + b .* x_j, ...).
+##               NULL = none; "own_row" = every within-row coordinate gets the log share of its own row in the area, standardised over
+##               the areas where the row is not empty (0 where it is empty); "own_row_loyalty" = the same for the loyalty coordinates only
+##               (the others get 0); or an n_areas x (model coordinates) matrix supplied directly.
+##   context_tau TRUE = the coefficients' sd is estimated (half-normal(0, context_scale)), one sd for the loyalty coordinates and one
+##               for the rest (one in all if there are no loyalty coordinates); FALSE = coefficients normal(0, context_scale)
+##   context_fixed  a vector of coefficients (one per model coordinate) to fix them instead of estimating them (diagnosis)
+##   mix         neighbourhood mixing (assimilation of small groups): row r's hierarchy mean in area j is (1 - w) x its E_rc rates + w x the
+##               other rows' E_rc rates weighted by their shares in the area, w = inv_logit(a_r + b log s_jr), s_jr = row r's share of area j.
+##               NULL = off; "estimate" = a (one per row) and b (shared, < 0) estimated, priors normal(mix_prior[1], mix_prior[2]) and
+##               normal(mix_prior[3], mix_prior[4]); "half_share" = the same with a_r replaced by the log share at which row r is half assimilated,
+##               w = inv_logit(b (log s - h_r)), h_r ~ normal(mix_prior[1], mix_prior[2]) (e.g. c(log(0.02), 1, -1, 0.5));
+##               list(a = R values, b = one value) = fixed (oracle checks)
+##   E_alpha     prior on the average table: each row's split ~ Dirichlet(E_alpha, ..., E_alpha) translated to the node logits (centre
+##               digamma(E_alpha m) - digamma(E_alpha n), sd sqrt(trigamma(E_alpha m) + trigamma(E_alpha n)) for a split of m against n
+##               columns). 1 = the default (uniform on each row's simplex); 4 = King's ei.MD.bayes default (alpha_rc ~ Gamma(4, 2)
+##               independently, so the normalised row means are Dirichlet(4, ..., 4)): centred nearer an even split and tighter.
+##               E_centre = "qi" still replaces the centres (not the sds) of the non-loyalty coordinates.
+##   sigma_fixed the area spread fixed instead of estimated (one value, or one per sigma group). Under a symmetric Dirichlet(a) every ILR
+##               balance of a row has variance trigamma(a) and they are uncorrelated, so sqrt(trigamma(2)) = 0.80 matches King's area-level
+##               Dirichlet at its prior mean (alpha_rc about 2). The margins push an estimated sigma down when there is sorting across areas.
+##   sigma_groups  one integer per model coordinate (overrides tiers), e.g. rep(1:R, each = C - 1) for one sigma per row
+##   mix_rows    rows that mix (names or positions); NULL = all rows; the others have w = 0
+##   nat_init    with nat_table: start E_rc at the table's own row splits (in node logits), so every area starts near the known totals.
+##               Large totals make warm-up very slow from the prior centre.
 ##   loyal_rows  names or positions of the rows that have a loyalty split (NULL = every row); give the same value to rw_row_priority_basis.
 ##               The other rows have no loyalty coordinate: no loyalty_mean, and all their coordinates count as non-loyalty ones.
 rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tiers = NULL, loyalty_mean = NULL,
                    chains = 4, iter = 1000, warmup = 500, seed = 1234,
                    cores = chains, refresh = max(iter %/% 10, 1), E_sd_scale = 1, E_sd_scale_small = E_sd_scale, small_frac = 0.05, E_sd_scale_offdiag = 1,
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL,
-                   interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5), ...) {
+                   interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
+                   nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -297,7 +380,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   rm <- apply(kc, c(1, 2), sum); cm <- apply(kc, c(1, 3), sum)      # keep the category names when kc has them
   if (is.null(row_order)) row_order <- order(colSums(rm))
   if (is.null(rem_col)) rem_col <- rep(1L, R)
-  mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C)    # row-margin coordinates removed: rows conditioned on the data
+  mr  <- build_margin_reduction(V_ilr, rm, R = R, C = C, build_rot = FALSE)    # row-margin coordinates removed: rows conditioned on the data
   mr  <- rw_setup(mr, rm, cm, row_order = row_order, rem_col = rem_col, alloc = alloc)
   Dm1 <- mr$Dm1_model
   ## with sigma shared in a few groups the scaling has a low-rank form: same density, cheaper gradient (about 1.5x at 7 x 7, 73 areas)
@@ -309,10 +392,16 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     mr$prior_mp_kappa_a <- kappa_prior[1]; mr$prior_mp_kappa_b <- kappa_prior[2]
   }
   K_int <- if (interior == "fixed") 0L else (R - 1L) * (C - 1L)
+  n_corr_raw <- 0L; n_dir_groups <- 0L
+  if (!is.null(nat_table)) {
+    stopifnot(all(dim(nat_table) == c(R, C)), all(nat_table >= 0))
+    mr$lflag_nat <- 1L; mr$nat_table <- unname(as.matrix(nat_table)); mr$nat_n_eff <- nat_n_eff
+    message(sprintf("known totals over the areas: multinomial on each row's split, total %s", if (nat_n_eff > 0) format(nat_n_eff) else format(sum(nat_table))))
+  }
   kappa0 <- if (interior == "scaled" && is.null(kappa)) exp(kappa_prior[1]) else NULL
   ## priors on the average table, one logit per split: the logit implied by a uniform split, with its sd
   m_pos <- colSums(mr$V_ilr_model > 1e-10); n_neg <- colSums(mr$V_ilr_model < -1e-10)
-  E_mean <- digamma(m_pos) - digamma(n_neg); E_sd <- sqrt(trigamma(m_pos) + trigamma(n_neg))
+  E_mean <- digamma(E_alpha * m_pos) - digamma(E_alpha * n_neg); E_sd <- sqrt(trigamma(E_alpha * m_pos) + trigamma(E_alpha * n_neg))
   ## optional tightening of the E_rc prior sd: E_sd_scale for every coordinate, E_sd_scale_small for coordinates whose loadings
   ## have a side made only of small columns (column share of the total below small_frac); both default 1 = the uniform-split prior
   if (E_sd_scale != 1 || E_sd_scale_small != 1) {
@@ -355,7 +444,79 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
   if (!is.null(loyalty_mean)) {                              # the loyalty split is the first split of each row: it involves all C columns
     E_mean[loy] <- ifelse(m_pos[loy] == 1, 1, -1) * loyalty_mean
   }
-  sig_id <- if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
+  ## starting values for E_rc: the prior centre, or the known table's row splits
+  if (!is.null(directions)) {
+    Vm <- mr$V_ilr_model
+    to_dir <- function(P) { stopifnot(all(dim(P) == c(R, C))); as.vector(crossprod(Vm, as.vector(t(P)))) }
+    colpat <- function(c) { P <- matrix(0, R, C); P[, c] <- 1; P }
+    loypat <- function() {                                   # +1 on each loyal row's own column (matched by name)
+      P <- matrix(0, R, C); rn <- dimnames(kc)[[2]]; cn <- dimnames(kc)[[3]]
+      for (r in loyal_ix) P[r, match(rn[r], cn)] <- 1
+      stopifnot(sum(P) == length(loyal_ix)); P
+    }
+    grp <- if (identical(directions, "columns")) list(lapply(seq_len(C), colpat))
+           else if (identical(directions, "loyalty")) list(list(loypat()))
+           else if (identical(directions, "columns+loyalty")) list(lapply(seq_len(C), colpat), list(loypat()))
+           else if (identical(directions, "columns_each")) lapply(seq_len(C), function(c) list(colpat(c)))
+           else lapply(directions, function(x) if (is.matrix(x)) list(x) else x)
+    W <- do.call(cbind, lapply(unlist(grp, recursive = FALSE), to_dir))
+    mr$n_dir <- ncol(W); mr$dir_W <- W; mr$dir_group <- as.array(as.integer(rep(seq_along(grp), lengths(grp))))
+    mr$n_dir_groups <- length(grp); mr$dir_tau_scale <- dir_tau_scale; n_dir_groups <- length(grp)
+    mr$lflag_corr <- 1L; mr$lflag_mp_scale_fast <- 0L
+    if (is.null(corr_blocks)) { mr$n_corr_blocks <- 0L; mr$corr_block <- as.array(integer(Dm1)) }
+    message(sprintf("named directions: %d direction(s) in %d group(s), half-normal(0, %g) on each group's sd", ncol(W), length(grp), dir_tau_scale))
+  }
+  if (!is.null(corr_blocks)) {
+    blk <- if (identical(corr_blocks, "all")) list(seq_len(Dm1)) else if (identical(corr_blocks, "loyalty")) list(which(loy)) else corr_blocks
+    stopifnot(is.list(blk), all(unlist(blk) %in% seq_len(Dm1)), !anyDuplicated(unlist(blk)), all(lengths(blk) >= 2))
+    cb <- integer(Dm1); for (g in seq_along(blk)) cb[blk[[g]]] <- g
+    mr$lflag_corr <- 1L; mr$n_corr_blocks <- length(blk); mr$corr_block <- as.array(as.integer(cb)); mr$corr_eta <- corr_eta; mr$corr_scale <- as.integer(corr_scale)
+    mr$lflag_mp_scale_fast <- 0L
+    n_corr_raw <- sum(lengths(blk) * (lengths(blk) - 1) / 2)
+    message(sprintf("correlations: %d block(s) of size %s, LKJ(%g); %d correlation parameters", length(blk), paste(lengths(blk), collapse = ", "), corr_eta, n_corr_raw))
+  }
+  n_ctx <- 0L; n_ctx_groups <- 0L
+  if (!is.null(context)) {
+    if (is.matrix(context)) { X <- context; stopifnot(all(dim(X) == c(J, Dm1))) } else {
+      context <- match.arg(context, c("own_row", "own_row_loyalty"))
+      xr <- sapply(seq_len(R), function(r) {
+        ok <- rm[, r] > 0; x <- numeric(J); l <- log(rm[ok, r] / rowSums(rm)[ok])
+        if (sum(ok) > 1 && sd(l) > 0) x[ok] <- (l - mean(l)) / sd(l); x })
+      X <- xr[, coord_row, drop = FALSE]
+      if (context == "own_row_loyalty") X[, !loy] <- 0
+    }
+    mr$lflag_E_cov <- if (!is.null(context_fixed)) 3L else if (context_tau) 2L else 1L; mr$E_cov_x <- unname(X); mr$prior_E_cov_scale <- context_scale
+    n_ctx <- if (is.null(context_fixed)) Dm1 else 0L
+    if (!is.null(context_fixed)) { stopifnot(length(context_fixed) == Dm1); mr$E_cov_b_fixed <- as.array(as.numeric(context_fixed)); context_tau <- FALSE }
+    if (context_tau) {
+      grp <- if (any(loy) && any(!loy)) ifelse(loy, 1L, 2L) else rep(1L, Dm1)
+      mr$n_E_cov_groups <- max(grp); mr$E_cov_group <- as.array(as.integer(grp)); n_ctx_groups <- max(grp)
+    }
+    message(sprintf("contextual effects on %d of %d coordinates; %s", sum(colSums(X != 0) > 0), Dm1,
+                    if (!is.null(context_fixed)) "coefficients fixed" else if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
+  }
+  n_mix <- 0L
+  if (!is.null(mix)) {
+    rn <- dimnames(kc)[[2]]; on <- if (is.null(mix_rows)) seq_len(R) else if (is.character(mix_rows)) match(mix_rows, rn) else mix_rows
+    stopifnot(!anyNA(on)); mr$mix_rows <- as.array(as.integer(seq_len(R) %in% on))
+    if (identical(mix, "estimate") || identical(mix, "half_share")) {
+      mr$lflag_mix <- if (identical(mix, "half_share")) 3L else 1L; n_mix <- R
+      mr$prior_mix_a_mu <- mix_prior[1]; mr$prior_mix_a_sd <- mix_prior[2]; mr$prior_mix_b_mu <- mix_prior[3]; mr$prior_mix_b_sd <- mix_prior[4]
+      message(sprintf("neighbourhood mixing (%s; rows %s): a ~ normal(%g, %g) per row, shared b ~ normal(%g, %g), b < 0", mix, paste(on, collapse = ","), mix_prior[1], mix_prior[2], mix_prior[3], mix_prior[4]))
+    } else {
+      stopifnot(is.list(mix), length(mix$a) == R, length(mix$b) == 1)
+      mr$lflag_mix <- 2L; mr$mix_a_fixed <- as.array(as.numeric(mix$a)); mr$mix_b_fixed <- as.numeric(mix$b)
+      message(sprintf("neighbourhood mixing fixed: b = %.2f, a = %s", mix$b, paste(sprintf("%.2f", mix$a), collapse = " ")))
+    }
+  }
+  E_init <- E_mean
+  if (!is.null(nat_table) && nat_init) {
+    P <- as.matrix(nat_table) / pmax(rowSums(as.matrix(nat_table)), 1e-300); p <- as.vector(t(P))
+    nl <- apply(mr$V_ilr_model, 2, function(v) { a <- sum(p[v > 1e-10]); b <- sum(p[v < -1e-10]); if (a > 0 && b > 0) log(a / b) else NA_real_ })
+    E_init[is.finite(nl)] <- nl[is.finite(nl)]
+    message(sprintf("E_rc started at the known table's row splits (%d of %d coordinates)", sum(is.finite(nl)), Dm1))
+  }
+  sig_id <- if (!is.null(sigma_groups)) as.integer(sigma_groups) else if (is.null(tiers)) seq_len(Dm1) else rep(as.integer(tiers), R)
   G <- max(sig_id)
   stopifnot(length(sig_id) == Dm1)
   fit <- ssEI::ei_estimate(
@@ -371,7 +532,8 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     margin_reduction = mr,
     ROT_E_rc = diag(Dm1), rotate_E_rc = FALSE,
     link_E_rc = NULL, rotate_lambda = "none",
-    sigma_group_id = sig_id, sigma_group_mode = rep("shared", G),             # sigma shared by the areas
+    sigma_group_id = sig_id, sigma_group_mode = rep(if (is.null(sigma_fixed)) "shared" else "fixed", G),   # sigma shared by the areas, or fixed
+    sigma_group_fixed_value = if (is.null(sigma_fixed)) 0 else rep_len(log(sigma_fixed), G),
     sigma_group_prior_a = rep(sigma_prior[1], G), sigma_group_prior_b = rep(sigma_prior[2], G),
     sigma_ncp = TRUE,
     E_rc_group_id = 1:Dm1, E_rc_group_mode = rep("shared", Dm1),
@@ -382,10 +544,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_mean, G, kappa0, sigma_prior[1]), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, if (is.null(sigma_fixed)) G else 0L, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_mean, G, kappa0, sigma_prior[1])))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, if (is.null(sigma_fixed)) G else 0L, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }

@@ -278,6 +278,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
                            hinge_delta_min = hinge_delta_min,
                            slack_tol = slack_tol
                          ))
+  if (isTRUE(standata$lflag_margin_param == 1)) standata$ROT_red <- matrix(0, 0, 0)   # unused with the margin parameterisation
 
   if(verbose){
     print(standata$R)
@@ -310,7 +311,7 @@ ei_estimate <- function(row_margins, col_margins, E_rc_prior, known_cell_values,
 
 #' @export
 build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
-                                   noncentred_mat = NULL) {
+                                   noncentred_mat = NULL, build_rot = TRUE) {
   margin_structure <- detect_margin_columns(V_ilr, R, C)
   free_dims        <- margin_structure$free
   Dm1_model        <- length(free_dims)
@@ -334,27 +335,29 @@ build_margin_reduction <- function(V_ilr, row_margins, R, C, eps = 0.5,
     V
   }
 
-  V_area <- make_helmert_basis(n_areas)
-  j_area <- matrix(1 / sqrt(n_areas), n_areas, 1)
-  j_cell <- matrix(1 / sqrt(D), D, 1)
+  if (build_rot) {
+    V_area <- make_helmert_basis(n_areas)
+    j_area <- matrix(1 / sqrt(n_areas), n_areas, 1)
+    j_cell <- matrix(1 / sqrt(D), D, 1)
 
-  B_agg <- kronecker(j_area, V_ilr_model)
-  B_vol <- kronecker(V_area, j_cell)
-  B_dev <- kronecker(V_area, V_ilr_model)
-  V_nested <- cbind(B_agg, B_vol, B_dev)
+    B_agg <- kronecker(j_area, V_ilr_model)
+    B_vol <- kronecker(V_area, j_cell)
+    B_dev <- kronecker(V_area, V_ilr_model)
+    V_nested <- cbind(B_agg, B_vol, B_dev)
 
-  V_block_diag <- matrix(0, n_areas * D, n_areas * Dm1_model)
-  for (j in 1:n_areas) {
-    rows <- ((j-1)*D + 1):(j*D)
-    cols <- ((j-1)*Dm1_model + 1):(j*Dm1_model)
-    V_block_diag[rows, cols] <- V_ilr_model
-  }
-  V_flat   <- cbind(V_block_diag, B_vol)
-  ROT_full <- t(V_flat) %*% V_nested
+    V_block_diag <- matrix(0, n_areas * D, n_areas * Dm1_model)
+    for (j in 1:n_areas) {
+      rows <- ((j-1)*D + 1):(j*D)
+      cols <- ((j-1)*Dm1_model + 1):(j*Dm1_model)
+      V_block_diag[rows, cols] <- V_ilr_model
+    }
+    V_flat   <- cbind(V_block_diag, B_vol)
+    ROT_full <- t(V_flat) %*% V_nested
 
-  Dtot_m1_reduced <- n_areas * Dm1_model + (n_areas - 1)
-  stopifnot(all.equal(t(ROT_full) %*% ROT_full,
-                      diag(Dtot_m1_reduced), tolerance = 1e-6))
+    Dtot_m1_reduced <- n_areas * Dm1_model + (n_areas - 1)
+    stopifnot(all.equal(t(ROT_full) %*% ROT_full,
+                        diag(Dtot_m1_reduced), tolerance = 1e-6))
+  } else ROT_full <- matrix(0, 0, 0)   # not needed with the margin parameterisation (large for many areas)
 
   noncentred_mat_model <- if (!is.null(noncentred_mat)) {
     stopifnot(ncol(noncentred_mat) >= max(free_dims))
@@ -445,9 +448,15 @@ rowwise_defaults <- function(R, C, Dm1_model) {
     rl_S = array(0, c(0, K, K)),
     ## small-cell term (soft multinomial) and its lookup table
     lflag_soft_smallcell = 0L, smallcell_scale = 0,
+    ## known totals over all the areas (e.g. national figures): off by default
+    lflag_nat = 0L, nat_table = array(0, c(0, 0)), nat_n_eff = 0,
+    ## correlations between the hierarchy coordinates: off by default
+    lflag_corr = 0L, n_corr_blocks = 0L, corr_block = integer(0), corr_eta = 2, corr_scale = 1L,
+    n_dir = 0L, n_dir_groups = 0L, dir_W = array(0, c(0, 0)), dir_group = integer(0), dir_tau_scale = 0.5,
     cz_n = 0L, cz_t0 = 0, cz_h = 1, cz_v = numeric(0), cz_d = numeric(0),
     ## experimental: covariate in the hierarchy mean, area-level column effects
-    lflag_E_cov = 0L, E_cov_x = array(0, c(0, Dm1_model)), prior_E_cov_scale = 0.5,
+    lflag_E_cov = 0L, E_cov_x = array(0, c(0, Dm1_model)), prior_E_cov_scale = 0.5, n_E_cov_groups = 0L, E_cov_group = integer(0), E_cov_b_fixed = numeric(0),
+    lflag_mix = 0L, mix_rows = integer(0), mix_a_fixed = numeric(0), mix_b_fixed = 0, prior_mix_a_mu = -4, prior_mix_a_sd = 2, prior_mix_b_mu = -1, prior_mix_b_sd = 0.5,
     lflag_col_eff = 0L, lflag_col_tau_shared = 0L, prior_col_tau_scale = 0.5,
     n_col_groups = 0L, col_group = integer(0),
     col_eff_known = array(0, c(0, C)),

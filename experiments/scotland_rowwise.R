@@ -24,6 +24,8 @@ E_SD_SCALE_SMALL <- 1; E_SD_SCALE_OFFDIAG <- 1;
 ## E_SD_SCALE_SMALL / E_SD_SCALE_OFFDIAG < 1 tighten the E_rc prior sd (small-column coordinates / all but the loyalty splits)
 E_CENTRE <- "uniform"; BLOC_AFFINITY <- 0; E_CENTRE_SHIFT <- 0;   # E_CENTRE "qi": non-loyalty coordinates centred on quasi-independence (see rw_qi_centre)
 INTERIOR <- "free"; KAPPA <- NULL; SIGMA_PRIOR <- c(log(0.3), 0.5)   # see the top of the file
+NAT_N_EFF <- NULL   # known totals over the areas: NULL = not used; 0 = the true summed table as an exact count; n > 0 = the same
+                    # table treated as a survey of size n. (No official Scottish split-ticket totals exist: this is a test of the option.)
 BLOCS <- FALSE;   # FALSE: no blocs, the tree is loyalty then bisections of the other columns, largest columns first (the general default)
 LOYAL_ROWS <- c("Conservative and Unionist Party [The]", "Labour Party [The]", "Liberal Democrats", "Scottish National Party")
 ## rows with a loyalty split (NULL: every row). At SIZE 3 and 5 only the ones present are used.
@@ -42,12 +44,13 @@ fit <- rw_fit(kc, V_ilr, alloc = ALLOC,
               tiers = c(1, 1, rep(2, C - 3)),              # sigma tiers within each row
               loyalty_mean = qlogis(0.75), loyal_rows = loyal_rows,
               interior = INTERIOR, kappa = KAPPA, sigma_prior = SIGMA_PRIOR,
+              nat_table = if (!is.null(NAT_N_EFF)) apply(kc, 2:3, sum), nat_n_eff = if (is.null(NAT_N_EFF)) 0 else NAT_N_EFF,
               E_sd_scale_small = E_SD_SCALE_SMALL, E_sd_scale_offdiag = E_SD_SCALE_OFFDIAG,
               E_centre = E_CENTRE, bloc = if (BLOCS) d$bloc, bloc_affinity = BLOC_AFFINITY, E_centre_shift = E_CENTRE_SHIFT,
               chains = CHAINS, iter = ITER, warmup = WARMUP, seed = SEED)
 
 ## Set BM_SAVE <- TRUE before sourcing to save this fit in the form used to compare with other methods (experiments/benchmark)
 if (isTRUE(get0("BM_SAVE"))) {
-  if (SIZE == 7 && N_AREAS >= 73) { source("experiments/benchmark/bm_lib.R"); bm_ssei_save(fit, kc, "scotland7", label = sprintf("ssEI alloc %d%s%s", ALLOC, if (is.null(LOYAL_ROWS)) "" else " major-loyal", if (BLOCS) "" else " no-blocs", if (INTERIOR == "free") "" else paste0(" interior-", INTERIOR))) }
+  if (SIZE == 7 && N_AREAS >= 73) { source("experiments/benchmark/bm_lib.R"); bm_ssei_save(fit, kc, "scotland7", label = sprintf("ssEI alloc %d%s%s%s%s", ALLOC, if (is.null(LOYAL_ROWS)) "" else " major-loyal", if (BLOCS) "" else " no-blocs", if (INTERIOR == "free") "" else paste0(" interior-", INTERIOR), if (is.null(NAT_N_EFF)) "" else paste0(" nat-", NAT_N_EFF))) }
   else message("not saved: the benchmark case is SIZE 7 with all 73 constituencies")
 }

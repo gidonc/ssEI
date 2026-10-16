@@ -101,7 +101,6 @@ data{
   int<lower=1> Dm1_model;
   matrix[(R * C), (R * C) - 1] V_ilr_full; // basis matrix for ILR transformation
   matrix[(R * C), Dm1_model] V_ilr_model;
-  matrix[n_areas*Dm1_model + n_areas - 1, n_areas*Dm1_model + n_areas - 1] ROT_red; //rebuilt for reduced dimensions
   matrix[n_agg_free, n_agg_free] ROT_E_rc; //ilr rotation from raw to E_rc in V_ilr basis
 
  // vector<lower=0>[(R * C) - 1] sigma_llrep;
@@ -131,6 +130,7 @@ data{
   // b_j = mp_b_ref[j] + mp_P[j] * beta_j + mp_N[j] * gamma_j      (b_j = llrep_model_j, V_ilr_model coords)
   // mp_G[j] : n_pin x Dm1 gradient of pinned margin log-ratios at b_ref ; G*P = I, G*N = 0, N'N = I
   int<lower=0, upper=1> lflag_margin_param;
+  matrix[lflag_margin_param == 1 ? 0 : n_areas*Dm1_model + n_areas - 1, lflag_margin_param == 1 ? 0 : n_areas*Dm1_model + n_areas - 1] ROT_red; // rebuilt for reduced dimensions (not used, and empty, with the margin parameterisation)
   int<lower=0, upper=1> lflag_mp_seq;            // margin param: 1 = expected table built by sequential allocation: mp_beta = column log-ratio deviation from observed, mp_z = interior logits (centred). Works with rows conditioned or free. Overrides lflag_mp_exact / lflag_mp_gamma_centred; mp_G, mp_P, mp_N, mp_b_ref are unused (pass zeros).
   int<lower=0, upper=1> lflag_mp_seq_anchor;     // margin param (seq): 1 = interior logits = (logits that realise E_rc for this area's rows) + mp_z, i.e. mp_z is the area's deviation from E_rc; 0 = mp_z are the logits themselves
   int<lower=0, upper=1> lflag_mp_exact;          // margin param: 0 = mp_beta is the linearised pinned coord; 1 = mp_beta is the EXACT column log-ratio deviation (Newton solve + Jacobian)
@@ -146,11 +146,36 @@ data{
   int<lower=0, upper=1> lflag_cpois_norm;      // HYBRID row by row: 1 = divide each realised cell's continuous Poisson density by its integral over x >= 0, so it is a proper density whatever the mean (cells in non-empty rows only; cells of empty rows are fixed at 0 and keep the Poisson probability of 0)
   int<lower=0, upper=1> lflag_soft_smallcell;  // SOFT (fit type 2): 1 = add the log integral of the continuous Poisson density for every expected cell in a non-empty row, i.e. the same implicit prior against very small expected cells that HYBRID has when lflag_cpois_norm = 0 (uses the cz_ grid)
   real<lower=0> smallcell_scale;               // multiplier on the SOFT small-cell term (1 = the HYBRID-equivalent strength)
+  int<lower=0, upper=1> lflag_nat;             // 1 = a known table of totals over all the areas (e.g. national split-ticket figures, or a survey):
+                                               //     for each row r, nat_table[r] ~ multinomial(the row's split implied by the areas), i.e.
+                                               //     target += sum_c w[r, c] * log(sum_j n_jr q_jrc / sum_j n_jr), q = the model's row-conditional shares.
+                                               //     Only the split within each row is used, so the table's row totals need not match the areas'.
+                                               //     The table must cover the same set of areas as the data.
+  matrix<lower=0>[lflag_nat ? R : 0, lflag_nat ? C : 0] nat_table;   // the known totals (counts or proportions)
+  real<lower=0> nat_n_eff;                     // 0 = use nat_table as counts; > 0 = rescale it to sum to nat_n_eff (e.g. a survey's sample size), keeping its row shares
   int<lower=0, upper=2> lflag_mp_interior;     // sequential margin param: what areas may do beyond moving whole rows and columns. 0 = free interior, the hierarchy b_j ~ N(E_rc, diag(sigma^2)) as before. 1 = interior fixed at E_rc's: each area's table is E_rc's table raked to the area's margins (one move per column, and per row when rows are parameters); mp_z has size 0; the same normal on b_j, restricted to those moves; needs lflag_seq_or_expected = 4 and lflag_mp_seq_anchor = 1. 2 = as 0 but the part of an area's deviation that is NOT such a move has sd kappa * sigma (kappa = 1 is mode 0 exactly, kappa -> 0 is mode 1); any allocation mode
   real<lower=0> mp_kappa_fixed;                // lflag_mp_interior = 2: 0 = kappa is a parameter with a lognormal(prior_mp_kappa_a, prior_mp_kappa_b) prior; > 0 = kappa fixed at this value
   real prior_mp_kappa_a;
   real<lower=0> prior_mp_kappa_b;
-  int<lower=0, upper=1> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_gamma .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate.
+  int<lower=0, upper=1> lflag_corr;            // sequential margin param: 1 = correlations between the hierarchy coordinates. Sigma = A Omega A',
+                                               //   A = chol(Sigma0), Sigma0 = the covariance without correlations (diag(sigma^2), or the kappa
+                                               //   structure when lflag_mp_interior = 2); Omega = correlation matrix, block diagonal over the
+                                               //   blocks in corr_block, each block LKJ(corr_eta). Omega = I is the model without correlations.
+                                               //   Needs lflag_mp_seq = 1, lflag_mp_scale_fast = 0 and mp_nc_w = 1 (interior 0 or 2), no column effects.
+  int<lower=0> n_corr_blocks;
+  array[lflag_corr ? Dm1_model : 0] int<lower=0> corr_block;   // block of each coordinate (0 = in no block: uncorrelated with all others)
+  real<lower=0> corr_eta;                      // LKJ shape: 1 = uniform over correlation matrices, larger = closer to Omega = I
+  int<lower=0> n_dir;                          // lflag_corr: named directions shared by an area's coordinates. Sigma0 gains
+                                               //   dir_W diag(tau^2) dir_W', tau = dir_tau[dir_group] (one scale per group); each column of
+                                               //   dir_W is a pattern of change in the hierarchy coordinates (e.g. a whole-column move)
+  int<lower=0> n_dir_groups;
+  matrix[n_dir > 0 ? Dm1_model : 0, n_dir] dir_W;
+  array[n_dir] int<lower=1> dir_group;
+  real<lower=0> dir_tau_scale;                 // half-normal prior scale of each dir_tau
+  int<lower=0, upper=1> corr_scale;            // lflag_corr: 0 = the interior parameters are scaled as without correlations (Sigma0), so Omega
+                                               //   only enters the density of each area's coordinates (centred in Omega); 1 = scaled by the full
+                                               //   Sigma (non-centred in Omega). Same posterior either way.
+  int<lower=0, upper=3> lflag_E_cov;           // sequential margin param: 1 = the hierarchy mean varies by area, b_j ~ N(E_rc + E_cov_b .* E_cov_x[j], sigma). One covariate value per area and coordinate (e.g. the centred log share of the coordinate's own row), one coefficient per coordinate, normal(0, prior_E_cov_scale). 2 = the same with the coefficients' sd estimated, one sd per group of coordinates (E_cov_tau, half-normal(0, prior_E_cov_scale)); non-centred: E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma. 3 = coefficients fixed at E_cov_b_fixed (for diagnosis, e.g. slopes taken from known tables)
   int<lower=0, upper=4> lflag_col_eff;         // sequential margin param: area-level column effects shared by every row: in area j, col_eff[j, c] ~ normal(0, col_tau[c]) is added to the log share of column c in every row. 1 = explicit, non-centred; 2 = explicit, centred; 3 = integrated out: b_j ~ multi_normal(E_rc, diag(sigma^2) + mp_Wc * diag(col_tau^2) * mp_Wc'), no per-area effect parameters (needs lflag_mp_seq_scale = 2, lflag_mp_scale_fast = 0, mp_nc_w = 1)
   int<lower=0, upper=1> lflag_col_tau_shared;  // 1 = one col_tau for every column, 0 = one per column
   int<lower=0> n_col_groups;                   // explicit column effects (lflag_col_eff 1 or 2): 0 = one set of effects per area; > 0 = one set per group of areas (e.g. polling places within an electorate share the electorate's candidate effects)
@@ -162,7 +187,22 @@ data{
   matrix[lflag_col_eff == 4 ? n_areas : 0, C] col_eff_known;   // lflag_col_eff = 4: the column effects are supplied as data (for diagnosis with known cells)
   real<lower=0> prior_col_tau_scale;           // prior sd of col_tau (half-normal)
   matrix[lflag_E_cov ? n_areas : 0, Dm1_model] E_cov_x;
-  real<lower=0> prior_E_cov_scale;             // prior sd of the coefficients (normal, mean 0)
+  real<lower=0> prior_E_cov_scale;             // prior sd of the coefficients (normal, mean 0); with lflag_E_cov = 2, of their sds (half-normal)
+  int<lower=0> n_E_cov_groups;                 // lflag_E_cov = 2: number of groups of coefficients, each with its own sd
+  int<lower=0, upper=3> lflag_mix;             // sequential margin param, rows conditioned: neighbourhood mixing (assimilation of small groups). The hierarchy
+                                               //   mean of row r in area j is the table (1 - w) q_r + w m_jr, q_r = E_rc's row r, m_jr = the other rows' E_rc rates
+                                               //   weighted by their shares in area j, w = inv_logit(mix_a[r] + mix_b * log(share of row r in area j)).
+                                               //   0 = off; 1 = mix_a (one per row) and mix_b (shared, < 0) estimated; 2 = fixed at mix_a_fixed, mix_b_fixed;
+                                               //   3 = estimated with mix_a = the log share at which a row is half assimilated: w = inv_logit(mix_b * (log s - mix_a[r]))
+  array[lflag_mix > 0 ? R : 0] int<lower=0, upper=1> mix_rows;   // rows that mix (0 = w fixed at 0)
+  vector[lflag_mix == 2 ? R : 0] mix_a_fixed;
+  real mix_b_fixed;
+  real prior_mix_a_mu;                         // mix_a[r] ~ normal(prior_mix_a_mu, prior_mix_a_sd)
+  real<lower=0> prior_mix_a_sd;
+  real prior_mix_b_mu;                         // mix_b ~ normal(prior_mix_b_mu, prior_mix_b_sd), mix_b < 0
+  real<lower=0> prior_mix_b_sd;
+  array[lflag_E_cov == 2 ? Dm1_model : 0] int<lower=1, upper=n_E_cov_groups> E_cov_group;
+  vector[lflag_E_cov == 3 ? Dm1_model : 0] E_cov_b_fixed;
   int<lower=0> cz_n;                           // grid for the log integral: cz_n points, t = log(mean) from cz_t0 in steps of cz_h
   real cz_t0;
   real<lower=0> cz_h;
@@ -897,6 +937,8 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   matrix[lflag_mp_interior > 0 ? Dm1_model : 0, mp_n_mv] mp_Wm;
   for (k in 1:(C - 1)) { for (i in 1:k) mp_Hc[i, k] = inv_sqrt(k * (k + 1.0)); mp_Hc[k + 1, k] = -k * inv_sqrt(k * (k + 1.0)); }
   for (k in 1:(R - 1)) { for (i in 1:k) mp_Hr[i, k] = inv_sqrt(k * (k + 1.0)); mp_Hr[k + 1, k] = -k * inv_sqrt(k * (k + 1.0)); }
+  if (lflag_mix > 0 && (lflag_margin_param != 1 || lflag_mp_seq != 1 || lflag_mp_seq_anchor != 1 || lflag_row_decompose != 1))
+    reject("lflag_mix needs the sequential margin parameterisation with the anchor and rows conditioned");
   if (lflag_mp_interior > 0) {
     matrix[R * C, mp_n_mv] Kf = rep_matrix(0, R * C, mp_n_mv);
     int offm = lflag_row_decompose == 1 ? 0 : R - 1;
@@ -929,6 +971,47 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     }
   }
 
+  // correlations between hierarchy coordinates: members of each block (in increasing order), and the count of free values
+  array[n_corr_blocks] int corr_size = rep_array(0, n_corr_blocks);
+  array[lflag_corr ? Dm1_model : 0] int corr_members;
+  array[n_corr_blocks] int corr_start;
+  int n_corr_raw = 0;
+  if (n_dir > 0 && lflag_corr != 1) reject("named directions (n_dir > 0) need lflag_corr = 1 (with n_corr_blocks = 0 for directions only)");
+  for (k in 1:n_dir) if (dir_group[k] > n_dir_groups) reject("dir_group: group ", dir_group[k], " but n_dir_groups = ", n_dir_groups);
+  if (lflag_corr == 1) {
+    int k = 0;
+    if (lflag_margin_param != 1 || lflag_mp_seq != 1) reject("lflag_corr needs lflag_margin_param = 1 and lflag_mp_seq = 1");
+    if (lflag_col_eff != 0) reject("lflag_corr cannot be combined with column effects");
+    if (lflag_mp_interior != 1) {
+      if (lflag_mp_seq_scale != 2 || lflag_mp_scale_fast != 0) reject("lflag_corr needs lflag_mp_seq_scale = 2 and lflag_mp_scale_fast = 0");
+      for (i in 1:Dm1_model) if (mp_nc_w[i] != 1) reject("lflag_corr needs mp_nc_w = 1 everywhere");
+    }
+    for (i in 1:Dm1_model) {
+      if (corr_block[i] > n_corr_blocks) reject("corr_block: block ", corr_block[i], " but n_corr_blocks = ", n_corr_blocks);
+      if (corr_block[i] > 0) corr_size[corr_block[i]] += 1;
+    }
+    for (g in 1:n_corr_blocks) {
+      if (corr_size[g] < 2) reject("corr_block: block ", g, " has fewer than two coordinates");
+      corr_start[g] = k + 1;
+      for (i in 1:Dm1_model) if (corr_block[i] == g) { k += 1; corr_members[k] = i; }
+      n_corr_raw += (corr_size[g] * (corr_size[g] - 1)) %/% 2;
+    }
+  }
+
+  // known totals over all the areas: weights of the multinomial kernel, row by row
+  matrix[lflag_nat ? R : 0, lflag_nat ? C : 0] nat_w;
+  array[lflag_nat ? R : 0] int nat_use;      // 1 = this row enters (positive total in the table and present in some area)
+  if (lflag_nat == 1) {
+    real tot = sum(nat_table);
+    if (tot <= 0) reject("lflag_nat: nat_table sums to zero");
+    nat_w = nat_n_eff > 0 ? nat_table * (nat_n_eff / tot) : nat_table;
+    for (r in 1:R) {
+      nat_use[r] = (sum(nat_table[r]) > 0 && sum(row_margins[1:n_areas, r]) > 0) ? 1 : 0;
+      if (sum(nat_table[r]) > 0 && sum(row_margins[1:n_areas, r]) == 0)
+        print("lflag_nat: row ", r, " has votes in nat_table but none in any area; it is left out");
+    }
+  }
+
   // margin param (exact): column log-ratios at each area's reference point, with the model's own row weights
   array[(lflag_margin_param == 1 && lflag_mp_exact == 1 && lflag_mp_seq == 0) ? n_areas : 0] vector[n_pin] mp_s_ref;
   if (lflag_margin_param == 1 && lflag_mp_exact == 1 && lflag_mp_seq == 0) {
@@ -958,6 +1041,8 @@ parameters{
   // margin parameterisation
   array[lflag_margin_param ? n_areas : 0] vector[n_pin] mp_beta;              // pinned margin coords (centred)
   array[lflag_margin_param ? n_areas : 0] vector[lflag_mp_interior == 1 ? 0 : Dm1_model - n_pin] mp_z;     // interaction coords: z (NCP | beta) or gamma itself if lflag_mp_gamma_centred; none when the interior is fixed
+  vector[n_corr_raw] corr_raw;
+  vector<lower=0>[n_dir > 0 ? n_dir_groups : 0] dir_tau;  // named directions: sd of each group's shared move across areas                 // lflag_corr: unconstrained values of each block's correlation matrix (as cholesky_factor_corr)
   vector<lower=0>[mp_kappa_free] mp_kappa;     // lflag_mp_interior = 2: sd of the non-move part of an area's deviation, as a multiple of sigma
   vector[lflag_margin_param ? n_areas - 1 : 0] log_volume_rest;              // log_volume[2:n_areas]
   vector[E_rc_n_leaf] E_rc_raw_leaf;
@@ -966,7 +1051,10 @@ parameters{
 
   vector[sigma_n_leaf] sigma_raw_leaf;
   vector[sigma_n_mu] sigma_group_mu;
-  vector[lflag_E_cov ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean
+  vector[(lflag_E_cov == 1 || lflag_E_cov == 2) ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
+  vector[(lflag_mix == 1 || lflag_mix == 3) ? R : 0] mix_a;                     // neighbourhood mixing: level of each row's weight (logit scale, at share 1)
+  vector<upper=0>[(lflag_mix == 1 || lflag_mix == 3) ? 1 : 0] mix_b;            // neighbourhood mixing: slope of the weight's logit on log share (shared by the rows)
+  vector<lower=0>[lflag_E_cov == 2 ? n_E_cov_groups : 0] E_cov_tau;   // lflag_E_cov = 2: sd of each group's coefficients
   vector[lflag_col_cov ? (lflag_col_kappa_shared ? 1 : C) : 0] col_kappa;   // coefficient of the column covariate
   array[(lflag_col_eff == 1 || lflag_col_eff == 2) ? (n_col_groups > 0 ? n_col_groups : n_areas) : 0] vector[C] col_eff_raw;      // area-level column effects when explicit (raw scale if non-centred)
   vector<lower=0>[(lflag_col_eff >= 1 && lflag_col_eff <= 3) ? (lflag_col_tau_shared ? 1 : C) : 0] col_tau;   // their sd across areas (one, or one per column)
@@ -989,7 +1077,10 @@ transformed parameters{
   real mp_col_lp = 0;    // column effects integrated out: log density of the tables under the full covariance minus that under diag(sigma^2)
   array[lflag_col_eff == 3 ? n_areas : 0] vector[C] mp_col_eff_mean;   // column effects integrated out: conditional mean of each area's effects given its table
   real rl_norm = 0;      // HYBRID row by row: sum of the log integrals of the continuous Poisson densities (lflag_cpois_norm)
+  real corr_lj = 0;     // lflag_corr: log Jacobian of the correlation blocks plus their LKJ priors
+  matrix[lflag_corr ? Dm1_model : 0, lflag_corr ? Dm1_model : 0] corr_L;   // Cholesky factor of Omega (lower triangular; blocks placed at their coordinates)
   real mp_beta_lp = 0;   // margin param: log prior of mp_beta (and of gamma if centred) given (E_rc, sigma_jrc)
+  vector[lflag_E_cov ? Dm1_model : 0] E_cov_b;   // coefficients of the area covariate in the hierarchy mean
 
   real<lower=0> cell_values[n_areas, R, C];
   real log_expected_cell_values[n_areas, R, C];
@@ -1007,6 +1098,9 @@ transformed parameters{
   array[(lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1] real anchor_lambda = rep_array(0.0, (lflag_neutral_logit==2||lflag_neutral_logit==3)?n_areas:0, R - 1, C - 1);
 
 vector[n_agg_free] E_rc_raw;
+  if (lflag_E_cov == 1) E_cov_b = E_cov_gamma;
+  if (lflag_E_cov == 2) E_cov_b = E_cov_tau[E_cov_group] .* E_cov_gamma;
+  if (lflag_E_cov == 3) E_cov_b = E_cov_b_fixed;
   {
     vector[n_agg_free] u;
     int k = 0;
@@ -1151,6 +1245,46 @@ vector[n_agg_free] E_rc_raw;
           mp_ik2 = inv_square(mp_kap);
         }
       }
+      // correlations (lflag_corr): Sigma = A Omega A' with A = chol(Sigma0) and Omega = corr_L corr_L'. Then Sigma^-1 = K' K with
+      //   K = corr_L^-1 A^-1 (lower triangular), and log det Sigma = 2 (sum log diag A + sum log diag corr_L).
+      matrix[lflag_corr ? Dm1_model : 0, lflag_corr ? Dm1_model : 0] mp_K;
+      real mp_ldS = 0;                                                         // 0.5 log det Sigma
+      matrix[lflag_corr ? mp_n_mv : 0, lflag_corr ? mp_n_mv : 0] mp_LPc;      // interior fixed: Cholesky factor of Wm' Sigma^-1 Wm
+      if (lflag_corr == 1) {
+        matrix[Dm1_model, Dm1_model] A;
+        corr_L = diag_matrix(rep_vector(1, Dm1_model));
+        for (g in 1:n_corr_blocks) {
+          int Kb = corr_size[g];
+          array[Kb] int idx = corr_members[corr_start[g]:(corr_start[g] + Kb - 1)];
+          int r0 = 0;
+          for (h in 1:(g - 1)) r0 += (corr_size[h] * (corr_size[h] - 1)) %/% 2;
+          {
+            vector[(Kb * (Kb - 1)) %/% 2] xg = corr_raw[(r0 + 1):(r0 + (Kb * (Kb - 1)) %/% 2)];
+            matrix[Kb, Kb] Lg = corr_chol_from_raw(xg, Kb);
+            corr_L[idx, idx] = Lg;
+            corr_lj += corr_chol_logjac(xg, Kb) + lkj_corr_cholesky_lpdf(Lg | corr_eta);
+          }
+        }
+        if (lflag_mp_interior == 2 || n_dir > 0) {
+          matrix[Dm1_model, Dm1_model] S0;
+          if (lflag_mp_interior == 2) {
+            matrix[Dm1_model, mp_n_mv] H = mdivide_left_tri_low(mp_LP, mp_Wm')';
+            S0 = square(mp_kap) * diag_matrix(s2) + (1 - square(mp_kap)) * tcrossprod(H);
+          } else {
+            S0 = diag_matrix(s2);
+          }
+          if (n_dir > 0) S0 += tcrossprod(diag_post_multiply(dir_W, dir_tau[dir_group]));   // + dir_W diag(tau^2) dir_W'
+          A = cholesky_decompose(0.5 * (S0 + S0'));
+        } else {
+          A = diag_matrix(sigma_jrc);
+        }
+        mp_K = mdivide_left_tri_low(corr_L, mdivide_left_tri_low(A, diag_matrix(rep_vector(1, Dm1_model))));
+        mp_ldS = sum(log(diagonal(A))) + sum(log(diagonal(corr_L)));
+        if (lflag_mp_interior == 1) {
+          matrix[mp_n_mv, mp_n_mv] PPc = crossprod(mp_K * mp_Wm);
+          mp_LPc = cholesky_decompose(0.5 * (PPc + PPc'));
+        }
+      }
       if (lflag_col_eff >= 1 && lflag_col_eff <= 3) mp_tauv = lflag_col_tau_shared == 1 ? rep_vector(col_tau[1], C) : col_tau;
       if (lflag_col_eff == 3) {
         matrix[C, C] LM;
@@ -1164,9 +1298,24 @@ vector[n_agg_free] E_rc_raw;
         // ---- sequential expected table: margins and interior logits are the coordinates ----
         vector[Dm1_model] Ej = E_rc;                                           // hierarchy mean for this area
         matrix[R, C] qEj = mp_qE;                                              // its table
-        if (lflag_E_cov == 1 || lflag_col_eff == 1 || lflag_col_eff == 2 || lflag_col_eff == 4 || lflag_col_cov == 1) {
+        if (lflag_mix > 0) {
+          // neighbourhood mixing: each row's mean table moves towards the rest of the area's (E_rc) rates, more so the smaller its share
+          vector[R * C] lq;
+          real mb = lflag_mix == 2 ? mix_b_fixed : mix_b[1];
+          for (r in 1:R) {
+            real w = mix_rows[r] == 0 ? 0 : (lflag_mix == 3 ? inv_logit(mb * (log(rm_prop[j, r]) - mix_a[r]))
+                                                            : inv_logit((lflag_mix == 1 ? mix_a[r] : mix_a_fixed[r]) + mb * log(rm_prop[j, r])));
+            row_vector[C] mr = rep_row_vector(0, C);
+            real ws = 0;
+            for (r2 in 1:R) if (r2 != r) { mr += rm_prop[j, r2] * mp_qE[r2]; ws += rm_prop[j, r2]; }
+            qEj[r] = (1 - w) * mp_qE[r] + w * mr / ws;
+            for (c in 1:C) lq[(r - 1) * C + c] = log(qEj[r, c]);
+          }
+          Ej = V_ilr_model' * lq;
+        }
+        if (lflag_E_cov >= 1 || lflag_col_eff == 1 || lflag_col_eff == 2 || lflag_col_eff == 4 || lflag_col_cov == 1) {
           if (lflag_col_cov == 1) Ej += mp_Wc * ((lflag_col_kappa_shared == 1 ? rep_vector(col_kappa[1], C) : col_kappa) .* col_x[j]');
-          if (lflag_E_cov == 1) Ej += E_cov_gamma .* E_cov_x[j]';
+          if (lflag_E_cov >= 1) Ej += E_cov_b .* E_cov_x[j]';
           if (lflag_col_eff == 1) Ej += mp_Wc * (mp_tauv .* col_eff_raw[n_col_groups > 0 ? col_group[j] : j]);
           if (lflag_col_eff == 2) Ej += mp_Wc * col_eff_raw[n_col_groups > 0 ? col_group[j] : j];
           if (lflag_col_eff == 4) Ej += mp_Wc * col_eff_known[j]';
@@ -1215,8 +1364,12 @@ vector[n_agg_free] E_rc_raw;
           bb = V_ilr_model' * logq;
           b_mp[j] = bb';
           dd = bb - Ej;
-          mp_beta_lp += -0.5 * dot_product(dd, dd ./ s2) + sum(log(diagonal(mp_LP)))
-                        + mp_move_logjac(al[1:R, 1:C], mp_Hr, mp_Hc, lflag_row_decompose);
+          if (lflag_corr == 1)
+            mp_beta_lp += -0.5 * dot_self(mp_K * dd) + sum(log(diagonal(mp_LPc)))
+                          + mp_move_logjac(al[1:R, 1:C], mp_Hr, mp_Hc, lflag_row_decompose);
+          else
+            mp_beta_lp += -0.5 * dot_product(dd, dd ./ s2) + sum(log(diagonal(mp_LP)))
+                          + mp_move_logjac(al[1:R, 1:C], mp_Hr, mp_Hc, lflag_row_decompose);
           for (r in 1:(R - 1)) for (c in 1:(C - 1)) mp_lambda_E[j, r, c] = lamE[(r - 1) * (C - 1) + c];
         } else {
         vector[(R - 1) * (C - 1)] lam = mp_z[j];
@@ -1284,9 +1437,13 @@ vector[n_agg_free] E_rc_raw;
             }
             if (lflag_col_eff == 3) Mi -= tcrossprod(mp_B[j]' * mp_DiW);          // precision of the logits under the full covariance
             if (lflag_mp_interior == 2) Mi = mp_ik2 * Mi + (1 - mp_ik2) * tcrossprod(mp_B[j]' * mp_DiW2);
+            if (lflag_corr == 1 && corr_scale == 1) Mi = crossprod(mp_K * mp_B[j]);   // B' Sigma^-1 B under the correlated covariance
             Lp = cholesky_decompose(0.5 * (Mi + Mi'));
             // conditional mean of the logits given the margins (one GLS step from the anchor) + non-centred deviation
-            if (lflag_col_eff == 3) {
+            if (lflag_corr == 1 && corr_scale == 1) {
+              vector[Dm1_model] vv = Ej - b0;
+              lam += Lp' \ (mdivide_left_tri_low(Lp, mp_B[j]' * (mp_K' * (mp_K * vv))) + mp_z[j]);
+            } else if (lflag_col_eff == 3) {
               vector[Dm1_model] vv = Ej - b0;
               lam += Lp' \ (mdivide_left_tri_low(Lp, mp_B[j]' * (vv ./ s2 - mp_DiW * (mp_DiW' * vv))) + mp_z[j]);
             } else if (lflag_mp_interior == 2) {
@@ -1305,7 +1462,12 @@ vector[n_agg_free] E_rc_raw;
         bb = V_ilr_model' * logq;
         b_mp[j] = bb';
         // hierarchy prior on b + log|d b / d (mp_beta, mp_z)|  (closed form, up to a data-only constant)
-        if (lflag_mp_interior == 2) {
+        if (lflag_corr == 1) {
+          // normal on b with covariance A Omega A' (the same constants as normal_lpdf, so Omega = I gives the model without correlations)
+          vector[Dm1_model] dd = bb - Ej;
+          mp_beta_lp += -0.5 * dot_self(mp_K * dd) - mp_ldS - 0.5 * Dm1_model * log(2 * pi())
+                        + ljm + al[R + 1, 1] - sum(logq);
+        } else if (lflag_mp_interior == 2) {
           // normal on b with the non-move part of the deviation scaled by kappa (the same constants as normal_lpdf, so kappa = 1 is identical)
           vector[Dm1_model] dd = bb - Ej;
           mp_beta_lp += -0.5 * (mp_ik2 * dot_product(dd, dd ./ s2) + (1 - mp_ik2) * dot_self(mp_DiW2' * dd))
@@ -1666,6 +1828,19 @@ if(lflag_fit_type == 1){
 
   log_volume ~ normal(0, 10);
 
+  // known totals over all the areas: each row's split, summed over the areas with the observed row counts
+  if (lflag_nat == 1) {
+    for (r in 1:R) if (nat_use[r] == 1) {
+      vector[C] mu = rep_vector(0, C);
+      for (j in 1:n_areas) if (row_margins[j, r] > 0) {
+        vector[C] q_jr;
+        for (c in 1:C) q_jr[c] = composition_arr[j, r, c];
+        mu += row_margins[j, r] * (q_jr / sum(q_jr));
+      }
+      target += dot_product(nat_w[r], log(mu) - log(sum(mu)));
+    }
+  }
+
 if (lflag_margin_param == 1) {
   // hierarchy b_j ~ N(E_rc, diag sigma^2) in (beta, z) coordinates
   target += mp_beta_lp;
@@ -1705,7 +1880,11 @@ if (lflag_margin_param == 1) {
 }
 
   if (mp_kappa_free == 1) mp_kappa ~ lognormal(prior_mp_kappa_a, prior_mp_kappa_b);
+  if (lflag_corr == 1) target += corr_lj;
+  if (n_dir > 0) dir_tau ~ normal(0, dir_tau_scale);
   if (lflag_E_cov == 1) E_cov_gamma ~ normal(0, prior_E_cov_scale);
+  if (lflag_E_cov == 2) { E_cov_gamma ~ std_normal(); E_cov_tau ~ normal(0, prior_E_cov_scale); }
+  if (lflag_mix == 1 || lflag_mix == 3) { mix_a ~ normal(prior_mix_a_mu, prior_mix_a_sd); mix_b ~ normal(prior_mix_b_mu, prior_mix_b_sd); }
   if (lflag_col_cov == 1) col_kappa ~ normal(0, prior_col_kappa_scale);
   if (lflag_col_eff >= 1 && lflag_col_eff <= 3) {
     col_tau ~ normal(0, prior_col_tau_scale);
@@ -1781,6 +1960,20 @@ if(lflag_fit_type == 0){
     }
 }
 generated quantities{
+  matrix[lflag_corr ? Dm1_model : 0, lflag_corr ? Dm1_model : 0] corr_Omega;   // the correlation matrix Omega (on the scale of A: exactly the correlations of the coordinates when Sigma0 is diagonal)
+  if (lflag_corr == 1) corr_Omega = multiply_lower_tri_self_transpose(corr_L);
+  matrix[lflag_nat ? R : 0, lflag_nat ? C : 0] nat_share_model;   // each row's split summed over the areas (compare with the known table's row shares)
+  if (lflag_nat == 1) {
+    for (r in 1:R) {
+      vector[C] mu = rep_vector(0, C);
+      for (j in 1:n_areas) if (row_margins[j, r] > 0) {
+        vector[C] q_jr;
+        for (c in 1:C) q_jr[c] = composition_arr[j, r, c];
+        mu += row_margins[j, r] * (q_jr / sum(q_jr));
+      }
+      nat_share_model[r] = sum(mu) > 0 ? (mu / sum(mu))' : rep_row_vector(0, C);
+    }
+  }
   vector[(R * C) - 1] ilr_mean;
   vector[(R * C) - 1] ilr_var;
   vector[(R * C) - 1] ilr_n;
