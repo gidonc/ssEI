@@ -576,7 +576,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     E_init <- raw0
     if (nf) message(sprintf("  held (not learned): own-column share of %s at %s", paste(dimnames(kc)[[2]][fix_ix], collapse = ", "),
                             paste(sapply(E_family_fix, `[[`, "share"), collapse = ", ")))
-    message(sprintf("average table restricted to the %s family: %d free coordinates of %d (the rest fixed at 0)", E_family, p, Dm1))
+    message(sprintf("average table restricted to the %s family: %d free coordinates of %d (%d held at stated values, the rest fixed at 0)", E_family, pf, Dm1, nf))
   }
   fit <- ssEI::ei_estimate(
     rm, cm,
