@@ -146,6 +146,10 @@ data{
   int<lower=0, upper=1> lflag_cpois_norm;      // HYBRID row by row: 1 = divide each realised cell's continuous Poisson density by its integral over x >= 0, so it is a proper density whatever the mean (cells in non-empty rows only; cells of empty rows are fixed at 0 and keep the Poisson probability of 0)
   int<lower=0, upper=1> lflag_soft_smallcell;  // SOFT (fit type 2): 1 = add the log integral of the continuous Poisson density for every expected cell in a non-empty row, i.e. the same implicit prior against very small expected cells that HYBRID has when lflag_cpois_norm = 0 (uses the cz_ grid)
   real<lower=0> smallcell_scale;               // multiplier on the SOFT small-cell term (1 = the HYBRID-equivalent strength)
+  int<lower=0, upper=1> lflag_soft_zerocol;    // SOFT (fit type 2) with lflag_mp_seq: 1 = allow empty column margins, treated as SAMPLING zeros (the column stays in the
+                                               //   model). Area likelihood factorised exactly: P(no votes in the empty columns) = prod_r (1 - s_jr)^n_jr, s_jr = row r's share
+                                               //   of the empty columns, times the usual normal approximation for the other columns with each row's shares renormalised
+                                               //   over them. The column-margin anchor (mp_s_obs) uses counts + 0.5 (a pure offset of mp_beta, so geometry only).
   int<lower=0, upper=1> lflag_nat;             // 1 = a known table of totals over all the areas (e.g. national split-ticket figures, or a survey):
                                                //     for each row r, nat_table[r] ~ multinomial(the row's split implied by the areas), i.e.
                                                //     target += sum_c w[r, c] * log(sum_j n_jr q_jrc / sum_j n_jr), q = the model's row-conditional shares.
@@ -823,6 +827,20 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
   //   rows free        (lflag_row_decompose == 0): n_pin = R - 1 + C - 1,  Dm1_model = R * C - 1
   //   in both cases mp_z has (R - 1) * (C - 1) interior logits; with log_volume that is R x C per area when rows are free.
   array[(lflag_margin_param == 1 && lflag_mp_seq == 1) ? n_areas : 0] vector[C - 1] mp_s_obs;
+  // soft fit with empty columns: per area, the number of non-empty columns and the indices of the non-empty (first zc_nnz) and empty columns
+  array[n_areas] int zc_nnz;
+  array[n_areas, C] int zc_nz;
+  array[n_areas, C] int zc_z;
+  for (j in 1:n_areas) {
+    int a = 0;
+    int b = 0;
+    for (c in 1:C) zc_nz[j, c] = 1;
+    for (c in 1:C) zc_z[j, c] = 1;
+    for (c in 1:C) {
+      if (col_margins[j, c] > 0) { a += 1; zc_nz[j, a] = c; } else { b += 1; zc_z[j, b] = c; }
+    }
+    zc_nnz[j] = a;
+  }
   vector[lflag_mp_vol_scale ? n_areas : 0] mp_vol_loc;      // log of the area totals
   vector[lflag_mp_vol_scale ? n_areas : 0] mp_vol_sc;       // 1 / sqrt(area total): posterior sd of a log Poisson volume
   array[lflag_mp_scale_fast == 1 ? n_areas : 0, lflag_mp_scale_fast == 1 ? sigma_n_groups : 0] matrix[Dm1_model - n_pin, Dm1_model - n_pin] mp_C;   // B_j' D_g B_j, D_g = selector of the coordinates in sigma group g
@@ -963,9 +981,13 @@ if(n_param != (n_param_gamma + n_param_alpha + n_param_beta + n_areas)){
     for (j in 1:n_areas) {
       // empty ROWS are fine with the ordered allocations (modes 2, 3): rm_prop is smoothed, so an empty row is a
       // very small row whose cells are tiny fractions of the column capacities and whose log-ratios are prior-led.
-      if (free_C[j] != C) reject("lflag_mp_seq: empty columns not supported yet (area ", j, ")");
+      if (free_C[j] != C && !(lflag_soft_zerocol == 1 && lflag_fit_type == 2 && lflag_real_rowwise == 0))
+        reject("lflag_mp_seq: empty columns need the soft fit with lflag_soft_zerocol = 1 (area ", j, ")");
       if (free_R[j] != R && lflag_seq_or_expected < 2) reject("lflag_mp_seq: empty rows need the ordered allocations or the adjusted table (lflag_seq_or_expected 2, 3 or 4), area ", j);
-      for (c in 1:(C - 1)) mp_s_obs[j][c] = log(cm_prop[j, c]) - log(cm_prop[j, C]);
+      if (lflag_soft_zerocol == 1)
+        for (c in 1:(C - 1)) mp_s_obs[j][c] = log(col_margins[j, c] + 0.5) - log(col_margins[j, C] + 0.5);
+      else
+        for (c in 1:(C - 1)) mp_s_obs[j][c] = log(cm_prop[j, c]) - log(cm_prop[j, C]);
       if (lflag_row_decompose == 0)
         for (r in 1:(R - 1)) mp_r_obs[j][r] = log(rm_prop[j, r]) - log(rm_prop[j, R]);
     }
@@ -1793,6 +1815,30 @@ if(lflag_fit_type == 1){
 } else if(lflag_fit_type == 2){
   row_margins_flat ~ poisson(expected_row_margins);   // scale anchor only
   for(j in 1:n_areas){
+  if (lflag_soft_zerocol == 1 && zc_nnz[j] < C) {
+    // empty columns as sampling zeros: P(Y) = P(no votes in the empty columns) x P(other columns | none there).
+    // The first factor is exact (rows independent multinomials); given it, each row is multinomial over the other columns with its
+    // shares renormalised, and their sum gets the usual normal approximation (mean and covariance matched).
+    int Cn = zc_nnz[j];
+    vector[Cn] mu_z = rep_vector(0, Cn);
+    matrix[Cn, Cn] Sigma_z = rep_matrix(0, Cn, Cn);
+    for (r in 1:R) {
+      real R_jr = row_margins[j, r];
+      if (R_jr > 0) {
+        vector[C] q_full;
+        real s0;
+        vector[Cn] q_jr;
+        for (c in 1:C) q_full[c] = composition_arr[j, r, c] / rm_prop[j, r];
+        if (lflag_row_decompose == 0) q_full /= sum(q_full);
+        s0 = sum(q_full[zc_z[j, 1:(C - Cn)]]);
+        target += R_jr * log1m(s0);
+        q_jr = q_full[zc_nz[j, 1:Cn]] / (1 - s0);
+        mu_z += R_jr * q_jr;
+        Sigma_z += R_jr * (diag_matrix(q_jr) - q_jr * q_jr');
+      }
+    }
+    if (Cn > 1) col_margins[j, zc_nz[j, 1:(Cn - 1)]]' ~ multi_normal(mu_z[1:(Cn - 1)], Sigma_z[1:(Cn - 1), 1:(Cn - 1)]);
+  } else {
   vector[C] mu_j = rep_vector(0, C);
   matrix[C, C] Sigma_j = rep_matrix(0, C, C);
   for(r in 1:R){
@@ -1812,7 +1858,7 @@ if(lflag_fit_type == 1){
   // drop the last column: totals sum to the known area total, so the
   // full C-dim covariance is singular by exactly one dimension
   col_margins[j, 1:(C-1)]' ~ multi_normal(mu_j[1:(C-1)], Sigma_j[1:(C-1), 1:(C-1)]);
-
+  }
 
   }
 }

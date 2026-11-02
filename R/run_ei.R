@@ -448,6 +448,8 @@ rowwise_defaults <- function(R, C, Dm1_model) {
     rl_S = array(0, c(0, K, K)),
     ## small-cell term (soft multinomial) and its lookup table
     lflag_soft_smallcell = 0L, smallcell_scale = 0,
+    ## soft fit: empty column margins treated as sampling zeros (exact factorisation; see the Stan data block)
+    lflag_soft_zerocol = 0L,
     ## known totals over all the areas (e.g. national figures): off by default
     lflag_nat = 0L, nat_table = array(0, c(0, 0)), nat_n_eff = 0,
     ## correlations between the hierarchy coordinates: off by default

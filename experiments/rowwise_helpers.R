@@ -135,7 +135,7 @@ rw_inv_or <- function(X, row_order, rem_col) {
 ##   alloc     3 = row by row, one adjustment per row ("adjusted row"); 2 = cell by cell, odds-ratio placement ("odds-ratio logit");
 ##             4 = the whole table at once, raking style ("adjusted table")
 rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1L, ncol(rm)),
-                     q_bar = rw_goodman(rm, cm), alloc = 3L) {
+                     q_bar = rw_goodman(rm, cm), alloc = 3L, zero_cols = any(cm == 0)) {
   stopifnot(alloc %in% c(2L, 3L, 4L))
   alloc_fun <- switch(as.character(alloc), "3" = rw_alloc, "2" = rw_alloc_or, "4" = rw_alloc_tab)
   inv_fun   <- switch(as.character(alloc), "3" = rw_inv, "2" = rw_inv_or, "4" = rw_inv_tab)
@@ -144,7 +144,8 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
   V <- mr$V_ilr_model
   stopifnot(Dm1 == R * (C - 1))                           # rows conditioned: within-row coordinates only
   W <- (rm + 0.01) / (rowSums(rm) + R * 0.01)             # the model's smoothed shares (empty rows become very small rows)
-  M <- (cm + 0.01) / (rowSums(cm) + C * 0.01)
+  cs <- if (zero_cols) 0.5 else 0.01                      # with empty columns (sampling zeros), the reference point uses counts + 0.5, as the Stan anchor does
+  M <- (cm + cs) / (rowSums(cm) + C * cs)
   b_of <- function(X, w) as.vector(crossprod(V, as.vector(t(log(X / w)))))
   ## reference matrix: d (hierarchy coordinates) / d (interior logits) at the Goodman pattern raked to each area's margins
   mp_B <- array(0, c(J, Dm1, K)); h <- 1e-4
@@ -160,7 +161,7 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
   }
   ## whitening of the column-margin parameters: factor of the covariance of the last-column log-ratios under the counts
   mp_T <- array(0, c(J, C - 1, C - 1))
-  for (j in seq_len(J)) { n <- cm[j, ] + 0.01; mp_T[j, , ] <- t(chol(diag(1 / n[-C], C - 1) + 1 / n[C])) }
+  for (j in seq_len(J)) { n <- cm[j, ] + cs; mp_T[j, , ] <- t(chol(diag(1 / n[-C], C - 1) + 1 / n[C])) }
   modifyList(mr, list(
     lflag_margin_param = 1L, lflag_mp_seq = 1L, lflag_mp_seq_anchor = 1L, n_pin = C - 1L,
     mp_b_ref = matrix(0, J, Dm1), mp_G = array(0, c(J, C - 1, Dm1)),      # not used by the sequential model
@@ -170,7 +171,8 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
     lflag_mp_beta_whiten = 1L, mp_T = mp_T,
     lflag_mp_vol_scale = 1L,
     lflag_mp_seq_scale = 2L, mp_B = mp_B, mp_nc_w = rep(1, Dm1), mp_sigma0 = rep(0.5, Dm1),
-    lflag_mp_scale_fast = 0L
+    lflag_mp_scale_fast = 0L,
+    lflag_soft_zerocol = as.integer(zero_cols)          # empty columns as sampling zeros (soft fit only; off when there are none)
   ))
 }
 
