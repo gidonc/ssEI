@@ -179,7 +179,14 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
 ## log Z(mu), Z = integral over x >= 0 of exp(x log mu - mu - lgamma(x + 1)), on a grid in t = log mu, with its derivative (for cpois_lognorm)
-rw_cpois_grid <- function(t0 = -14, t1 = 4, h = 0.05) {   # above exp(4) = 55 the integral is 1 to 1e-9 (the Stan function returns 0 there)
+rw_cpois_grid <- function(form = c("integral", "half_zero", "jeffreys"), t0 = -14, t1 = 4, h = 0.05) {
+  ## form: the penalty as a function of the expected cell mu, passed to Stan as a lookup table in t = log mu (0 is returned above the grid)
+  ##   integral   log of the integral of the continuous Poisson density over x >= 0 (the term implicit in HYBRID). Above exp(4) = 55 it is 0 to 1e-9
+  ##   half_zero  log(1 - exp(-mu) / 2): a Poisson cell whose empty outcome counts for half (the leading Euler-Maclaurin term of `integral`)
+  ##   jeffreys   log(mu) / 2 up to a constant: the Jeffreys / Firth penalty of a multinomial row, equivalent to half a pseudo-voter per cell
+  form <- match.arg(form)
+  if (form == "jeffreys") { tt <- seq(t0, 14, by = h); return(list(t0 = t0, h = h, v = 0.5 * (tt - max(tt)), d = rep(0.5, length(tt)))) }
+  if (form == "half_zero") { tt <- seq(t0, t1, by = h); m <- exp(tt); return(list(t0 = t0, h = h, v = log1p(-0.5 * exp(-m)), d = 0.5 * m * exp(-m) / (1 - 0.5 * exp(-m)))) }
   lz <- function(t) { m <- exp(t); log(stats::integrate(function(x) exp(x * t - m - lgamma(x + 1)), 0, m + 12 * sqrt(m) + 40, rel.tol = 1e-11, subdivisions = 2000L)$value) }
   tt <- seq(t0, t1, by = h); v <- sapply(tt, lz); e <- 1e-4; d <- (sapply(tt + e, lz) - sapply(tt - e, lz)) / (2 * e)
   list(t0 = t0, h = h, v = v, d = d)
@@ -405,7 +412,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5, E_family_fix = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, context_coords = NULL, context_sign = NULL, smallcell = 0, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, context_coords = NULL, context_sign = NULL, smallcell = 0, smallcell_form = "integral", mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -557,9 +564,9 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                     if (!is.null(context_fixed)) "coefficients fixed" else if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
   }
   if (smallcell > 0) {   # the small-cell term (lflag_soft_smallcell), with its lookup table: log of the integral of the continuous Poisson density
-    cz <- rw_cpois_grid(); mr$lflag_soft_smallcell <- 1L; mr$smallcell_scale <- smallcell
+    cz <- rw_cpois_grid(smallcell_form); mr$lflag_soft_smallcell <- 1L; mr$smallcell_scale <- smallcell
     mr$cz_n <- length(cz$v); mr$cz_t0 <- cz$t0; mr$cz_h <- cz$h; mr$cz_v <- cz$v; mr$cz_d <- cz$d
-    message(sprintf("small-cell term on, scale %g", smallcell))
+    message(sprintf("small-cell term on (%s), scale %g", smallcell_form, smallcell))
   }
   n_mix <- 0L
   if (!is.null(mix)) {
