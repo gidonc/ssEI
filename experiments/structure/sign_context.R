@@ -8,6 +8,7 @@
 ##            sign         the same with the stated signs
 ##            sign_fixed   signs, coefficients half-normal(0, 0.5) (no estimated sd)
 ##            sign_wide    signs, coefficients half-normal(0, 1)
+##            smallcell    the small-cell term, no contextual effects; smallcell_free = the term plus `free`
 ##            all_free     senc: every coordinate, unrestricted (the 13 October run)
 ##            all_true     every coordinate with a covariate, signs taken from the true tables (a ceiling for sign information)
 ## Chosen coordinates and stated signs:
@@ -65,6 +66,8 @@ extra <- switch(VARIANT,
   sign       = list(context = ctx, context_coords = coords, context_sign = signs),
   sign_fixed = list(context = ctx, context_coords = coords, context_sign = signs, context_tau = FALSE, context_scale = 0.5),
   sign_wide  = list(context = ctx, context_coords = coords, context_sign = signs, context_tau = FALSE, context_scale = 1),
+  smallcell  = list(smallcell = 1),
+  smallcell_free = list(smallcell = 1, context = ctx, context_coords = coords),
   all_free   = list(context = "own_row"),
   all_true   = list(context = "own_row", context_sign = sign(b_true_all)),
   stop("unknown variant"))
@@ -79,9 +82,9 @@ tot <- apply(cv, c(1, 3, 4), sum); kt <- apply(kc, 2:3, sum); et <- apply(tot, 2
 lt <- apply(tot, 2:3, quantile, 0.05); ht <- apply(tot, 2:3, quantile, 0.95)
 rs <- rowSums(kt); width <- 100 * mean(((ht - lt) / rs)[kt > 0])                    # mean 90% interval width of the summed table's row rates, points
 sp <- do.call(rbind, rstan::get_sampler_params(fit, inc_warmup = FALSE))
-pars <- c("E_rc", "sigma_group_mu", if (VARIANT != "base") "E_cov_b")
+pars <- c("E_rc", "sigma_group_mu", if (!VARIANT %in% c("base", "smallcell")) "E_cov_b")
 sm <- rstan::summary(fit, pars = pars)$summary
-b_est <- if (VARIANT != "base") rstan::summary(fit, pars = "E_cov_b")$summary[, c("mean", "2.5%", "97.5%")] else NULL
+b_est <- if (!VARIANT %in% c("base", "smallcell")) rstan::summary(fit, pars = "E_cov_b")$summary[, c("mean", "2.5%", "97.5%")] else NULL
 res <- data.frame(data = DATA, variant = VARIANT, chains = CHAINS, iter = ITER,
   ei_area = 50 * sum(abs(est - kc)) / sum(kc), ei_total = 50 * sum(abs(et - kt)) / sum(kt),
   cover_area = mean((kc >= lo & kc <= hi)[big]), cover_total = mean((kt >= lt & kt <= ht)[kt > 0]), width_total = width,

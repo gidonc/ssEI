@@ -178,6 +178,12 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
+## log Z(mu), Z = integral over x >= 0 of exp(x log mu - mu - lgamma(x + 1)), on a grid in t = log mu, with its derivative (for cpois_lognorm)
+rw_cpois_grid <- function(t0 = -14, t1 = 4, h = 0.05) {   # above exp(4) = 55 the integral is 1 to 1e-9 (the Stan function returns 0 there)
+  lz <- function(t) { m <- exp(t); log(stats::integrate(function(x) exp(x * t - m - lgamma(x + 1)), 0, m + 12 * sqrt(m) + 40, rel.tol = 1e-11, subdivisions = 2000L)$value) }
+  tt <- seq(t0, t1, by = h); v <- sapply(tt, lz); e <- 1e-4; d <- (sapply(tt + e, lz) - sapply(tt - e, lz)) / (2 * e)
+  list(t0 = t0, h = h, v = v, d = d)
+}
 rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0, n_mix = 0, ctx_sign = NULL) {
   function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
                     mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
@@ -363,6 +369,8 @@ rw_coords <- function(kc, V_ilr) {
 ##   context_tau TRUE = the coefficients' sd is estimated (half-normal(0, context_scale)), one sd for the loyalty coordinates and one
 ##               for the rest (one in all if there are no loyalty coordinates); FALSE = coefficients normal(0, context_scale)
 ##   context_fixed  a vector of coefficients (one per model coordinate) to fix them instead of estimating them (diagnosis)
+##   smallcell   > 0 adds the small-cell term (the log integral of the continuous Poisson density of every expected cell in a non-empty row,
+##               times this scale; 1 = the strength implicit in HYBRID). Not a likelihood term: see claude/ssei_small_cell_reexamined.md
 ##   context_coords  model coordinates (numbered as in rw_coords()) that keep their covariate; the others get 0. NULL = all that `context` gives
 ##   context_sign  sign restrictions on the estimated coefficients, in the spirit of monotone EI (Elzayn et al. 2026): a claim about the
 ##               direction in which a row's split changes with the covariate, with the size left to the prior and the data. One value per
@@ -397,7 +405,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5, E_family_fix = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, context_coords = NULL, context_sign = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, context_coords = NULL, context_sign = NULL, smallcell = 0, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -547,6 +555,11 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     }
     message(sprintf("contextual effects on %d of %d coordinates; %s", sum(colSums(X != 0) > 0), Dm1,
                     if (!is.null(context_fixed)) "coefficients fixed" else if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
+  }
+  if (smallcell > 0) {   # the small-cell term (lflag_soft_smallcell), with its lookup table: log of the integral of the continuous Poisson density
+    cz <- rw_cpois_grid(); mr$lflag_soft_smallcell <- 1L; mr$smallcell_scale <- smallcell
+    mr$cz_n <- length(cz$v); mr$cz_t0 <- cz$t0; mr$cz_h <- cz$h; mr$cz_v <- cz$v; mr$cz_d <- cz$d
+    message(sprintf("small-cell term on, scale %g", smallcell))
   }
   n_mix <- 0L
   if (!is.null(mix)) {
