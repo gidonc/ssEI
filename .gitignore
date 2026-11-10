@@ -8,3 +8,4 @@ fit_D_with_rot.rds
 fits
 experiments/benchmark/results/
 experiments/pavia_bench/*.rds
+experiments/structure/results/*.rds
