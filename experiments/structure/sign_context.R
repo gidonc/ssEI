@@ -8,6 +8,9 @@
 ##            sign         the same with the stated signs
 ##            sign_fixed   signs, coefficients half-normal(0, 0.5) (no estimated sd)
 ##            sign_wide    signs, coefficients half-normal(0, 1)
+##            mixfix01 / 02 / 05   senc: neighbourhood mixing of the black and natam rows with a fixed curve, half assimilated at a
+##                         share of 1% / 2% / 5%, slope -1 on the log share (stated in advance; see claude/ssei_neighbourhood_mixing.md)
+##            mixall02 / 05 / 10   the same fixed curve on every row (half assimilated at 2% / 5% / 10%); any data set
 ##            smallcell    the small-cell term, no contextual effects; smallcell_free = the term plus `free`
 ##            all_free     senc: every coordinate, unrestricted (the 13 October run)
 ##            all_true     every coordinate with a covariate, signs taken from the true tables (a ceiling for sign information)
@@ -66,6 +69,11 @@ extra <- switch(VARIANT,
   sign       = list(context = ctx, context_coords = coords, context_sign = signs),
   sign_fixed = list(context = ctx, context_coords = coords, context_sign = signs, context_tau = FALSE, context_scale = 0.5),
   sign_wide  = list(context = ctx, context_coords = coords, context_sign = signs, context_tau = FALSE, context_scale = 1),
+  mixfix01 = , mixfix02 = , mixfix05 = {   # senc: neighbourhood mixing for the minority rows with a curve fixed in advance (not estimated):
+    h <- as.numeric(sub("mixfix", "0.", VARIANT))   # w = inv_logit(-(log s - log h)): half assimilated at share h, slope -1 (the misclassification shape)
+    stopifnot(DATA == "senc"); list(mix = list(a = rep(log(h), R), b = -1), mix_rows = c("black", "natam")) },
+  mixall02 = , mixall05 = , mixall10 = {   # the same fixed curve for EVERY row: any group that is a small local minority resembles its neighbours
+    h <- as.numeric(sub("mixall", "0.", VARIANT)); list(mix = list(a = rep(log(h), R), b = -1)) },
   smallcell  = list(smallcell = 1),
   smallcell_free = list(smallcell = 1, context = ctx, context_coords = coords),
   all_free   = list(context = "own_row"),
@@ -82,9 +90,9 @@ tot <- apply(cv, c(1, 3, 4), sum); kt <- apply(kc, 2:3, sum); et <- apply(tot, 2
 lt <- apply(tot, 2:3, quantile, 0.05); ht <- apply(tot, 2:3, quantile, 0.95)
 rs <- rowSums(kt); width <- 100 * mean(((ht - lt) / rs)[kt > 0])                    # mean 90% interval width of the summed table's row rates, points
 sp <- do.call(rbind, rstan::get_sampler_params(fit, inc_warmup = FALSE))
-pars <- c("E_rc", "sigma_group_mu", if (!VARIANT %in% c("base", "smallcell")) "E_cov_b")
+pars <- c("E_rc", "sigma_group_mu", if (!VARIANT %in% c("base", "smallcell", "mixfix01", "mixfix02", "mixfix05", "mixall02", "mixall05", "mixall10")) "E_cov_b")
 sm <- rstan::summary(fit, pars = pars)$summary
-b_est <- if (!VARIANT %in% c("base", "smallcell")) rstan::summary(fit, pars = "E_cov_b")$summary[, c("mean", "2.5%", "97.5%")] else NULL
+b_est <- if (!VARIANT %in% c("base", "smallcell", "mixfix01", "mixfix02", "mixfix05", "mixall02", "mixall05", "mixall10")) rstan::summary(fit, pars = "E_cov_b")$summary[, c("mean", "2.5%", "97.5%")] else NULL
 res <- data.frame(data = DATA, variant = VARIANT, chains = CHAINS, iter = ITER,
   ei_area = 50 * sum(abs(est - kc)) / sum(kc), ei_total = 50 * sum(abs(et - kt)) / sum(kt),
   cover_area = mean((kc >= lo & kc <= hi)[big]), cover_total = mean((kt >= lt & kt <= ht)[kt > 0]), width_total = width,
