@@ -207,6 +207,9 @@ data{
   real<lower=0> prior_mix_b_sd;
   array[lflag_E_cov == 2 ? Dm1_model : 0] int<lower=1, upper=n_E_cov_groups> E_cov_group;
   vector[lflag_E_cov == 3 ? Dm1_model : 0] E_cov_b_fixed;
+  int<lower=0> n_E_cov_sign;                   // sign restrictions on the estimated coefficients (lflag_E_cov 1 or 2): 0 = none; otherwise Dm1_model
+  vector<lower=-1, upper=1>[n_E_cov_sign] E_cov_sign;   // per coordinate: 1 = coefficient >= 0, -1 = coefficient <= 0, 0 = unrestricted. The prior becomes
+                                               //   half-normal on the restricted coefficients (lflag_E_cov = 2: on their raw values, so the sign holds whatever the sd)
   int<lower=0> cz_n;                           // grid for the log integral: cz_n points, t = log(mean) from cz_t0 in steps of cz_h
   real cz_t0;
   real<lower=0> cz_h;
@@ -279,6 +282,17 @@ data{
   vector[sigma_n_groups] sigma_group_fixed_value;
 }
 transformed data{
+  // bounds of the contextual coefficients (infinite = unrestricted)
+  int n_E_cov_est = (lflag_E_cov == 1 || lflag_E_cov == 2) ? Dm1_model : 0;
+  vector[n_E_cov_est] E_cov_lb = rep_vector(negative_infinity(), n_E_cov_est);
+  vector[n_E_cov_est] E_cov_ub = rep_vector(positive_infinity(), n_E_cov_est);
+  if (n_E_cov_sign > 0 && n_E_cov_est > 0) {
+    if (n_E_cov_sign != Dm1_model) reject("E_cov_sign needs one value per model coordinate (", Dm1_model, "), got ", n_E_cov_sign);
+    for (k in 1:Dm1_model) {
+      if (E_cov_sign[k] > 0) E_cov_lb[k] = 0;
+      if (E_cov_sign[k] < 0) E_cov_ub[k] = 0;
+    }
+  }
   int K;
   int K_j;
   int K_t;
@@ -1073,7 +1087,7 @@ parameters{
 
   vector[sigma_n_leaf] sigma_raw_leaf;
   vector[sigma_n_mu] sigma_group_mu;
-  vector[(lflag_E_cov == 1 || lflag_E_cov == 2) ? Dm1_model : 0] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
+  vector<lower=E_cov_lb, upper=E_cov_ub>[n_E_cov_est] E_cov_gamma;   // coefficients of the area covariate in the hierarchy mean (lflag_E_cov = 2: on the raw scale)
   vector[(lflag_mix == 1 || lflag_mix == 3) ? R : 0] mix_a;                     // neighbourhood mixing: level of each row's weight (logit scale, at share 1)
   vector<upper=0>[(lflag_mix == 1 || lflag_mix == 3) ? 1 : 0] mix_b;            // neighbourhood mixing: slope of the weight's logit on log share (shared by the rows)
   vector<lower=0>[lflag_E_cov == 2 ? n_E_cov_groups : 0] E_cov_tau;   // lflag_E_cov = 2: sd of each group's coefficients
