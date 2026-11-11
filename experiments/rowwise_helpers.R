@@ -178,14 +178,27 @@ rw_setup <- function(mr, rm, cm, row_order = order(colSums(rm)), rem_col = rep(1
 
 ## starting values: every area at E_rc's table, volume and margin parameters at 0
 ##   K = 0 when the interior is fixed (no interior parameters); kappa = starting value of the interior scale, NULL when it is not a parameter
-rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0, n_mix = 0) {
+## log Z(mu), Z = integral over x >= 0 of exp(x log mu - mu - lgamma(x + 1)), on a grid in t = log mu, with its derivative (for cpois_lognorm)
+rw_cpois_grid <- function(form = c("integral", "half_zero", "jeffreys"), t0 = -14, t1 = 4, h = 0.05) {
+  ## form: the penalty as a function of the expected cell mu, passed to Stan as a lookup table in t = log mu (0 is returned above the grid)
+  ##   integral   log of the integral of the continuous Poisson density over x >= 0 (the term implicit in HYBRID). Above exp(4) = 55 it is 0 to 1e-9
+  ##   half_zero  log(1 - exp(-mu) / 2): a Poisson cell whose empty outcome counts for half (the leading Euler-Maclaurin term of `integral`)
+  ##   jeffreys   log(mu) / 2 up to a constant: the Jeffreys / Firth penalty of a multinomial row, equivalent to half a pseudo-voter per cell
+  form <- match.arg(form)
+  if (form == "jeffreys") { tt <- seq(t0, 14, by = h); return(list(t0 = t0, h = h, v = 0.5 * (tt - max(tt)), d = rep(0.5, length(tt)))) }
+  if (form == "half_zero") { tt <- seq(t0, t1, by = h); m <- exp(tt); return(list(t0 = t0, h = h, v = log1p(-0.5 * exp(-m)), d = 0.5 * m * exp(-m) / (1 - 0.5 * exp(-m)))) }
+  lz <- function(t) { m <- exp(t); log(stats::integrate(function(x) exp(x * t - m - lgamma(x + 1)), 0, m + 12 * sqrt(m) + 40, rel.tol = 1e-11, subdivisions = 2000L)$value) }
+  tt <- seq(t0, t1, by = h); v <- sapply(tt, lz); e <- 1e-4; d <- (sapply(tt + e, lz) - sapply(tt - e, lz)) / (2 * e)
+  list(t0 = t0, h = h, v = v, d = d)
+}
+rw_init <- function(J, n_pin, K, E_mean, n_sigma, kappa = NULL, log_sigma = log(0.3), n_corr_raw = 0, n_dir_groups = 0, n_ctx = 0, n_ctx_groups = 0, n_mix = 0, ctx_sign = NULL) {
   function() c(list(log_volume_raw = 0, log_volume_rest = as.array(rep(0, J - 1)),
                     mp_beta = matrix(0, J, n_pin), mp_z = matrix(0, J, K),
                     E_rc_group_mu = as.array(E_mean), sigma_group_mu = as.array(rep(log_sigma, n_sigma))),
                if (!is.null(kappa)) list(mp_kappa = as.array(kappa)),
                if (n_corr_raw > 0) list(corr_raw = as.array(rep(0, n_corr_raw))),
                if (n_dir_groups > 0) list(dir_tau = as.array(rep(0.2, n_dir_groups))),
-               if (n_ctx > 0) list(E_cov_gamma = as.array(rep(0, n_ctx))),
+               if (n_ctx > 0) list(E_cov_gamma = as.array(if (is.null(ctx_sign)) rep(0, n_ctx) else 0.1 * ctx_sign)),   # restricted coefficients start inside their half-line
                if (n_ctx_groups > 0) list(E_cov_tau = as.array(rep(0.1, n_ctx_groups))),
                if (n_mix > 0) list(mix_a = as.array(rep(-4, n_mix)), mix_b = as.array(-1)))
 }
@@ -363,6 +376,14 @@ rw_coords <- function(kc, V_ilr) {
 ##   context_tau TRUE = the coefficients' sd is estimated (half-normal(0, context_scale)), one sd for the loyalty coordinates and one
 ##               for the rest (one in all if there are no loyalty coordinates); FALSE = coefficients normal(0, context_scale)
 ##   context_fixed  a vector of coefficients (one per model coordinate) to fix them instead of estimating them (diagnosis)
+##   smallcell   > 0 adds the small-cell term (the log integral of the continuous Poisson density of every expected cell in a non-empty row,
+##               times this scale; 1 = the strength implicit in HYBRID). Not a likelihood term: see claude/ssei_small_cell_reexamined.md
+##   context_coords  model coordinates (numbered as in rw_coords()) that keep their covariate; the others get 0. NULL = all that `context` gives
+##   context_sign  sign restrictions on the estimated coefficients, in the spirit of monotone EI (Elzayn et al. 2026): a claim about the
+##               direction in which a row's split changes with the covariate, with the size left to the prior and the data. One value per
+##               model coordinate (1 = coefficient >= 0, -1 = <= 0, 0 = unrestricted), or a single value for every coordinate with a
+##               covariate. A positive coefficient moves the coordinate's numerator columns up where the covariate is high (for a loyalty
+##               coordinate: more loyal). The prior on a restricted coefficient is half-normal (context_tau = TRUE: on its raw value).
 ##   mix         neighbourhood mixing (assimilation of small groups): row r's hierarchy mean in area j is (1 - w) x its E_rc rates + w x the
 ##               other rows' E_rc rates weighted by their shares in the area, w = inv_logit(a_r + b log s_jr), s_jr = row r's share of area j.
 ##               NULL = off; "estimate" = a (one per row) and b (shared, < 0) estimated, priors normal(mix_prior[1], mix_prior[2]) and
@@ -391,7 +412,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
                    E_centre = c("uniform", "qi"), bloc = NULL, bloc_affinity = 0, E_centre_shift = 0, loyal_rows = NULL, offset_rows = NULL, offset_sd = NULL, E_family = NULL, E_family_sd = 1.5, E_family_fix = NULL,
                    interior = c("free", "fixed", "scaled"), kappa = NULL, kappa_prior = c(log(0.5), 0.5), sigma_prior = c(log(0.3), 0.5),
                    nat_table = NULL, nat_n_eff = 0, nat_init = TRUE, corr_blocks = NULL, corr_eta = 2, corr_scale = 1L,
-                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
+                   directions = NULL, dir_tau_scale = 0.5, context = NULL, context_tau = TRUE, context_scale = 0.5, context_fixed = NULL, context_coords = NULL, context_sign = NULL, smallcell = 0, smallcell_form = "integral", mix = NULL, mix_prior = c(-4, 2, -1, 0.5), mix_rows = NULL, sigma_groups = NULL, E_alpha = 1, sigma_fixed = NULL, sigma_rows_fixed = NULL, ...) {
   J <- dim(kc)[1]; R <- dim(kc)[2]; C <- dim(kc)[3]
   interior <- match.arg(interior)
   if (interior == "fixed" && alloc != 4L) { message("interior = \"fixed\": using the adjusted table (alloc = 4)"); alloc <- 4L }
@@ -513,7 +534,7 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     n_corr_raw <- sum(lengths(blk) * (lengths(blk) - 1) / 2)
     message(sprintf("correlations: %d block(s) of size %s, LKJ(%g); %d correlation parameters", length(blk), paste(lengths(blk), collapse = ", "), corr_eta, n_corr_raw))
   }
-  n_ctx <- 0L; n_ctx_groups <- 0L
+  n_ctx <- 0L; n_ctx_groups <- 0L; ctx_sign <- NULL
   if (!is.null(context)) {
     if (is.matrix(context)) { X <- context; stopifnot(all(dim(X) == c(J, Dm1))) } else {
       context <- match.arg(context, c("own_row", "own_row_loyalty"))
@@ -522,6 +543,15 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
         if (sum(ok) > 1 && sd(l) > 0) x[ok] <- (l - mean(l)) / sd(l); x })
       X <- xr[, coord_row, drop = FALSE]
       if (context == "own_row_loyalty") X[, !loy] <- 0
+    }
+    if (!is.null(context_coords)) { stopifnot(all(context_coords %in% seq_len(Dm1))); X[, -context_coords] <- 0 }
+    ctx_sign <- NULL
+    if (!is.null(context_sign) && is.null(context_fixed)) {
+      has_x <- colSums(X != 0) > 0
+      ctx_sign <- if (length(context_sign) == 1) ifelse(has_x, sign(context_sign), 0) else { stopifnot(length(context_sign) == Dm1); sign(context_sign) }
+      mr$n_E_cov_sign <- as.integer(Dm1); mr$E_cov_sign <- as.array(as.numeric(ctx_sign))
+      message(sprintf("sign restrictions on the contextual coefficients: %d >= 0, %d <= 0, %d unrestricted (of the %d coordinates with a covariate)",
+                      sum(ctx_sign[has_x] > 0), sum(ctx_sign[has_x] < 0), sum(ctx_sign[has_x] == 0), sum(has_x)))
     }
     mr$lflag_E_cov <- if (!is.null(context_fixed)) 3L else if (context_tau) 2L else 1L; mr$E_cov_x <- unname(X); mr$prior_E_cov_scale <- context_scale
     n_ctx <- if (is.null(context_fixed)) Dm1 else 0L
@@ -532,6 +562,11 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     }
     message(sprintf("contextual effects on %d of %d coordinates; %s", sum(colSums(X != 0) > 0), Dm1,
                     if (!is.null(context_fixed)) "coefficients fixed" else if (context_tau) sprintf("%d estimated sd(s), half-normal(0, %g)", n_ctx_groups, context_scale) else sprintf("coefficients normal(0, %g)", context_scale)))
+  }
+  if (smallcell > 0) {   # the small-cell term (lflag_soft_smallcell), with its lookup table: log of the integral of the continuous Poisson density
+    cz <- rw_cpois_grid(smallcell_form); mr$lflag_soft_smallcell <- 1L; mr$smallcell_scale <- smallcell
+    mr$cz_n <- length(cz$v); mr$cz_t0 <- cz$t0; mr$cz_h <- cz$h; mr$cz_v <- cz$v; mr$cz_d <- cz$d
+    message(sprintf("small-cell term on (%s), scale %g", smallcell_form, smallcell))
   }
   n_mix <- 0L
   if (!is.null(mix)) {
@@ -622,10 +657,10 @@ rw_fit <- function(kc, V_ilr, alloc = 3L, row_order = NULL, rem_col = NULL, tier
     prior_gamma_shape = 2, prior_gamma_rate = .5,
     raw_seq_cell_weights = TRUE,
     chains = chains, cores = cores, refresh = refresh, iter = iter, warmup = warmup,
-    init = rw_init(J, mr$n_pin, K_int, E_init, n_sig_est, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix), seed = seed, ...
+    init = rw_init(J, mr$n_pin, K_int, E_init, n_sig_est, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix, ctx_sign), seed = seed, ...
   )
   ## return_data = TRUE: the Stan data and the starting-value function, for running the model elsewhere (e.g. cmdstanr)
-  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, n_sig_est, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix)))
+  if (isTRUE(list(...)$return_data)) return(list(data = fit, init = rw_init(J, mr$n_pin, K_int, E_init, n_sig_est, kappa0, sigma_prior[1], n_corr_raw, n_dir_groups, n_ctx, n_ctx_groups, n_mix, ctx_sign)))
   if (inherits(fit, "stanfit")) rw_report(fit, kc)
   invisible(fit)
 }
