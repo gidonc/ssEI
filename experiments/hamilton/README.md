@@ -5,11 +5,13 @@ No edits on Hamilton are needed. Each step is one command.
 ## Each time
 
 1. **RStudio Server (Open OnDemand), in the ssEI project.** Pull: Git pane > Pull, or `git pull` in the RStudio terminal.
-2. **Only if the package itself changed** (R/, inst/stan/, DESCRIPTION). Use Session > Restart R, then:
-   ```r
-   source("experiments/hamilton/install.R")
+2. **Only if the package itself changed** (R/, inst/stan/, DESCRIPTION). From the shell:
+   ```bash
+   bash experiments/hamilton/sweep.sh install
    ```
-   It reinstalls ssEI into `/nobackup/<user>/R-libs` when the package source differs from what is installed, and says "up to date" otherwise. It also installs eiPack, quadprog and coda if missing. Compiling takes about 5-10 minutes.
+   This runs as a Slurm job. It reinstalls ssEI into `/nobackup/<user>/R-libs` when the package source differs from what is installed, and says "up to date" otherwise. Compiling takes about 5-10 minutes, and the compiler output goes to `<library>/ssEI_install.log`.
+
+   In RStudio, `source("experiments/hamilton/install.R")` after Session > Restart R does the same, with the output kept out of the console.
 3. **Hamilton shell** (OnDemand shell, or `ssh` and `cd ~/R/projects/ssEI`):
    ```bash
    bash experiments/hamilton/sweep.sh submit base       # grid experiments/sweep/grid_base.csv
